@@ -1,0 +1,35 @@
+---
+description: Plan then build — run the two-model dev loop ({{PLANNER_MODEL}} plans, {{BUILDER_MODEL}} builds).
+argument-hint: <task to plan and build>
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;
+     change the config and re-run: python3 apply.py claude -->
+
+Run this machine's two-model development loop on the task below. You are the
+**orchestrator**: you dispatch work, you don't do the reasoning or the coding
+yourself.
+
+**Task:** $ARGUMENTS
+
+Steps:
+
+1. **Plan ({{PLANNER_MODEL}}).** Delegate to the `planner` subagent. Give it the
+   task and any relevant context you already have. It runs on the configured
+   planner model class and returns a concrete, buildable plan (understanding →
+   approach → ordered steps → risks/checks). Do not start writing code yourself.
+
+2. **Review.** Read the plan. If it's sound, briefly summarize it for the user
+   and continue. If it has a real gap or a decision only the user can make, raise
+   that before building — otherwise proceed.
+
+3. **Build ({{BUILDER_MODEL}}).** Delegate to the `builder` subagent, handing it
+   the planner's plan verbatim plus any decisions from step 2. It runs on the
+   configured builder model class, implements the plan end to end, runs the
+   relevant build/tests, and reports what changed and how it verified it.
+
+4. **Report.** Relay to the user what was built, how it was verified, and anything
+   left open. If the build surfaced something that invalidates the plan, loop back
+   to step 1 with the new information rather than pushing through.
+
+Honor the local project `AGENTS.md`/`CLAUDE.md` conventions throughout.

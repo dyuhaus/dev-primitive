@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local, non-committed config overrides (keep secrets and machine-specific
+# tweaks out of the repo). The tracked source of truth is roles.config.json.
+roles.local.json
+*.local.json

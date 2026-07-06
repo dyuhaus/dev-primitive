@@ -1,0 +1,42 @@
+{
+  "$schema": "./roles.schema.json",
+  "version": 1,
+  "description": "Two-role development primitive. Reason with one model class, build with another. Portable across harnesses and providers. This file is the single source of truth: edit the model classes below and re-run apply.py to regenerate every harness adapter.",
+  "roles": {
+    "planner": {
+      "purpose": "planning and reasoning about the project: architecture, design, root-cause analysis, trade-off calls, sequencing work, and reviewing an approach before it is built",
+      "model": {
+        "class": "fable",
+        "id": "",
+        "provider": "anthropic"
+      },
+      "readOnly": true
+    },
+    "builder": {
+      "purpose": "actual scripting and building: writing and editing code, creating files, running builds and tests, and applying a plan end to end",
+      "model": {
+        "class": "opus",
+        "id": "",
+        "provider": "anthropic"
+      },
+      "readOnly": false
+    }
+  },
+  "routing": {
+    "planBeforeBuild": true,
+    "inlineTrivial": true,
+    "note": "Substantive reasoning goes to the planner; substantive implementation goes to the builder. Trivial lookups and one-line edits skip the round-trip."
+  },
+  "providers": {
+    "anthropic": {
+      "type": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "baseUrlEnv": ""
+    },
+    "openrouter": {
+      "type": "openai",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "baseUrlEnv": "OPENROUTER_BASE_URL"
+    }
+  }
+}
