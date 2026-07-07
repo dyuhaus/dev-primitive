@@ -1,0 +1,29 @@
+---
+description: Switch the planner's model (now {{PLANNER_MODEL}}) and regenerate — wraps `apply.py set planner`.
+argument-hint: "<model class>, or --id <exact id>, or blank to show current"
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;
+     change the config and re-run: python3 apply.py claude -->
+
+Change which model the **planner** role uses, in one step. Thin wrapper over the
+primitive's `set` command — `roles.config.json` stays the single source of truth,
+and the Claude Code adapter is regenerated for you.
+
+**Requested change:** $ARGUMENTS
+
+Do this:
+
+1. If `$ARGUMENTS` is empty, run `python3 /home/dyadmin/dev-primitive/apply.py show`
+   to display the current roles/models, then stop — change nothing.
+2. Otherwise run exactly:
+   `python3 /home/dyadmin/dev-primitive/apply.py set planner $ARGUMENTS`
+   A bare value sets the model **class** and clears any pin; `--id <id>` pins an
+   exact model; `--no-apply` updates the config without regenerating; `--dry-run`
+   previews. The command edits `roles.config.json`, re-validates, writes it back,
+   and regenerates the adapter.
+3. Relay the resolved role/model table it prints and confirm the planner now
+   resolves to the intended model. If it printed a validation error (an invalid
+   value aborts without writing), relay that verbatim instead.
+
+Never hand-edit the generated agent files — `set` is the only supported path.

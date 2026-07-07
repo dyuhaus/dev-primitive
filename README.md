@@ -19,9 +19,10 @@ inline.
 
 ```bash
 python3 apply.py validate    # check config, print the resolved role/model table
-python3 apply.py claude      # (re)generate the Claude Code adapter (~/.claude/agents + /pb)
+python3 apply.py claude      # (re)generate the Claude Code adapter (~/.claude/agents + /pb + /pbg)
 python3 apply.py generic     # print a paste-in block for any other harness
 python3 apply.py all         # both
+python3 apply.py set builder sonnet   # change a role's model + regenerate (easy path)
 ```
 
 No third-party dependencies (Python 3.8+ stdlib only).
@@ -55,7 +56,7 @@ An *adapter* turns the config into whatever a harness understands:
 
 | Harness | How |
 |---|---|
-| **Claude Code** | `apply.py claude` renders two subagents (`planner`, `builder`) with the configured `model:` and a `/pb` slash command. |
+| **Claude Code** | `apply.py claude` renders two subagents (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model from chat. |
 | **Codex / Hermes / Gemini / raw system prompt** | `apply.py generic` prints a portable Markdown block (roles + resolved classes + provider env) to paste into `AGENTS.md` / `GEMINI.md` / a system prompt. |
 | **Programmatic / OpenAI-compatible client** | Read `roles.config.json` directly; pick `roles.<role>.model` + the `providers[...]` entry, one client per role. |
 
@@ -71,7 +72,7 @@ roles.config.json        single source of truth (edit this)
 roles.schema.json        JSON-Schema validator
 apply.py                 stdlib-only generator / validator
 PRIMITIVE.md             full harness-neutral spec
-adapters/claude-code/    planner / builder / pb templates
+adapters/claude-code/    planner / builder / pb / pbg / pbg-builder / pbg-planner templates
 ```
 
 See [`PRIMITIVE.md`](./PRIMITIVE.md) for the full spec and design rules.

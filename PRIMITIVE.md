@@ -22,7 +22,9 @@ kind of work to the right model rather than doing both itself.
 Everything is driven by [`roles.config.json`](./roles.config.json). It defines
 the two roles and, for each, a **model class** (plus an optional pinned `id` and
 a `provider`). To change which model does the planning or the building, edit that
-file and regenerate — nothing else.
+file and regenerate (or run `apply.py set <role> <class>`, which does both in one
+step) — nothing else. From within Claude Code, `/pbg-builder <model>` and
+`/pbg-planner <model>` do the same for each role.
 
 ```jsonc
 "planner": { "model": { "class": "fable", "id": "", "provider": "anthropic" }, "readOnly": true }
@@ -50,8 +52,33 @@ python3 apply.py show        # same table
 python3 apply.py claude      # (re)generate the Claude Code adapter
 python3 apply.py generic     # print a paste-in block for any other harness
 python3 apply.py all         # do both
+python3 apply.py set builder sonnet   # change a role's model + regenerate (easy path)
 python3 apply.py claude --dry-run   # preview without writing
 ```
+
+Use `apply.py set <role> <class>` to change a model in one step (it edits
+`roles.config.json`, validates, and regenerates); pass `--id` to pin an exact
+model, `--no-apply` to only update the config.
+
+## Looping until a condition holds
+
+The plain loop (`/pb`) runs one plan→build pass. Two ways to keep going until an
+explicit done-condition holds:
+
+- **Harness-enforced (recommended): `/goal` then `/pb`.** The built-in
+  `/goal <done-condition>` sets a session-scoped completion condition and keeps
+  working across turns until it holds (a fast model checks after every turn) or you
+  run `/goal clear`; it auto-clears when met. Set it first, then send `/pb <task>`
+  as the next message; the goal governs the plan→build turns. This uses the
+  harness's own Stop-hook loop, so the guarantee is real. `/goal` and `/pb` can't
+  be combined in one message — `/goal` is a built-in (only recognized alone at the
+  start of a message) and `/pb` immediately spawns subagents (ending any command
+  chain) — so send them as two messages.
+- **Single-command (softer): `/pbg <task> until: <done-condition>`.** A convenience
+  variant that emulates the loop inside the orchestrator (plan → build → verify →
+  loop, bounded). Model-driven, not harness-enforced — use it when you want one
+  line and accept the weaker guarantee. Omit `until:` and the planner derives
+  explicit acceptance criteria first.
 
 ## Adapters — adding this to any harness
 
@@ -60,8 +87,9 @@ thin and driven entirely by `roles.config.json`.
 
 - **Claude Code** (`adapters/claude-code/`): `apply.py claude` renders two
   subagents (`~/.claude/agents/planner.md`, `builder.md`) with the configured
-  `model:` and a `/pb` slash command that runs the plan→build loop. The main loop
-  auto-delegates to them.
+  `model:` and slash commands: `/pb` (one plan→build pass) and `/pbg` (loop
+  until a done-condition holds), plus `/pbg-builder` and `/pbg-planner` to switch
+  a role's model from chat. The main loop auto-delegates to them.
 - **Any prompt/instruction-based harness** (Codex, Hermes, Gemini, a bespoke
   agent, a raw system prompt): `apply.py generic` prints a portable Markdown block
   naming the two roles, their resolved model classes, and each role's provider +

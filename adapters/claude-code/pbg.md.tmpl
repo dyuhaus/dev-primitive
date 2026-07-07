@@ -1,0 +1,64 @@
+---
+description: Plan → build → verify, looping until a done-condition holds — single-command goal loop ({{PLANNER_MODEL}} plans, {{BUILDER_MODEL}} builds).
+argument-hint: "<task>  [ until: <done-condition> ]"
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;
+     change the config and re-run: python3 apply.py claude -->
+
+Run this machine's two-model development loop on the task below and **keep going
+until an explicit done-condition holds**. You are the **orchestrator**: you
+dispatch work and check the condition; you don't do the reasoning or the coding
+yourself.
+
+**Input:** $ARGUMENTS
+
+This is the persistence variant of `/pb`: plan → build → verify → (if not done)
+loop. It emulates a goal loop **inside the orchestrator**, so it is *model-driven,
+not harness-enforced*. For a stronger, harness-guaranteed loop, run the built-in
+`/goal <done-condition>` first and then `/pb <task>` as separate messages — that
+uses Claude Code's own Stop-hook goal loop. `/goal` and `/pb` cannot share one
+message (`/goal` is a built-in and `/pb` spawns subagents), so that path is two
+messages; use `/pbg` when you want it in a single line.
+
+Steps:
+
+0. **Parse the input.** Split `$ARGUMENTS` on the marker `until:` (case-insensitive):
+   text before it is the **task**, text after it is the **done-condition**. If there
+   is no `until:`, treat the whole input as the task and delegate to the `planner`
+   to derive an explicit, checkable set of **acceptance criteria** from it. Either
+   way, state the done-condition / acceptance criteria back to the user in one line
+   before you start — this is what the loop terminates on, so it must be concrete
+   and verifiable (a test suite passes, a command exits 0, an observable behavior),
+   not vague.
+
+1. **Plan ({{PLANNER_MODEL}}).** Delegate to the `planner` subagent with the task,
+   the done-condition, and any evidence from the previous round's verification. It
+   returns a concrete, buildable plan aimed at satisfying the condition. Do not
+   write code yourself.
+
+2. **Review.** Read the plan. If it's sound, briefly summarize it and continue. If
+   it has a real gap or a decision only the user can make, raise that before
+   building rather than guessing.
+
+3. **Build ({{BUILDER_MODEL}}).** Delegate to the `builder` subagent, handing it the
+   planner's plan verbatim plus any decisions from step 2. It implements the plan
+   end to end and reports what changed.
+
+4. **Verify the done-condition.** Actually check it with evidence — run the relevant
+   tests / build / linters or exercise the behavior; do not just assert it. Capture
+   the concrete result. Delegate the check to the `builder` when commands must run.
+
+5. **Decide.**
+   - **Condition met:** report what was built, the evidence that the condition
+     holds, and stop.
+   - **Not met:** summarize the specific gap (which check failed and why), then loop
+     back to step 1 with that evidence so the next round targets the gap.
+
+**Bounds — never loop unboundedly.** Stop and hand back to the user when any of
+these hit: about 3 full plan→build→verify rounds without meeting the condition; two
+consecutive rounds with no measurable progress on the condition; the condition turns
+out to be unverifiable or ambiguous; or a material decision needs the user. Report
+where it stands, what was tried, and the remaining gap rather than churning.
+
+Honor the local project `AGENTS.md`/`CLAUDE.md` conventions throughout.

@@ -33,3 +33,11 @@ Steps:
    to step 1 with the new information rather than pushing through.
 
 Honor the local project `AGENTS.md`/`CLAUDE.md` conventions throughout.
+
+---
+
+*To keep going until a done-condition holds:* run the built-in `/goal <condition>`
+first, then `/pb <task>` — Claude Code's Stop-hook loop keeps working until it holds
+or you run `/goal clear`. Or use `/pbg <task> until: <condition>` for the
+single-command, model-driven variant. `/goal` and `/pb` can't share one message, so
+send them as two.

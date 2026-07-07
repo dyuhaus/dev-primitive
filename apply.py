@@ -12,11 +12,16 @@ Usage:
     python3 apply.py claude              # (re)generate the Claude Code adapter
     python3 apply.py generic             # print a portable block for any harness
     python3 apply.py all                 # generate Claude Code + print portable block
+    python3 apply.py set <role> <class>  # change a role's model + regenerate (e.g. set builder sonnet)
 
 Options:
     --config PATH   config file (default: roles.config.json next to this script)
     --home PATH     home dir for the Claude Code adapter (default: $HOME)
     --dry-run       print what would be written instead of writing
+    --id ID         (set) pin an exact model id; empty string clears the pin
+    --class CLASS   (set) set the model class explicitly
+    --provider P    (set) set the role's provider
+    --no-apply      (set) update the config but do not regenerate the adapter
 
 No third-party dependencies. Python 3.8+.
 """
@@ -103,6 +108,33 @@ def resolve_model(role: dict) -> str:
     return mid if mid else str(model.get("class", "")).strip()
 
 
+def apply_set(cfg: dict, args) -> list:
+    """Mutate cfg in place for the `set` action; return a list of human-readable changes.
+    The caller re-validates and writes. Pinned id wins over class at resolve time, so setting a
+    class without --id clears any existing pin to keep behavior intuitive."""
+    role = args.role
+    if not role:
+        fail("`set` needs a role: planner | builder  (e.g. python3 apply.py set builder sonnet)")
+    rm = cfg["roles"][role]["model"]
+    changes = []
+    new_class = args.cls if args.cls is not None else args.model
+    if new_class is not None:
+        rm["class"] = new_class
+        changes.append(f"class -> '{new_class}'")
+        if args.pin_id is None and str(rm.get("id", "")).strip():
+            rm["id"] = ""
+            changes.append("id -> '' (cleared so the class is active)")
+    if args.pin_id is not None:
+        rm["id"] = args.pin_id
+        changes.append(f"id -> '{args.pin_id}'" if str(args.pin_id).strip() else "id -> '' (pin cleared)")
+    if args.provider is not None:
+        rm["provider"] = args.provider
+        changes.append(f"provider -> '{args.provider}'")
+    if not changes:
+        fail("nothing to set — pass a model class, or one of --id / --class / --provider")
+    return changes
+
+
 def role_view(cfg: dict, key: str) -> dict:
     role = cfg["roles"][key]
     prov_name = role["model"]["provider"]
@@ -159,6 +191,9 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
         (tdir / "planner.md.tmpl", home / ".claude" / "agents" / "planner.md"),
         (tdir / "builder.md.tmpl", home / ".claude" / "agents" / "builder.md"),
         (tdir / "pb.md.tmpl", home / ".claude" / "commands" / "pb.md"),
+        (tdir / "pbg.md.tmpl", home / ".claude" / "commands" / "pbg.md"),
+        (tdir / "pbg-builder.md.tmpl", home / ".claude" / "commands" / "pbg-builder.md"),
+        (tdir / "pbg-planner.md.tmpl", home / ".claude" / "commands" / "pbg-planner.md"),
     ]
     print("Claude Code adapter:")
     for tmpl, target in jobs:
@@ -221,10 +256,22 @@ def fail(msg: str) -> None:
 # ---------------------------------------------------------------- main
 def main() -> None:
     ap = argparse.ArgumentParser(description="Two-role dev primitive generator.")
-    ap.add_argument("action", choices=["validate", "show", "claude", "generic", "all"])
+    ap.add_argument("action", choices=["validate", "show", "claude", "generic", "all", "set"])
+    ap.add_argument("role", nargs="?", choices=["planner", "builder"],
+                    help="(set) which role to modify")
+    ap.add_argument("model", nargs="?",
+                    help="(set) new model class for the role; clears any pinned id unless --id is given")
     ap.add_argument("--config", default=str(SCRIPT_DIR / "roles.config.json"))
     ap.add_argument("--home", default=os.environ.get("HOME", str(Path.home())))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--id", dest="pin_id", default=None,
+                    help="(set) pin an exact model id; pass an empty string to clear the pin")
+    ap.add_argument("--class", dest="cls", default=None,
+                    help="(set) set the model class explicitly")
+    ap.add_argument("--provider", default=None,
+                    help="(set) set the role's provider (must exist in providers)")
+    ap.add_argument("--no-apply", action="store_true",
+                    help="(set) update the config but do not regenerate the Claude Code adapter")
     args = ap.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -234,6 +281,32 @@ def main() -> None:
         for e in errs:
             print(f"  - {e}", file=sys.stderr)
         sys.exit(1)
+
+    if args.action == "set":
+        changes = apply_set(cfg, args)          # mutates cfg in place
+        errs = validate(cfg)                    # re-validate the mutated config
+        if errs:
+            print("Resulting config would be INVALID (not written):", file=sys.stderr)
+            for e in errs:
+                print(f"  - {e}", file=sys.stderr)
+            sys.exit(1)
+        cfg_path = Path(args.config)
+        if args.dry_run:
+            print(f"[dry-run] {args.role}: " + "; ".join(changes))
+            after = "skip regeneration (--no-apply)" if args.no_apply else "regenerate the Claude Code adapter"
+            print(f"[dry-run] would write {cfg_path} and {after}\n")
+            print_table(cfg)
+            return
+        cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"Updated {args.role}: " + "; ".join(changes))
+        print(f"  wrote {cfg_path}\n")
+        print_table(cfg)
+        if args.no_apply:
+            print("(--no-apply: config updated but adapters NOT regenerated; "
+                  "run `python3 apply.py claude` to apply.)")
+        else:
+            install_claude(cfg, Path(args.home).expanduser(), dry=False)
+        return
 
     if args.action in ("validate", "show"):
         print("Config is valid.\n")
