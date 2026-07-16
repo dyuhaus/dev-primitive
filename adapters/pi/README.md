@@ -5,12 +5,12 @@ The pi adapter is a **live adapter**, not a generated one.
 It is installed globally at:
 
 ```text
-/home/dyadmin/.pi/agent/extensions/pb-primitive/
+$HOME/.pi/agent/extensions/pb-primitive/
 ```
 
 The extension reads the nearest project `roles.config.json` or
-`.pi/roles.config.json`, falling back to this repository's
-`/home/dyadmin/dev-primitive/roles.config.json`. Therefore this repository's
+`.pi/roles.config.json`, falling back to the checked-out copy of this
+repository's `roles.config.json`. Therefore this repository's
 configuration remains the single source of truth and there is no `apply.py pi`
 generation step that can become stale.
 
@@ -31,7 +31,7 @@ Validate without a model call:
 ```bash
 node ~/.pi/agent/extensions/pb-primitive/_selftest.mjs
 pi --no-extensions -e ~/.pi/agent/extensions/pb-primitive/index.ts --list-models fable
-python3 /home/dyadmin/dev-primitive/apply.py validate
+python3 apply.py validate   # from the repository root
 ```
 
 This adapter intentionally does not change role configuration. Continue using
