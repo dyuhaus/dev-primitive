@@ -10,7 +10,8 @@
         "id": "",
         "provider": "anthropic"
       },
-      "readOnly": true
+      "readOnly": true,
+      "access": "harness"
     },
     "builder": {
       "purpose": "actual scripting and building: writing and editing code, creating files, running builds and tests, and applying a plan end to end",
@@ -19,8 +20,13 @@
         "id": "",
         "provider": "anthropic"
       },
-      "readOnly": false
+      "readOnly": false,
+      "access": "harness"
     }
+  },
+  "classIds": {
+    "fable": "claude-fable-5",
+    "openrouter:sonnet": "anthropic/claude-sonnet-5"
   },
   "routing": {
     "planBeforeBuild": true,
@@ -31,12 +37,15 @@
     "anthropic": {
       "type": "anthropic",
       "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "apiKeyFile": "~/appdata/anthropic/api-key",
       "baseUrlEnv": ""
     },
     "openrouter": {
       "type": "openai",
       "apiKeyEnv": "OPENROUTER_API_KEY",
-      "baseUrlEnv": "OPENROUTER_BASE_URL"
+      "baseUrlEnv": "OPENROUTER_BASE_URL",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyFile": "~/appdata/openrouter/api-key"
     }
   }
 }

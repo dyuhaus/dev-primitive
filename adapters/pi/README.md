@@ -36,3 +36,8 @@ python3 apply.py validate   # from the repository root
 
 This adapter intentionally does not change role configuration. Continue using
 `roles.config.json` and the existing `apply.py set` workflow for model changes.
+
+The provider fields consumed by the `api` transport (`baseUrl`, the
+`~/appdata/<provider>/api-key` keyfile default, and provider-scoped
+`classIds["<provider>:<class>"]` keys) are ignored by this pi adapter — it passes
+provider and model explicitly through pi's own model selection.
