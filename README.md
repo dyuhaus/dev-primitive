@@ -23,6 +23,7 @@ python3 apply.py claude      # (re)generate the Claude Code adapter (~/.claude/a
 python3 apply.py generic     # print a paste-in block for any other harness
 python3 apply.py all         # both
 python3 apply.py set builder sonnet   # change a role's model + regenerate (easy path)
+python3 apply.py set planner --access api   # route a role over the direct provider API (see PRIMITIVE.md)
 ```
 
 No third-party dependencies (Python 3.8+ stdlib only).
@@ -33,8 +34,8 @@ Everything is driven by [`roles.config.json`](./roles.config.json) — the singl
 source of truth. Each role has a **customizable model class**:
 
 ```jsonc
-"planner": { "model": { "class": "fable", "id": "", "provider": "anthropic" }, "readOnly": true }
-"builder": { "model": { "class": "opus",  "id": "", "provider": "anthropic" }, "readOnly": false }
+"planner": { "model": { "class": "fable", "id": "", "provider": "anthropic" }, "readOnly": true,  "access": "harness" }
+"builder": { "model": { "class": "opus",  "id": "", "provider": "anthropic" }, "readOnly": false, "access": "harness" }
 ```
 
 - **`class`** — the model class/alias (e.g. `fable`, `opus`, `sonnet`, or any
@@ -44,7 +45,12 @@ source of truth. Each role has a **customizable model class**:
   overrides `class`.
 - **`provider`** — a key into the `providers` map (Anthropic, any
   OpenAI-compatible endpoint incl. OpenRouter, Google, or a local model), which
-  names the wire protocol and the **env vars** for the API key / base URL.
+  names the wire protocol and the **env vars** (or a keyfile path) for the API key.
+- **`access`** — the role's *transport*: `harness` (default; the harness's native
+  model selection + auth) or `api` (a direct provider API call billed to that
+  provider's own key, off the subscription). See PRIMITIVE.md
+  "Role transports"; provision the key with `bin/set-api-key` and run api roles via
+  `bin/role-call <role>`.
 
 Change which model plans or builds by editing this file and re-running `apply.py`.
 The config is validated by [`roles.schema.json`](./roles.schema.json) and by
@@ -56,7 +62,7 @@ An *adapter* turns the config into whatever a harness understands:
 
 | Harness | How |
 |---|---|
-| **Claude Code** | `apply.py claude` renders two subagents (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model from chat. |
+| **Claude Code** | `apply.py claude` renders a subagent per harness-transport role (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model or transport from chat. A role set to `access: "api"` gets no subagent — the commands call `bin/role-call <role>` (direct provider API) instead. |
 | **Codex / Hermes / Gemini / raw system prompt** | `apply.py generic` prints a portable Markdown block (roles + resolved classes + provider env) to paste into `AGENTS.md` / `GEMINI.md` / a system prompt. |
 | **Programmatic / OpenAI-compatible client** | Read `roles.config.json` directly; pick `roles.<role>.model` + the `providers[...]` entry, one client per role. |
 
@@ -68,11 +74,14 @@ changes.
 ## Layout
 
 ```
-roles.config.json        single source of truth (edit this)
-roles.schema.json        JSON-Schema validator
-apply.py                 stdlib-only generator / validator
-PRIMITIVE.md             full harness-neutral spec
-adapters/claude-code/    planner / builder / pb / pbg / pbg-builder / pbg-planner templates
+roles.config.json           single source of truth (edit this)
+roles.schema.json           JSON-Schema validator
+apply.py                    stdlib-only generator / validator
+bin/role-call               run an api-transport role over the direct provider API (headless claude)
+bin/set-api-key             interactive, terminal-only key provisioning (writes a 0600 keyfile)
+PRIMITIVE.md                full harness-neutral spec
+adapters/claude-code/       planner / builder / pb / pbg / pbg-builder / pbg-planner templates
+adapters/claude-code/dispatch/  per-transport (harness|api) dispatch fragments for /pb and /pbg
 ```
 
 See [`PRIMITIVE.md`](./PRIMITIVE.md) for the full spec and design rules.

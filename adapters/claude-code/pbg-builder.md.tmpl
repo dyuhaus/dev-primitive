@@ -26,4 +26,11 @@ Do this:
    resolves to the intended model. If it printed a validation error (an invalid
    value aborts without writing), relay that verbatim instead.
 
+**Transport.** The builder's current transport is `{{BUILDER_ACCESS}}`. You can also
+switch *how* the role is reached, not just which model:
+`python3 /home/dyadmin/dev-primitive/apply.py set builder --access api|harness`.
+Switching to `api` runs the builder as a direct API call (its own key, off the
+subscription) and **removes the builder subagent file**; switching back to `harness`
+recreates it. See PRIMITIVE.md "Role transports (`access`)".
+
 Never hand-edit the generated agent files — `set` is the only supported path.

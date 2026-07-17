@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+#
+# role-call — run a dev-primitive role over the direct provider API (headless claude CLI).
+#
+# For roles configured with `access: "api"` in roles.config.json. The role's API
+# key is taken from the provider's env var (wins) or its keyfile, and exported ONLY
+# into the child claude process — never placed in argv, never logged. The parent
+# session keeps its own (subscription) auth untouched.
+#
+# Usage:
+#   role-call <role> [task words...]         task from the remaining arguments
+#   role-call <role> --task-file PATH        task read from a file
+#   role-call <role> -                        task read from stdin
+#   role-call <role> --ping                   tiny liveness call (max-turns 1)
+#
+# Options:
+#   --task-file PATH   read the task from PATH
+#   --ping             send a minimal liveness prompt instead of a task
+#   --max-turns N      cap the agent's turns
+#   --timeout SECONDS  wall-clock timeout for the claude call (default 3600)
+#   --config PATH      config file (default: roles.config.json next to this repo)
+#   --dry-run          print the command that would run (key redacted) and exit
+#   --force            run even if the role is harness-transport (access != api)
+#
+# Exit codes: 0 ok · 1 generic/parse failure · 2 no API key · 4 role is harness-transport.
+
+set -uo pipefail
+
+# Read-only tool allowlist for read-only roles (e.g. planner): inspection only, no mutation.
+READONLY_ALLOWED_TOOLS='Read,Grep,Glob,WebFetch,WebSearch,TodoWrite,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(rg:*),Bash(grep:*),Bash(find:*),Bash(wc:*)'
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_PATH")"
+APPLY="$REPO_DIR/apply.py"
+
+die() { echo "[role-call] $*" >&2; exit 1; }
+
+ROLE=""
+TASK=""
+TASK_SET=0
+TASK_FILE=""
+FROM_STDIN=0
+PING=0
+MAX_TURNS=""
+TIMEOUT=""
+CONFIG=""
+DRY_RUN=0
+FORCE=0
+POSITIONAL=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --task-file) TASK_FILE="${2:-}"; shift 2 || die "--task-file needs a path" ;;
+    --ping)      PING=1; shift ;;
+    --max-turns) MAX_TURNS="${2:-}"; shift 2 || die "--max-turns needs a number" ;;
+    --timeout)   TIMEOUT="${2:-}"; shift 2 || die "--timeout needs seconds" ;;
+    --config)    CONFIG="${2:-}"; shift 2 || die "--config needs a path" ;;
+    --dry-run)   DRY_RUN=1; shift ;;
+    --force)     FORCE=1; shift ;;
+    -)           FROM_STDIN=1; shift ;;
+    -h|--help)   sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --*)         die "unknown option: $1" ;;
+    *)           if [ -z "$ROLE" ]; then ROLE="$1"; else POSITIONAL+=("$1"); fi; shift ;;
+  esac
+done
+
+[ -n "$ROLE" ] || die "usage: role-call <role> [task...] | --task-file PATH | -"
+[ -n "$CONFIG" ] || CONFIG="$REPO_DIR/roles.config.json"
+TIMEOUT="${TIMEOUT:-3600}"
+
+# --- resolve role facts from the single source of truth ------------------------
+FACTS_ERR="$(mktemp)"
+FACTS="$(python3 "$APPLY" resolve "$ROLE" --config "$CONFIG" --format env 2>"$FACTS_ERR")"
+if [ $? -ne 0 ]; then
+  cat "$FACTS_ERR" >&2; rm -f "$FACTS_ERR"
+  die "could not resolve role '$ROLE' from $CONFIG"
+fi
+rm -f "$FACTS_ERR"
+eval "$FACTS"   # values are single-quoted by apply.py — safe to eval
+
+# --- transport guard -----------------------------------------------------------
+if [ "${ACCESS:-}" != "api" ] && [ "$FORCE" != 1 ]; then
+  echo "[role-call] role '$ROLE' is harness-transport (access=${ACCESS:-harness}), not api." >&2
+  echo "[role-call] This wrapper only runs api-transport roles. Use the harness subagent, or pass --force to override." >&2
+  exit 4
+fi
+
+# --- task acquisition ----------------------------------------------------------
+if [ "$PING" = 1 ]; then
+  TASK="Reply with exactly PLANNER-OK and stop."
+  TASK_SET=1
+  [ -n "$MAX_TURNS" ] || MAX_TURNS=1
+elif [ -n "$TASK_FILE" ]; then
+  [ -r "$TASK_FILE" ] || die "task file not readable: $TASK_FILE"
+  TASK="$(cat "$TASK_FILE")"; TASK_SET=1
+elif [ "$FROM_STDIN" = 1 ]; then
+  TASK="$(cat)"; TASK_SET=1
+elif [ "${#POSITIONAL[@]}" -gt 0 ]; then
+  TASK="${POSITIONAL[*]}"; TASK_SET=1
+fi
+[ "$TASK_SET" = 1 ] || die "no task given — pass task words, --task-file PATH, -, or --ping"
+
+# --- key resolution: env var wins, else keyfile --------------------------------
+ENV_VAL="${!API_KEY_ENV:-}"
+if [ -n "$ENV_VAL" ]; then
+  KEY="$ENV_VAL"; KEY_SOURCE="from env"
+elif [ -n "${API_KEY_FILE:-}" ] && [ -r "$API_KEY_FILE" ]; then
+  perms="$(stat -c '%a' "$API_KEY_FILE" 2>/dev/null || echo '?')"
+  [ "$perms" = "600" ] || echo "[role-call] WARNING: $API_KEY_FILE has perms $perms, expected 600 (chmod 600 it)" >&2
+  KEY="$(cat "$API_KEY_FILE")"; KEY_SOURCE="from $API_KEY_FILE"
+else
+  KEY=""; KEY_SOURCE="MISSING"
+fi
+
+# --- compose prompt (charter + task) -------------------------------------------
+CHARTER="$(python3 "$APPLY" prompt "$ROLE" --config "$CONFIG")" || die "could not render role prompt for '$ROLE'"
+PROMPT="$CHARTER
+
+## Task
+
+$TASK"
+
+# --- build the claude command --------------------------------------------------
+CMD=( timeout "$TIMEOUT" claude -p "$PROMPT" --model "$MODEL" --output-format json )
+if [ "${READ_ONLY:-false}" = "true" ]; then
+  CMD+=( --allowedTools "$READONLY_ALLOWED_TOOLS" )
+else
+  CMD+=( --permission-mode acceptEdits )
+fi
+[ -n "$MAX_TURNS" ] && CMD+=( --max-turns "$MAX_TURNS" )
+
+# --- dry run -------------------------------------------------------------------
+if [ "$DRY_RUN" = 1 ]; then
+  echo "[role-call] DRY RUN — would invoke (key redacted):"
+  DISP="$API_KEY_ENV=<$KEY_SOURCE> timeout $TIMEOUT claude -p \"<prompt>\" --model $MODEL --output-format json"
+  if [ "${READ_ONLY:-false}" = "true" ]; then
+    DISP="$DISP --allowedTools \"$READONLY_ALLOWED_TOOLS\""
+  else
+    DISP="$DISP --permission-mode acceptEdits"
+  fi
+  [ -n "$MAX_TURNS" ] && DISP="$DISP --max-turns $MAX_TURNS"
+  echo "$DISP"
+  echo "[role-call] role=$ROLE access=${ACCESS:-} model=$MODEL read_only=${READ_ONLY:-false} key_source=$KEY_SOURCE"
+  echo "[role-call] prompt[0:200]: ${PROMPT:0:200}"
+  exit 0
+fi
+
+# --- key required for a real run -----------------------------------------------
+if [ "$KEY_SOURCE" = "MISSING" ]; then
+  keyfile_disp="${API_KEY_FILE:-<no keyfile configured>}"
+  echo "No API key for provider '${PROVIDER_TYPE:-unknown}': \$$API_KEY_ENV is unset and $keyfile_disp does not exist. Fix: run $SCRIPT_PATH/set-api-key (interactive, run it yourself), or temporarily plan on the harness: python3 $APPLY set $ROLE --access harness" >&2
+  exit 2
+fi
+
+# --- invoke: key exported only into the child; never in argv --------------------
+ERRFILE="$(mktemp)"
+OUT="$( export "$API_KEY_ENV=$KEY"; "${CMD[@]}" 2>"$ERRFILE" )"
+rc=$?
+
+if [ $rc -ne 0 ]; then
+  echo "[role-call] claude exited $rc (role=$ROLE model=$MODEL)" >&2
+  [ -s "$ERRFILE" ] && cat "$ERRFILE" >&2
+  [ -n "$OUT" ] && printf '%s\n' "$OUT" >&2
+  rm -f "$ERRFILE"
+  exit 1
+fi
+rm -f "$ERRFILE"
+
+# --- parse JSON with stdlib python: .result -> stdout, cost line -> stderr ------
+printf '%s' "$OUT" | RC_ROLE="$ROLE" RC_MODEL="$MODEL" python3 -c '
+import sys, os, json
+raw = sys.stdin.read()
+role = os.environ.get("RC_ROLE", "?")
+model = os.environ.get("RC_MODEL", "?")
+try:
+    d = json.loads(raw)
+except Exception:
+    sys.stderr.write("[role-call] could not parse claude JSON output:\n")
+    sys.stderr.write(raw + "\n")
+    sys.exit(3)
+result = d.get("result")
+if not isinstance(result, str):
+    result = "" if result is None else json.dumps(result)
+sys.stdout.write(result)
+if not result.endswith("\n"):
+    sys.stdout.write("\n")
+cost = d.get("total_cost_usd")
+sess = d.get("session_id", "")
+if cost is None:
+    sys.stderr.write("[role-call] WARNING: no total_cost_usd in response — this run may have billed the subscription, not the API key; check auth precedence\n")
+    sys.stderr.write("[role-call] role=%s model=%s cost=$? session=%s\n" % (role, model, sess))
+else:
+    sys.stderr.write("[role-call] role=%s model=%s cost=$%s session=%s\n" % (role, model, cost, sess))
+'
+prc=$?
+[ $prc -eq 0 ] || exit 1
+exit 0

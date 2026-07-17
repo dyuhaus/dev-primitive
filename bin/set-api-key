@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# set-api-key — securely provision the API key for a dev-primitive provider.
+#
+# Interactive, terminal-only. It reads the key with the echo OFF, writes it to the
+# provider's configured keyfile (dir 0700, file 0600), and NEVER prints the secret.
+# Claude/agents must not run this for you — a human runs it in a real terminal.
+#
+# Usage:
+#   bin/set-api-key [provider] [--verify]
+#     provider   provider key in roles.config.json (default: anthropic)
+#     --verify   after writing, make a tiny real API call (role-call planner --ping).
+#                This costs a few real cents on the provider key.
+
+set -uo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_PATH")"
+CONFIG="$REPO_DIR/roles.config.json"
+
+PROVIDER="anthropic"
+VERIFY=0
+for arg in "$@"; do
+  case "$arg" in
+    --verify) VERIFY=1 ;;
+    --*)      echo "unknown option: $arg" >&2; exit 1 ;;
+    *)        PROVIDER="$arg" ;;
+  esac
+done
+
+die() { echo "set-api-key: $*" >&2; exit 1; }
+
+# Must be an interactive terminal — refuse to run headless so a secret is never
+# piped in from an agent or a log.
+if [ ! -t 0 ] || [ ! -t 1 ]; then
+  die "refusing to run without an interactive terminal. Run this yourself in a real shell."
+fi
+
+# Resolve the keyfile path and env var name from the config.
+read -r KEYFILE KEYENV < <(python3 - "$CONFIG" "$PROVIDER" <<'PY'
+import json, os, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+prov = cfg.get("providers", {}).get(sys.argv[2])
+if not isinstance(prov, dict):
+    sys.stderr.write("provider not found in config: %s\n" % sys.argv[2]); sys.exit(2)
+kf = prov.get("apiKeyFile", "")
+if not kf:
+    sys.stderr.write("provider '%s' has no apiKeyFile in the config\n" % sys.argv[2]); sys.exit(2)
+print(os.path.expanduser(kf), prov.get("apiKeyEnv", ""))
+PY
+) || die "could not resolve keyfile for provider '$PROVIDER' from $CONFIG"
+
+echo "Provider : $PROVIDER"
+echo "Key file : $KEYFILE"
+echo "Env var  : ${KEYENV:-<none>}  (this file is only consulted when \$$KEYENV is unset)"
+echo
+echo "Paste the API key. It will NOT be shown on screen."
+printf 'API key: '
+IFS= read -rs KEY
+echo
+[ -n "$KEY" ] || die "empty input — nothing written."
+
+# Shape check (advisory only).
+case "$KEY" in
+  sk-ant-*) : ;;
+  *)
+    printf 'That does not start with "sk-ant-". Write it anyway? [y/N] '
+    IFS= read -r ans
+    case "$ans" in y|Y|yes|YES) : ;; *) die "aborted — nothing written." ;; esac
+    ;;
+esac
+
+# Write with tight permissions; create the dir 0700 and the file 0600.
+KEYDIR="$(dirname "$KEYFILE")"
+mkdir -p "$KEYDIR" || die "could not create $KEYDIR"
+chmod 700 "$KEYDIR" 2>/dev/null || true
+umask 077
+printf '%s' "$KEY" > "$KEYFILE" || die "could not write $KEYFILE"
+chmod 600 "$KEYFILE" || die "could not chmod 600 $KEYFILE"
+
+BYTES="$(wc -c < "$KEYFILE" | tr -d ' ')"
+FP="$(printf '%s' "$KEY" | sha256sum | cut -c1-8)"
+unset KEY
+echo
+echo "Wrote $KEYFILE"
+echo "  bytes       : $BYTES"
+echo "  sha256[0:8] : $FP   (fingerprint only — not the key)"
+
+if [ "$VERIFY" = 1 ]; then
+  echo
+  echo "Verifying with a tiny real API call — this costs a few real cents on the $PROVIDER key."
+  printf 'Proceed? [y/N] '
+  IFS= read -r ans
+  case "$ans" in
+    y|Y|yes|YES)
+      echo "Running: role-call planner --ping"
+      if OUT="$("$SCRIPT_PATH/role-call" planner --ping 2>&1)"; then
+        echo "$OUT"
+        if printf '%s' "$OUT" | grep -q 'cost=\$[0-9]'; then
+          echo "OK: total_cost_usd appeared — the call billed the API key."
+        else
+          echo "WARNING: no total_cost_usd seen — check whether this billed the subscription instead." >&2
+        fi
+      else
+        echo "$OUT" >&2
+        die "verification call failed (see output above)."
+      fi
+      ;;
+    *) echo "Skipped verification." ;;
+  esac
+fi
