@@ -44,139 +44,6 @@ step) — nothing else. From within Claude Code, `/pbg-builder <model>` and
 The config is validated by [`roles.schema.json`](./roles.schema.json) and by
 `apply.py validate`.
 
-## Role transports (`access`)
-
-Besides *which* model a role uses, each role has a **transport** — *how* it is
-reached — set by a per-role `access` field:
-
-```jsonc
-"planner": { "access": "harness", "model": { "class": "fable", ... } }
-```
-
-- **`harness`** (the default; absent means `harness`) — the role runs through the
-  harness's own native model selection and auth. In Claude Code this is a subagent
-  with a `model:` line, billed to the interactive session.
-- **`api`** — the role runs as a **direct provider API call**, billed to that
-  provider's own credentials, bypassing the session's auth. Use this when a role's
-  model isn't available (or shouldn't be billed) through the harness's subscription.
-
-**Why it exists / the auth-precedence fact.** In Claude Code, a headless call
-(`claude -p ... --output-format json`) with the provider key in the child
-process's environment uses *that key* with no prompt, while the parent session
-keeps its own subscription OAuth. The JSON envelope's `total_cost_usd` is the proof
-the call billed the API key rather than the subscription. `access: "api"` captures
-this split in config so every adapter can honor it.
-
-**Key source (never the secret itself in config).** An api-transport role reads its
-key from the provider's `apiKeyEnv` variable if set, else from the file named by the
-provider's `apiKeyFile` (default `~/appdata/<provider>/api-key` when omitted, dir
-`0700` / file `0600`). The env var wins when both exist. Provision the keyfile interactively with
-[`bin/set-api-key`](./bin/set-api-key) — it refuses to run without a terminal, reads
-the key with echo off, writes it `0600`, and prints only a length + short
-fingerprint, never the secret. `--verify` makes one tiny real call to confirm the
-key bills the API.
-
-**Model resolution for the API path.** Harness aliases (e.g. `fable`) may not be
-valid model ids, so the api path resolves the model as **`model.id` →
-`classIds["<provider>:<class>"]` → `classIds["<class>"]` → the literal class** (best
-effort). Map aliases to concrete ids in the top-level `classIds` object, e.g.
-`"classIds": { "fable": "claude-fable-5" }`; a provider-scoped key like
-`"openrouter:sonnet": "anthropic/claude-sonnet-5"` wins over the bare-class key when
-the role's provider matches, so one alias can map to different ids per provider.
-`validate` warns if an api role would fall through to a bare class.
-
-**Running an api role.** [`bin/role-call <role> "<task>"`](./bin/role-call) is the
-ready-made wrapper: it composes the role's charter (`apply.py prompt <role>`) with
-the task, picks the engine from the provider `type` (see **Provider engines**), and
-runs the call with the key exported *only* into that child process (never in argv or
-logs). It prints the plan/report to stdout and a `[role-call]` line (model + token/cost
-figures, format per engine) to stderr. `--task-file`, `-` (stdin), `--ping`, and
-`--dry-run` are supported. `apply.py resolve <role>` exposes the same facts
-machine-readably for a bespoke wrapper.
-
-**Switching / degradation.** `apply.py set <role> --access api|harness` flips a
-role's transport and regenerates. Switching a role **to** `api` deletes its
-generated Claude Code subagent file (a hand-edited one without the generated marker
-is left in place with a warning) — its absence is deliberate, there is no shim; the
-`/pb` and `/pbg` commands are rewritten to call `bin/role-call` for that role
-instead. Switching **back** to `harness` recreates the subagent. If the key is
-missing, `role-call` exits non-zero with a remedial message (provision the key, or
-`set <role> --access harness` to fall back to the subscription).
-
-**Cost note.** Direct API calls bill real money. Fable over the API is roughly
-$10 / $50 per million input / output tokens, so a substantial planning turn can cost
-several dollars; `role-call` prints each run's `total_cost_usd` so it's never hidden.
-
-### Provider engines
-
-`bin/role-call` picks an **engine** from the provider's `type`, so the same wrapper
-drives Anthropic and any OpenAI-compatible or local endpoint. `apply.py` emits the
-engine as the `ENGINE` fact (`apply.py resolve <role>`); there is no separate config
-field for it yet.
-
-| provider `type` | engine | mechanics |
-|---|---|---|
-| `anthropic` | `claude-cli` | headless, agentic `claude -p … --output-format json`; read-only roles get the read-only tool allowlist |
-| `openai`, `local` | `chat` | single-shot `POST {baseUrl}/chat/completions`, `Authorization: Bearer <key>`, role charter as the system message and the task as the user message |
-| `google` | *(none)* | no direct engine — `role-call` exits with guidance to use Gemini's OpenAI-compatible endpoint as a `type: "openai"` provider (below) |
-
-**Base URL (chat engine).** Resolved as **`$baseUrlEnv` (when set) → the literal
-`baseUrl` → hard error**. Set one of them on any `openai`/`local` provider; `validate`
-warns for an api role whose provider has neither.
-
-**Non-agentic rule.** The chat engine has **no tools** — the model cannot open files,
-run commands, or inspect the repo. Whatever the role needs must be **in the task
-itself** (relevant file contents, error output, constraints). The generated `/pb` and
-`/pbg` dispatch text says this for a chat-engine role; a bespoke caller must honor it.
-
-**Token / cost reporting (stderr).** Every run prints one `[role-call]` line:
-
-- `claude-cli`: `role=… engine=claude-cli model=… cost=$<total_cost_usd> session=…`.
-  A missing `total_cost_usd` is the tell that the call may have billed the
-  **subscription** rather than the API key — that warning is specific to this engine.
-- `chat`: `role=… engine=chat model=<response model or requested> tokens=<prompt>+<completion>`,
-  with ` cost=$<usage.cost>` appended only when the provider returns a cost, and
-  `tokens=?` when the response omits usage. (No subscription-billing warning applies —
-  a Bearer-key chat call has no subscription path.)
-
-**Gemini via the OpenAI-compatible endpoint.** There is no native `generateContent`
-engine. Define Gemini as a `type: "openai"` provider pointing at its OpenAI-compat
-base URL and give it your Gemini key:
-
-```jsonc
-"providers": {
-  "gemini": {
-    "type": "openai",
-    "apiKeyEnv": "GEMINI_API_KEY",
-    "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai"
-  }
-}
-```
-
-**Worked example — route the planner over OpenRouter (chat engine):**
-
-```bash
-bin/set-api-key openrouter                    # provision the OpenRouter key (0600 keyfile)
-python3 apply.py set planner --provider openrouter --id anthropic/claude-sonnet-5 --access api
-bin/role-call planner --ping                  # expect an "engine=chat … tokens=…" line
-```
-
-`set` accepts `--provider` / `--id` / `--access` with no positional class; `--id` pins
-the concrete model the endpoint expects.
-
-### Flip runbook (subscription → API for the planner)
-
-When the provider key exists and you're ready to route planning over the API:
-
-1. `bin/set-api-key` — provision the Anthropic key (run it yourself in a terminal).
-2. `bin/role-call planner --ping` — confirm a `cost=$…` line appears (bills the key).
-3. `python3 apply.py set planner --access api` — flip the transport + regenerate
-   (this removes `~/.claude/agents/planner.md`).
-4. Smoke `/pb` on a tiny task — confirm the orchestrator invokes `role-call planner`
-   and relays the cost.
-5. Update any harness-level orchestrator guidance (e.g. machine `AGENTS.md`) in the
-   **same** session — after the flip there is no `planner` subagent to delegate to.
-
 ## Usage
 
 ```bash
@@ -186,16 +53,12 @@ python3 apply.py claude      # (re)generate the Claude Code adapter
 python3 apply.py generic     # print a paste-in block for any other harness
 python3 apply.py all         # do both
 python3 apply.py set builder sonnet   # change a role's model + regenerate (easy path)
-python3 apply.py set planner --access api   # change a role's transport (see "Role transports")
-python3 apply.py resolve planner      # machine-readable role facts (transport, model, key source)
-python3 apply.py prompt planner       # the rendered role charter (used by bin/role-call)
 python3 apply.py claude --dry-run   # preview without writing
 ```
 
 Use `apply.py set <role> <class>` to change a model in one step (it edits
 `roles.config.json`, validates, and regenerates); pass `--id` to pin an exact
-model, `--access harness|api` to change the transport, `--no-apply` to only update
-the config.
+model, `--no-apply` to only update the config.
 
 ## Looping until a condition holds
 
@@ -222,15 +85,11 @@ explicit done-condition holds:
 An *adapter* turns the config into whatever a given harness understands. Each is
 thin and driven entirely by `roles.config.json`.
 
-- **Claude Code** (`adapters/claude-code/`): `apply.py claude` renders a subagent
-  per **harness-transport** role (`~/.claude/agents/planner.md`, `builder.md`) with
-  the configured `model:`, and slash commands: `/pb` (one plan→build pass) and
-  `/pbg` (loop until a done-condition holds), plus `/pbg-builder` and `/pbg-planner`
-  to switch a role's model or transport from chat. The main loop auto-delegates to
-  them. A role with `access: "api"` gets **no subagent** — its generated file is
-  removed and the `/pb` / `/pbg` commands instead instruct the orchestrator to run
-  `bin/role-call <role>` (per-transport dispatch fragments live in
-  `adapters/claude-code/dispatch/`).
+- **Claude Code** (`adapters/claude-code/`): `apply.py claude` renders two
+  subagents (`~/.claude/agents/planner.md`, `builder.md`) with the configured
+  `model:` and slash commands: `/pb` (one plan→build pass) and `/pbg` (loop
+  until a done-condition holds), plus `/pbg-builder` and `/pbg-planner` to switch
+  a role's model from chat. The main loop auto-delegates to them.
 - **Any prompt/instruction-based harness** (Codex, Hermes, Gemini, a bespoke
   agent, a raw system prompt): `apply.py generic` prints a portable Markdown block
   naming the two roles, their resolved model classes, and each role's provider +
@@ -251,8 +110,7 @@ renders them. The config never changes.
   script) — nothing is hidden in one harness's memory or chat history.
 - No provider or model is hardcoded as the only path; swap classes/providers in
   the config.
-- No secrets in the config — only the *names* of env vars or *paths* to key files
-  that hold them.
+- No secrets in the config — only the *names* of env vars that hold them.
 
 ## Per-project override
 
