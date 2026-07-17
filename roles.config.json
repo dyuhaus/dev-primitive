@@ -25,7 +25,8 @@
     }
   },
   "classIds": {
-    "fable": "claude-fable-5"
+    "fable": "claude-fable-5",
+    "openrouter:sonnet": "anthropic/claude-sonnet-5"
   },
   "routing": {
     "planBeforeBuild": true,
@@ -42,7 +43,9 @@
     "openrouter": {
       "type": "openai",
       "apiKeyEnv": "OPENROUTER_API_KEY",
-      "baseUrlEnv": "OPENROUTER_BASE_URL"
+      "baseUrlEnv": "OPENROUTER_BASE_URL",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyFile": "~/appdata/openrouter/api-key"
     }
   }
 }

@@ -41,6 +41,12 @@ ROLE_KEYS = ("planner", "builder")
 ACCESS_VALUES = ("harness", "api")
 # Marker that identifies a file this generator wrote (used before deleting a stale one).
 GENERATED_MARKER = "Generated from dev-primitive"
+# The direct-API engine bin/role-call uses for a role, derived from the provider's type.
+# anthropic -> headless claude CLI (agentic); openai/local -> single-shot chat-completions;
+# google has no direct engine (use its OpenAI-compatible endpoint as a type:openai provider).
+ENGINE_BY_TYPE = {"anthropic": "claude-cli", "openai": "chat", "local": "chat", "google": ""}
+# Default keyfile convention when a provider omits apiKeyFile.
+DEFAULT_KEYFILE_TMPL = "~/appdata/{provider}/api-key"
 
 
 # ---------------------------------------------------------------- load + validate
@@ -89,6 +95,8 @@ def validate(cfg: dict):
                 errs.append(f"providers.{name}.apiKeyEnv must be a string")
             if "apiKeyFile" in prov and not isinstance(prov.get("apiKeyFile"), str):
                 errs.append(f"providers.{name}.apiKeyFile must be a string (a path, not the secret)")
+            if "baseUrl" in prov and not isinstance(prov.get("baseUrl"), str):
+                errs.append(f"providers.{name}.baseUrl must be a string (a URL, not the secret)")
 
     roles = cfg.get("roles")
     if not isinstance(roles, dict):
@@ -123,12 +131,28 @@ def validate(cfg: dict):
             errs.append(f"roles.{key}.model.provider must be a string")
         elif prov_name not in providers:
             errs.append(f"roles.{key}.model.provider '{prov_name}' is not defined in providers")
-        # Warn if an api-transport role can't resolve to a concrete model id.
-        if access == "api" and not str(mid).strip() and str(cls).strip() and str(cls).strip() not in class_ids:
-            warns.append(
-                f"{key}: access=api but class '{cls}' has no classIds entry and no pinned id; "
-                f"the literal class will be passed to --model. "
-                f"Pin with: python3 apply.py set {key} --id <exact-model-id>")
+        if access == "api":
+            prov = providers.get(prov_name) if isinstance(prov_name, str) else None
+            ptype = prov.get("type", "") if isinstance(prov, dict) else ""
+            # Warn if an api-transport role can't resolve to a concrete model id
+            # (neither a pinned id, a provider-scoped classIds hit, nor a bare-class hit).
+            has_scoped = isinstance(prov_name, str) and f"{prov_name}:{cls}" in class_ids
+            if not str(mid).strip() and str(cls).strip() and str(cls).strip() not in class_ids and not has_scoped:
+                warns.append(
+                    f"{key}: access=api but class '{cls}' has no classIds entry (neither "
+                    f"'{prov_name}:{cls}' nor '{cls}') and no pinned id; the literal class will be "
+                    f"passed to the API. Pin with: python3 apply.py set {key} --id <exact-model-id>")
+            # Warn if the provider has no direct-api engine role-call can drive.
+            if ptype == "google":
+                warns.append(
+                    f"{key}: provider '{prov_name}' type google has no direct-api engine in role-call; "
+                    f"use Gemini's OpenAI-compatible endpoint as a type:openai provider (see PRIMITIVE.md)")
+            elif ptype in ("openai", "local"):
+                has_base = bool(prov.get("baseUrl")) or bool(prov.get("baseUrlEnv"))
+                if not has_base:
+                    warns.append(
+                        f"{key}: role-call will fail: set providers.{prov_name}.baseUrl or "
+                        f"{prov_name}'s baseUrlEnv")
 
     return errs, warns
 
@@ -141,13 +165,18 @@ def resolve_model(role: dict) -> str:
 
 
 def resolve_api_model(cfg: dict, role: dict) -> str:
-    """Model id for the direct-API transport: pinned model.id, else classIds[class], else the literal class."""
+    """Model id for the direct-API transport. Lookup order: pinned model.id, else the
+    provider-scoped classIds["<provider>:<class>"], else classIds["<class>"], else the literal class."""
     model = role.get("model", {})
     mid = str(model.get("id", "")).strip()
     if mid:
         return mid
     cls = str(model.get("class", "")).strip()
+    prov_name = str(model.get("provider", "")).strip()
     class_ids = cfg.get("classIds") or {}
+    scoped = class_ids.get(f"{prov_name}:{cls}")
+    if scoped is not None:
+        return scoped
     return class_ids.get(cls, cls)
 
 
@@ -193,9 +222,11 @@ def role_view(cfg: dict, key: str) -> dict:
         "id": role["model"].get("id", ""),
         "provider": prov_name,
         "provider_type": prov.get("type", ""),
+        "engine": ENGINE_BY_TYPE.get(prov.get("type", ""), ""),
         "api_key_env": prov.get("apiKeyEnv", ""),
-        "api_key_file": prov.get("apiKeyFile", ""),
+        "api_key_file": prov.get("apiKeyFile") or DEFAULT_KEYFILE_TMPL.format(provider=prov_name),
         "base_url_env": prov.get("baseUrlEnv", ""),
+        "base_url": prov.get("baseUrl", ""),
         "purpose": role.get("purpose", ""),
         "read_only": bool(role.get("readOnly", False)),
         "access": role.get("access", "harness"),
@@ -217,10 +248,22 @@ def _ref_phrase(role: str, access: str, dev_dir: str) -> str:
     return f"the {role} via `{dev_dir}/bin/role-call {role}`"
 
 
+# A single-shot chat-API role has no tools — it can't inspect the repo, so the caller
+# must inline every bit of context. Emitted only for the chat engine; "" for claude-cli.
+CHAT_CONTEXT_NOTE = (
+    " IMPORTANT: this role runs on a single-shot chat API with NO tools — it cannot "
+    "inspect the repo. Include ALL needed context (relevant file contents, error output, "
+    "constraints) inline in the task file.")
+
+
 def template_mapping(cfg: dict) -> dict:
     p = role_view(cfg, "planner")
     b = role_view(cfg, "builder")
     dev_dir = str(SCRIPT_DIR)
+
+    def context_note(v):
+        return CHAT_CONTEXT_NOTE if v["access"] == "api" and v["engine"] == "chat" else ""
+
     return {
         "PLANNER_MODEL": p["model"],
         "BUILDER_MODEL": b["model"],
@@ -230,8 +273,12 @@ def template_mapping(cfg: dict) -> dict:
         "BUILDER_PROVIDER": b["provider"],
         "PLANNER_ACCESS": p["access"],
         "BUILDER_ACCESS": b["access"],
+        "PLANNER_ENGINE": p["engine"],
+        "BUILDER_ENGINE": b["engine"],
         "PLANNER_API_MODEL": p["api_model"],
         "BUILDER_API_MODEL": b["api_model"],
+        "PLANNER_API_CONTEXT_NOTE": context_note(p),
+        "BUILDER_API_CONTEXT_NOTE": context_note(b),
         "PLANNER_REF": _ref_phrase("planner", p["access"], dev_dir),
         "BUILDER_REF": _ref_phrase("builder", b["access"], dev_dir),
         "DEV_PRIMITIVE_DIR": dev_dir,
@@ -276,6 +323,11 @@ def resolve_facts(cfg: dict, role: str) -> dict:
         "API_KEY_FILE": key_file,
         "READ_ONLY": "true" if v["read_only"] else "false",
         "PURPOSE": v["purpose"],
+        # Appended (order after the originals — bin/role-call evals this):
+        "PROVIDER": v["provider"],
+        "ENGINE": v["engine"],
+        "BASE_URL_ENV": v["base_url_env"],
+        "BASE_URL": v["base_url"],
     }
 
 
@@ -420,7 +472,16 @@ def print_table(cfg: dict) -> None:
             key_src = f"${v['api_key_env']}" if v["api_key_env"] else "-"
             if v["api_key_file"]:
                 key_src += f" or {v['api_key_file']}"
-            print(f"           transport=access=api (direct API; model '{v['api_model']}', key: {key_src})")
+            engine = v["engine"] or "none"
+            print(f"           transport=access=api (direct API; engine={engine}; "
+                  f"model '{v['api_model']}', key: {key_src})")
+            if v["engine"] == "chat":
+                if v["base_url_env"]:
+                    base_src = f"${v['base_url_env']} (if set) or "
+                else:
+                    base_src = ""
+                base_src += v["base_url"] or "(no baseUrl — role-call will fail)"
+                print(f"           base-url: {base_src}")
         else:
             print("           transport=access=harness (native subagent/auth)")
     print()

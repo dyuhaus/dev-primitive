@@ -1,28 +1,41 @@
 #!/usr/bin/env bash
 #
-# role-call — run a dev-primitive role over the direct provider API (headless claude CLI).
+# role-call — run a dev-primitive role over its provider's direct API.
 #
-# For roles configured with `access: "api"` in roles.config.json. The role's API
-# key is taken from the provider's env var (wins) or its keyfile, and exported ONLY
-# into the child claude process — never placed in argv, never logged. The parent
-# session keeps its own (subscription) auth untouched.
+# For roles configured with `access: "api"` in roles.config.json. Two engines,
+# chosen by the provider's type (apply.py emits it as ENGINE):
+#
+#   claude-cli  (provider type anthropic) — a headless, agentic `claude -p` call.
+#               Read-only roles get a read-only tool allowlist. The JSON envelope's
+#               total_cost_usd proves the call billed the API key, not a subscription.
+#   chat        (provider type openai|local) — a single-shot POST to
+#               {baseUrl}/chat/completions with the role charter as the system
+#               message and the task as the user message. No tools; the model
+#               cannot inspect the repo, so put all context in the task.
+#
+# The provider type `google` has no direct engine here — use Gemini's
+# OpenAI-compatible endpoint as a type:"openai" provider (see PRIMITIVE.md).
+#
+# The role's API key is taken from the provider's env var (wins) or its keyfile,
+# and exported ONLY into the child call — never placed in argv, never logged. The
+# parent session keeps its own (subscription) auth untouched.
 #
 # Usage:
 #   role-call <role> [task words...]         task from the remaining arguments
 #   role-call <role> --task-file PATH        task read from a file
 #   role-call <role> -                        task read from stdin
-#   role-call <role> --ping                   tiny liveness call (max-turns 1)
+#   role-call <role> --ping                   tiny liveness call
 #
 # Options:
 #   --task-file PATH   read the task from PATH
 #   --ping             send a minimal liveness prompt instead of a task
-#   --max-turns N      cap the agent's turns
-#   --timeout SECONDS  wall-clock timeout for the claude call (default 3600)
+#   --max-turns N      cap the agent's turns (claude-cli engine only; ignored by chat)
+#   --timeout SECONDS  wall-clock timeout for the call (default 3600)
 #   --config PATH      config file (default: roles.config.json next to this repo)
-#   --dry-run          print the command that would run (key redacted) and exit
+#   --dry-run          print what would run (key redacted) and exit
 #   --force            run even if the role is harness-transport (access != api)
 #
-# Exit codes: 0 ok · 1 generic/parse failure · 2 no API key · 4 role is harness-transport.
+# Exit codes: 0 ok · 1 generic/parse/HTTP failure · 2 no API key · 4 role is harness-transport.
 
 set -uo pipefail
 
@@ -58,7 +71,7 @@ while [ $# -gt 0 ]; do
     --dry-run)   DRY_RUN=1; shift ;;
     --force)     FORCE=1; shift ;;
     -)           FROM_STDIN=1; shift ;;
-    -h|--help)   sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '3,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --*)         die "unknown option: $1" ;;
     *)           if [ -z "$ROLE" ]; then ROLE="$1"; else POSITIONAL+=("$1"); fi; shift ;;
   esac
@@ -87,7 +100,7 @@ fi
 
 # --- task acquisition ----------------------------------------------------------
 if [ "$PING" = 1 ]; then
-  TASK="Reply with exactly PLANNER-OK and stop."
+  TASK="Reply with exactly OK and stop."
   TASK_SET=1
   [ -n "$MAX_TURNS" ] || MAX_TURNS=1
 elif [ -n "$TASK_FILE" ]; then
@@ -112,62 +125,71 @@ else
   KEY=""; KEY_SOURCE="MISSING"
 fi
 
-# --- compose prompt (charter + task) -------------------------------------------
+# No key for a real run: provider-generic exit-2 message (both engines).
+die_no_key() {
+  keyfile_disp="${API_KEY_FILE:-<no keyfile configured>}"
+  echo "No API key for provider '$PROVIDER': \$$API_KEY_ENV is unset and $keyfile_disp does not exist. Fix: run $SCRIPT_PATH/set-api-key $PROVIDER (interactive, run it yourself), or temporarily plan on the harness: python3 $APPLY set $ROLE --access harness" >&2
+  exit 2
+}
+
+# --- render the role charter (single copy of the role prompt) ------------------
 CHARTER="$(python3 "$APPLY" prompt "$ROLE" --config "$CONFIG")" || die "could not render role prompt for '$ROLE'"
-PROMPT="$CHARTER
+
+# --- dispatch by engine --------------------------------------------------------
+case "${ENGINE:-}" in
+
+  claude-cli)
+    # --- compose prompt (charter + task) ---------------------------------------
+    PROMPT="$CHARTER
 
 ## Task
 
 $TASK"
 
-# --- build the claude command --------------------------------------------------
-CMD=( timeout "$TIMEOUT" claude -p "$PROMPT" --model "$MODEL" --output-format json )
-if [ "${READ_ONLY:-false}" = "true" ]; then
-  CMD+=( --allowedTools "$READONLY_ALLOWED_TOOLS" )
-else
-  CMD+=( --permission-mode acceptEdits )
-fi
-[ -n "$MAX_TURNS" ] && CMD+=( --max-turns "$MAX_TURNS" )
+    # --- build the claude command ----------------------------------------------
+    CMD=( timeout "$TIMEOUT" claude -p "$PROMPT" --model "$MODEL" --output-format json )
+    if [ "${READ_ONLY:-false}" = "true" ]; then
+      CMD+=( --allowedTools "$READONLY_ALLOWED_TOOLS" )
+    else
+      CMD+=( --permission-mode acceptEdits )
+    fi
+    [ -n "$MAX_TURNS" ] && CMD+=( --max-turns "$MAX_TURNS" )
 
-# --- dry run -------------------------------------------------------------------
-if [ "$DRY_RUN" = 1 ]; then
-  echo "[role-call] DRY RUN — would invoke (key redacted):"
-  DISP="$API_KEY_ENV=<$KEY_SOURCE> timeout $TIMEOUT claude -p \"<prompt>\" --model $MODEL --output-format json"
-  if [ "${READ_ONLY:-false}" = "true" ]; then
-    DISP="$DISP --allowedTools \"$READONLY_ALLOWED_TOOLS\""
-  else
-    DISP="$DISP --permission-mode acceptEdits"
-  fi
-  [ -n "$MAX_TURNS" ] && DISP="$DISP --max-turns $MAX_TURNS"
-  echo "$DISP"
-  echo "[role-call] role=$ROLE access=${ACCESS:-} model=$MODEL read_only=${READ_ONLY:-false} key_source=$KEY_SOURCE"
-  echo "[role-call] prompt[0:200]: ${PROMPT:0:200}"
-  exit 0
-fi
+    # --- dry run ---------------------------------------------------------------
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "[role-call] DRY RUN — would invoke (key redacted):"
+      DISP="$API_KEY_ENV=<$KEY_SOURCE> timeout $TIMEOUT claude -p \"<prompt>\" --model $MODEL --output-format json"
+      if [ "${READ_ONLY:-false}" = "true" ]; then
+        DISP="$DISP --allowedTools \"$READONLY_ALLOWED_TOOLS\""
+      else
+        DISP="$DISP --permission-mode acceptEdits"
+      fi
+      [ -n "$MAX_TURNS" ] && DISP="$DISP --max-turns $MAX_TURNS"
+      echo "$DISP"
+      echo "[role-call] role=$ROLE access=${ACCESS:-} engine=claude-cli model=$MODEL read_only=${READ_ONLY:-false} key_source=$KEY_SOURCE"
+      echo "[role-call] prompt[0:200]: ${PROMPT:0:200}"
+      exit 0
+    fi
 
-# --- key required for a real run -----------------------------------------------
-if [ "$KEY_SOURCE" = "MISSING" ]; then
-  keyfile_disp="${API_KEY_FILE:-<no keyfile configured>}"
-  echo "No API key for provider '${PROVIDER_TYPE:-unknown}': \$$API_KEY_ENV is unset and $keyfile_disp does not exist. Fix: run $SCRIPT_PATH/set-api-key (interactive, run it yourself), or temporarily plan on the harness: python3 $APPLY set $ROLE --access harness" >&2
-  exit 2
-fi
+    # --- key required for a real run -------------------------------------------
+    [ "$KEY_SOURCE" = "MISSING" ] && die_no_key
 
-# --- invoke: key exported only into the child; never in argv --------------------
-ERRFILE="$(mktemp)"
-OUT="$( export "$API_KEY_ENV=$KEY"; "${CMD[@]}" 2>"$ERRFILE" )"
-rc=$?
+    # --- invoke: key exported only into the child; never in argv ---------------
+    ERRFILE="$(mktemp)"
+    OUT="$( export "$API_KEY_ENV=$KEY"; "${CMD[@]}" 2>"$ERRFILE" )"
+    rc=$?
 
-if [ $rc -ne 0 ]; then
-  echo "[role-call] claude exited $rc (role=$ROLE model=$MODEL)" >&2
-  [ -s "$ERRFILE" ] && cat "$ERRFILE" >&2
-  [ -n "$OUT" ] && printf '%s\n' "$OUT" >&2
-  rm -f "$ERRFILE"
-  exit 1
-fi
-rm -f "$ERRFILE"
+    if [ $rc -ne 0 ]; then
+      echo "[role-call] claude exited $rc (role=$ROLE model=$MODEL)" >&2
+      [ -s "$ERRFILE" ] && cat "$ERRFILE" >&2
+      [ -n "$OUT" ] && printf '%s\n' "$OUT" >&2
+      rm -f "$ERRFILE"
+      exit 1
+    fi
+    rm -f "$ERRFILE"
 
-# --- parse JSON with stdlib python: .result -> stdout, cost line -> stderr ------
-printf '%s' "$OUT" | RC_ROLE="$ROLE" RC_MODEL="$MODEL" python3 -c '
+    # --- parse JSON with stdlib python: .result -> stdout, cost line -> stderr --
+    printf '%s' "$OUT" | RC_ROLE="$ROLE" RC_MODEL="$MODEL" python3 -c '
 import sys, os, json
 raw = sys.stdin.read()
 role = os.environ.get("RC_ROLE", "?")
@@ -188,10 +210,135 @@ cost = d.get("total_cost_usd")
 sess = d.get("session_id", "")
 if cost is None:
     sys.stderr.write("[role-call] WARNING: no total_cost_usd in response — this run may have billed the subscription, not the API key; check auth precedence\n")
-    sys.stderr.write("[role-call] role=%s model=%s cost=$? session=%s\n" % (role, model, sess))
+    sys.stderr.write("[role-call] role=%s engine=claude-cli model=%s cost=$? session=%s\n" % (role, model, sess))
 else:
-    sys.stderr.write("[role-call] role=%s model=%s cost=$%s session=%s\n" % (role, model, cost, sess))
+    sys.stderr.write("[role-call] role=%s engine=claude-cli model=%s cost=$%s session=%s\n" % (role, model, cost, sess))
 '
-prc=$?
-[ $prc -eq 0 ] || exit 1
-exit 0
+    prc=$?
+    [ $prc -eq 0 ] || exit 1
+    exit 0
+    ;;
+
+  chat)
+    # --- resolve the base URL: baseUrlEnv (if set) wins, else literal baseUrl ---
+    BASE=""
+    if [ -n "${BASE_URL_ENV:-}" ]; then
+      BASE="${!BASE_URL_ENV:-}"
+    fi
+    [ -n "$BASE" ] || BASE="${BASE_URL:-}"
+    [ -n "$BASE" ] || die "provider '$PROVIDER' (type $PROVIDER_TYPE) has no base URL: set \$$BASE_URL_ENV or providers.$PROVIDER.baseUrl in the config"
+    BASE="${BASE%/}"   # tolerate a trailing slash
+    URL="$BASE/chat/completions"
+
+    # A ping caps output tokens; --max-turns is meaningless for a single-shot call.
+    MAX_TOKENS=""
+    [ "$PING" = 1 ] && MAX_TOKENS=32
+
+    # --- dry run ---------------------------------------------------------------
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "[role-call] DRY RUN — would POST (key redacted):"
+      echo "engine=chat  POST $URL"
+      echo "model=$MODEL"
+      echo "key: $API_KEY_ENV=<$KEY_SOURCE>"
+      [ -n "${MAX_TOKENS:-}" ] && echo "max_tokens=$MAX_TOKENS"
+      [ -n "$MAX_TURNS" ] && echo "(--max-turns $MAX_TURNS ignored: meaningless for the chat engine)"
+      echo "[role-call] role=$ROLE access=${ACCESS:-} engine=chat model=$MODEL key_source=$KEY_SOURCE"
+      echo "[role-call] system[0:120]: ${CHARTER:0:120}"
+      echo "[role-call] user[0:200]: ${TASK:0:200}"
+      echo "read_only note: no tools — read-only is inherent"
+      exit 0
+    fi
+
+    # --- key required for a real run -------------------------------------------
+    [ "$KEY_SOURCE" = "MISSING" ] && die_no_key
+
+    # --- write charter (system) and task (user) to temp files ------------------
+    SYS_FILE="$(mktemp)"; USER_FILE="$(mktemp)"
+    trap 'rm -f "$SYS_FILE" "$USER_FILE"' EXIT
+    printf '%s' "$CHARTER" > "$SYS_FILE"
+    printf '%s' "$TASK"    > "$USER_FILE"
+
+    # --- invoke: key exported ONLY as RC_KEY into the python child (never argv) -
+    RC_KEY="$KEY" RC_URL="$URL" RC_MODEL="$MODEL" \
+    RC_SYS_FILE="$SYS_FILE" RC_USER_FILE="$USER_FILE" RC_MAX_TOKENS="$MAX_TOKENS" \
+    RC_ROLE="$ROLE" RC_TIMEOUT="$TIMEOUT" \
+    timeout "$TIMEOUT" python3 - <<'PY'
+import os, sys, json, urllib.request, urllib.error
+
+url = os.environ["RC_URL"]
+model = os.environ["RC_MODEL"]
+key = os.environ["RC_KEY"]
+role = os.environ.get("RC_ROLE", "?")
+with open(os.environ["RC_SYS_FILE"], encoding="utf-8") as fh:
+    system = fh.read()
+with open(os.environ["RC_USER_FILE"], encoding="utf-8") as fh:
+    user = fh.read()
+
+body = {"model": model, "messages": [
+    {"role": "system", "content": system},
+    {"role": "user", "content": user},
+]}
+mt = os.environ.get("RC_MAX_TOKENS", "")
+if mt.strip():
+    body["max_tokens"] = int(mt)
+
+req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
+req.add_header("Authorization", "Bearer " + key)
+req.add_header("Content-Type", "application/json")
+try:
+    timeout = float(os.environ.get("RC_TIMEOUT", "") or 3600)
+except ValueError:
+    timeout = 3600
+try:
+    resp = urllib.request.urlopen(req, timeout=timeout)
+    raw = resp.read().decode("utf-8", "replace")
+except urllib.error.HTTPError as e:
+    detail = ""
+    try:
+        detail = e.read().decode("utf-8", "replace")
+    except Exception:
+        pass
+    sys.stderr.write("[role-call] HTTP %s from %s\n" % (e.code, url))
+    if detail:
+        sys.stderr.write(detail[:800] + "\n")
+    sys.exit(1)
+except Exception as e:
+    sys.stderr.write("[role-call] request to %s failed: %s\n" % (url, e))
+    sys.exit(1)
+
+try:
+    d = json.loads(raw)
+    content = d["choices"][0]["message"]["content"]
+except Exception:
+    sys.stderr.write("[role-call] unexpected chat response shape:\n" + raw[:800] + "\n")
+    sys.exit(1)
+if not isinstance(content, str):
+    content = json.dumps(content)
+sys.stdout.write(content)
+if not content.endswith("\n"):
+    sys.stdout.write("\n")
+
+resp_model = d.get("model") or model
+usage = d.get("usage") or {}
+line = "[role-call] role=%s engine=chat model=%s " % (role, resp_model)
+pt = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+ct = usage.get("completion_tokens") if isinstance(usage, dict) else None
+if pt is not None and ct is not None:
+    line += "tokens=%s+%s" % (pt, ct)
+    cost = usage.get("cost")
+    if cost is not None:
+        line += " cost=$%s" % (cost,)
+else:
+    line += "tokens=?"
+sys.stderr.write(line + "\n")
+PY
+    rc=$?
+    [ $rc -eq 0 ] || exit 1
+    exit 0
+    ;;
+
+  ""|*)
+    die "no direct-api engine for provider type '${PROVIDER_TYPE:-unknown}'. For Gemini, define a type:\"openai\" provider with baseUrl https://generativelanguage.googleapis.com/v1beta/openai and your GEMINI key (see PRIMITIVE.md \"Provider engines\")."
+    ;;
+
+esac

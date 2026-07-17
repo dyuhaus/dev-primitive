@@ -45,7 +45,10 @@ source of truth. Each role has a **customizable model class**:
   overrides `class`.
 - **`provider`** — a key into the `providers` map (Anthropic, any
   OpenAI-compatible endpoint incl. OpenRouter, Google, or a local model), which
-  names the wire protocol and the **env vars** (or a keyfile path) for the API key.
+  names the wire protocol and the **env vars** (or a keyfile path / `baseUrl`) for
+  the API key. On the `api` transport the provider `type` also picks the engine
+  `bin/role-call` uses — headless `claude` for `anthropic`, single-shot
+  chat-completions for `openai`/`local` (see PRIMITIVE.md "Provider engines").
 - **`access`** — the role's *transport*: `harness` (default; the harness's native
   model selection + auth) or `api` (a direct provider API call billed to that
   provider's own key, off the subscription). See PRIMITIVE.md
@@ -62,7 +65,7 @@ An *adapter* turns the config into whatever a harness understands:
 
 | Harness | How |
 |---|---|
-| **Claude Code** | `apply.py claude` renders a subagent per harness-transport role (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model or transport from chat. A role set to `access: "api"` gets no subagent — the commands call `bin/role-call <role>` (direct provider API) instead. |
+| **Claude Code** | `apply.py claude` renders a subagent per harness-transport role (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model or transport from chat. A role set to `access: "api"` gets no subagent — the commands call `bin/role-call <role>` (direct provider API: headless `claude` for Anthropic, chat-completions for any OpenAI-compatible/local endpoint) instead. |
 | **Codex / Hermes / Gemini / raw system prompt** | `apply.py generic` prints a portable Markdown block (roles + resolved classes + provider env) to paste into `AGENTS.md` / `GEMINI.md` / a system prompt. |
 | **Programmatic / OpenAI-compatible client** | Read `roles.config.json` directly; pick `roles.<role>.model` + the `providers[...]` entry, one client per role. |
 
@@ -77,7 +80,7 @@ changes.
 roles.config.json           single source of truth (edit this)
 roles.schema.json           JSON-Schema validator
 apply.py                    stdlib-only generator / validator
-bin/role-call               run an api-transport role over the direct provider API (headless claude)
+bin/role-call               run an api-transport role over the direct provider API (headless claude for Anthropic, single-shot chat-completions for any OpenAI-compatible/local endpoint)
 bin/set-api-key             interactive, terminal-only key provisioning (writes a 0600 keyfile)
 PRIMITIVE.md                full harness-neutral spec
 adapters/claude-code/       planner / builder / pb / pbg / pbg-builder / pbg-planner templates

@@ -9,8 +9,9 @@
 # Usage:
 #   bin/set-api-key [provider] [--verify]
 #     provider   provider key in roles.config.json (default: anthropic)
-#     --verify   after writing, make a tiny real API call (role-call planner --ping).
-#                This costs a few real cents on the provider key.
+#     --verify   after writing, make a tiny real API call (role-call <role> --ping)
+#                for the first api-transport role that uses this provider. This costs
+#                a few real cents / fractions of a cent on the provider key.
 
 set -uo pipefail
 
@@ -36,22 +37,26 @@ if [ ! -t 0 ] || [ ! -t 1 ]; then
   die "refusing to run without an interactive terminal. Run this yourself in a real shell."
 fi
 
-# Resolve the keyfile path and env var name from the config.
-read -r KEYFILE KEYENV < <(python3 - "$CONFIG" "$PROVIDER" <<'PY'
+# Resolve the keyfile path, env var name, and provider type from the config.
+# When apiKeyFile is omitted, default to the ~/appdata/<provider>/api-key convention.
+read -r KEYFILE KEYENV PTYPE KEYFILE_DEFAULTED < <(python3 - "$CONFIG" "$PROVIDER" <<'PY'
 import json, os, sys
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))
 prov = cfg.get("providers", {}).get(sys.argv[2])
 if not isinstance(prov, dict):
     sys.stderr.write("provider not found in config: %s\n" % sys.argv[2]); sys.exit(2)
 kf = prov.get("apiKeyFile", "")
+defaulted = "0"
 if not kf:
-    sys.stderr.write("provider '%s' has no apiKeyFile in the config\n" % sys.argv[2]); sys.exit(2)
-print(os.path.expanduser(kf), prov.get("apiKeyEnv", ""))
+    kf = "~/appdata/%s/api-key" % sys.argv[2]
+    defaulted = "1"
+print(os.path.expanduser(kf), prov.get("apiKeyEnv", ""), prov.get("type", ""), defaulted)
 PY
 ) || die "could not resolve keyfile for provider '$PROVIDER' from $CONFIG"
 
-echo "Provider : $PROVIDER"
+echo "Provider : $PROVIDER  (type ${PTYPE:-unknown})"
 echo "Key file : $KEYFILE"
+[ "$KEYFILE_DEFAULTED" = "1" ] && echo "           (convention default — provider has no apiKeyFile in the config)"
 echo "Env var  : ${KEYENV:-<none>}  (this file is only consulted when \$$KEYENV is unset)"
 echo
 echo "Paste the API key. It will NOT be shown on screen."
@@ -60,15 +65,28 @@ IFS= read -rs KEY
 echo
 [ -n "$KEY" ] || die "empty input — nothing written."
 
-# Shape check (advisory only).
-case "$KEY" in
-  sk-ant-*) : ;;
+# Advisory shape check. Expected prefix is keyed by provider name first, then type;
+# a provider with no known prefix skips the confirmation entirely.
+EXPECT_PREFIX=""
+case "$PROVIDER" in
+  anthropic)  EXPECT_PREFIX="sk-ant-" ;;
+  openrouter) EXPECT_PREFIX="sk-or-" ;;
   *)
-    printf 'That does not start with "sk-ant-". Write it anyway? [y/N] '
-    IFS= read -r ans
-    case "$ans" in y|Y|yes|YES) : ;; *) die "aborted — nothing written." ;; esac
+    case "$PTYPE" in
+      openai) EXPECT_PREFIX="sk-" ;;
+    esac
     ;;
 esac
+if [ -n "$EXPECT_PREFIX" ]; then
+  case "$KEY" in
+    "$EXPECT_PREFIX"*) : ;;
+    *)
+      printf 'That does not start with "%s". Write it anyway? [y/N] ' "$EXPECT_PREFIX"
+      IFS= read -r ans
+      case "$ans" in y|Y|yes|YES) : ;; *) die "aborted — nothing written." ;; esac
+      ;;
+  esac
+fi
 
 # Write with tight permissions; create the dir 0700 and the file 0600.
 KEYDIR="$(dirname "$KEYFILE")"
@@ -87,20 +105,64 @@ echo "  bytes       : $BYTES"
 echo "  sha256[0:8] : $FP   (fingerprint only — not the key)"
 
 if [ "$VERIFY" = 1 ]; then
+  # Find the first api-transport role (planner then builder) that uses this provider,
+  # and its engine, so we know which success signal to look for.
+  read -r VROLE VENGINE < <(python3 - "$CONFIG" "$PROVIDER" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+prov_name = sys.argv[2]
+ENGINE_BY_TYPE = {"anthropic": "claude-cli", "openai": "chat", "local": "chat", "google": ""}
+roles = cfg.get("roles", {})
+providers = cfg.get("providers", {})
+for name in ("planner", "builder"):
+    r = roles.get(name)
+    if not isinstance(r, dict):
+        continue
+    if r.get("access") != "api":
+        continue
+    if r.get("model", {}).get("provider") != prov_name:
+        continue
+    ptype = providers.get(prov_name, {}).get("type", "")
+    print(name, ENGINE_BY_TYPE.get(ptype, ""))
+    break
+PY
+)
+  if [ -z "${VROLE:-}" ]; then
+    echo
+    echo "key written; no api-transport role currently uses provider '$PROVIDER' — skipped live verify"
+    exit 0
+  fi
   echo
-  echo "Verifying with a tiny real API call — this costs a few real cents on the $PROVIDER key."
+  echo "Verifying with a tiny real API call — this costs a few real cents / fractions of a cent on the $PROVIDER key."
+  echo "  role=$VROLE engine=${VENGINE:-none}"
+  case "$VENGINE" in
+    chat) echo "  (chat engine: a successful call proves the key is VALID, not billing attribution)" ;;
+  esac
   printf 'Proceed? [y/N] '
   IFS= read -r ans
   case "$ans" in
     y|Y|yes|YES)
-      echo "Running: role-call planner --ping"
-      if OUT="$("$SCRIPT_PATH/role-call" planner --ping 2>&1)"; then
+      echo "Running: role-call $VROLE --ping"
+      if OUT="$("$SCRIPT_PATH/role-call" "$VROLE" --ping 2>&1)"; then
         echo "$OUT"
-        if printf '%s' "$OUT" | grep -q 'cost=\$[0-9]'; then
-          echo "OK: total_cost_usd appeared — the call billed the API key."
-        else
-          echo "WARNING: no total_cost_usd seen — check whether this billed the subscription instead." >&2
-        fi
+        case "$VENGINE" in
+          claude-cli)
+            if printf '%s' "$OUT" | grep -q 'cost=\$[0-9]'; then
+              echo "OK: total_cost_usd appeared — the call billed the API key."
+            else
+              echo "WARNING: no total_cost_usd seen — check whether this billed the subscription instead." >&2
+            fi
+            ;;
+          chat)
+            if printf '%s' "$OUT" | grep -q 'engine=chat.*tokens='; then
+              echo "OK: the chat endpoint answered (tokens= line) — the key is valid."
+            else
+              echo "WARNING: no tokens= line seen — inspect the output above." >&2
+            fi
+            ;;
+          *)
+            echo "OK: call returned (no engine-specific check for engine '${VENGINE:-none}')." ;;
+        esac
       else
         echo "$OUT" >&2
         die "verification call failed (see output above)."
