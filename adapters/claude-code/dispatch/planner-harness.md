@@ -1,1 +1,0 @@
-Delegate to the `planner` subagent. Give it the task and any relevant context you already have. It runs on the configured planner model class and returns a concrete, buildable plan (understanding → approach → ordered steps → risks/checks). Do not start writing code yourself.

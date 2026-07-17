@@ -32,7 +32,7 @@ Steps:
    and verifiable (a test suite passes, a command exits 0, an observable behavior),
    not vague.
 
-1. **Plan ({{PLANNER_MODEL}}).** Delegate to {{PLANNER_REF}} with the task,
+1. **Plan ({{PLANNER_MODEL}}).** Delegate to the `planner` subagent with the task,
    the done-condition, and any evidence from the previous round's verification. It
    returns a concrete, buildable plan aimed at satisfying the condition. Do not
    write code yourself.
@@ -41,13 +41,13 @@ Steps:
    it has a real gap or a decision only the user can make, raise that before
    building rather than guessing.
 
-3. **Build ({{BUILDER_MODEL}}).** Delegate to {{BUILDER_REF}}, handing it the
+3. **Build ({{BUILDER_MODEL}}).** Delegate to the `builder` subagent, handing it the
    planner's plan verbatim plus any decisions from step 2. It implements the plan
    end to end and reports what changed.
 
 4. **Verify the done-condition.** Actually check it with evidence — run the relevant
    tests / build / linters or exercise the behavior; do not just assert it. Capture
-   the concrete result. Delegate the check to {{BUILDER_REF}} when commands must run.
+   the concrete result. Delegate the check to the `builder` when commands must run.
 
 5. **Decide.**
    - **Condition met:** report what was built, the evidence that the condition

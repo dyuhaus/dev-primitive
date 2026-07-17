@@ -1,1 +1,0 @@
-Delegate to the `builder` subagent, handing it the planner's plan verbatim plus any decisions from step 2. It runs on the configured builder model class, implements the plan end to end, runs the relevant build/tests, and reports what changed and how it verified it.

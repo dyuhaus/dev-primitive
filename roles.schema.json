@@ -19,11 +19,6 @@
         "builder": { "$ref": "#/$defs/role" }
       }
     },
-    "classIds": {
-      "type": "object",
-      "additionalProperties": { "type": "string" },
-      "description": "Optional map from model class/alias to a concrete model id, for transports that cannot resolve the harness alias (e.g. the api access path). Keys may be a bare class (e.g. \"fable\") or provider-scoped as \"<provider>:<class>\" (e.g. \"openrouter:sonnet\"). Lookup order for an api role: model.id (when set) -> classIds[\"<provider>:<class>\"] -> classIds[\"<class>\"] -> the literal class."
-    },
     "routing": {
       "type": "object",
       "additionalProperties": true,
@@ -47,11 +42,6 @@
       "properties": {
         "purpose": { "type": "string", "minLength": 1 },
         "readOnly": { "type": "boolean" },
-        "access": {
-          "type": "string",
-          "enum": ["harness", "api"],
-          "description": "How the role is reached. 'harness' (default): the harness's native model selection and auth. 'api': a direct call billed to the role's provider credentials, bypassing the harness's session auth."
-        },
         "model": {
           "type": "object",
           "required": ["class", "provider"],
@@ -86,15 +76,7 @@
           "description": "Wire protocol / SDK family the harness should use for this provider."
         },
         "apiKeyEnv": { "type": "string" },
-        "apiKeyFile": {
-          "type": "string",
-          "description": "Optional path (~ allowed) to a file holding the API key, chmod 600. When omitted it defaults to ~/appdata/<provider>/api-key. Used when the apiKeyEnv variable is unset; the env var wins when both exist. Path only — never the secret itself."
-        },
-        "baseUrlEnv": { "type": "string" },
-        "baseUrl": {
-          "type": "string",
-          "description": "Optional literal base URL for the provider's OpenAI-compatible endpoint (e.g. https://openrouter.ai/api/v1). At runtime the baseUrlEnv variable, when set, overrides this. Required (one of the two) for api-transport roles on openai/local providers."
-        }
+        "baseUrlEnv": { "type": "string" }
       }
     }
   }
