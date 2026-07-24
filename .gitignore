@@ -17,3 +17,6 @@ Thumbs.db
 # tweaks out of the repo). The tracked source of truth is roles.config.json.
 roles.local.json
 *.local.json
+
+# Local router decision audit. It deliberately contains no raw task text.
+runtime/
