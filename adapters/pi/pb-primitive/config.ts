@@ -322,8 +322,8 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 		if (typeof postAudit !== "object" || postAudit === null) errs.push("routing.postWorkflowAudit must be an object");
 		else {
 			if (typeof postAudit.enabled !== "boolean") errs.push("routing.postWorkflowAudit.enabled must be boolean");
-			validateEntry({ purpose: "post-workflow audit", model: postAudit.model }, "routing.postWorkflowAudit");
-			if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(postAudit.thinking))) errs.push("routing.postWorkflowAudit.thinking must be a supported thinking level");
+			if (postAudit.enabled === true || postAudit.model !== undefined) validateEntry({ purpose: "post-workflow audit", model: postAudit.model }, "routing.postWorkflowAudit");
+			if (postAudit.thinking !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(postAudit.thinking))) errs.push("routing.postWorkflowAudit.thinking must be a supported thinking level");
 		}
 	}
 	const selection = cfg.routing?.automaticSelection;

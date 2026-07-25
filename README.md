@@ -69,10 +69,11 @@ source of truth. Each role has a **customizable model class**:
 This shared file is harness-neutral: Claude Code, Codex/generic consumers, and
 other harnesses use its Planner/Builder values (`fable`/`opus` on Anthropic by
 default). Pi alone has a complete runtime overlay at
-`adapters/pi/roles.config.pi.json`, which currently selects the configured
-Planner and GPT-5.6 Terra Builder through OpenRouter only when no project-level
-config overrides it. `routing.postWorkflowAudit` independently pins GPT-5.6 Sol
-at medium thinking for the compact post-workflow review.
+`adapters/pi/roles.config.pi.json`, whose defaults currently select the
+configured Planner and GPT-5.6 Terra Builder through OpenRouter when no
+project-level config overrides it. The Pi overlay also defaults
+`routing.postWorkflowAudit` to GPT-5.6 Sol at medium thinking; an effective
+project-level configuration may change or disable that reviewer.
 
 Change a shared cross-harness model by editing this file and re-running
 `apply.py`. Change a Pi-only model with `apply.py set --config

@@ -139,10 +139,14 @@ def validate(cfg: dict) -> list:
                 if not isinstance(post_audit, dict):
                     errs.append("routing.postWorkflowAudit must be an object")
                 else:
-                    if not isinstance(post_audit.get("enabled"), bool):
+                    enabled = post_audit.get("enabled")
+                    if not isinstance(enabled, bool):
                         errs.append("routing.postWorkflowAudit.enabled must be boolean")
-                    validate_model(post_audit.get("model"), "routing.postWorkflowAudit.model")
-                    if post_audit.get("thinking") not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
+                    if enabled is True:
+                        validate_model(post_audit.get("model"), "routing.postWorkflowAudit.model")
+                    elif "model" in post_audit:
+                        validate_model(post_audit.get("model"), "routing.postWorkflowAudit.model")
+                    if "thinking" in post_audit and post_audit.get("thinking") not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
                         errs.append("routing.postWorkflowAudit.thinking must be a supported thinking level")
             selection = routing.get("automaticSelection")
             if selection is not None:
@@ -255,6 +259,7 @@ def template_mapping(cfg: dict) -> dict:
         "BUILDER_PURPOSE": b["purpose"],
         "PLANNER_PROVIDER": p["provider"],
         "BUILDER_PROVIDER": b["provider"],
+        "WORKFLOW_AUDIT_ENABLED": str(post_audit.get("enabled", False)).lower(),
         "WORKFLOW_AUDIT_MODEL": audit_model,
         "WORKFLOW_AUDIT_THINKING": post_audit.get("thinking", "medium"),
     }

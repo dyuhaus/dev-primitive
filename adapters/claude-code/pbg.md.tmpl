@@ -49,9 +49,11 @@ Steps:
    tests / build / linters or exercise the behavior; do not just assert it. Capture
    the concrete result. Delegate the check to the `builder` when commands must run.
 
-5. **Light audit ({{WORKFLOW_AUDIT_MODEL}}, {{WORKFLOW_AUDIT_THINKING}} thinking).**
-   After each completed Planner → executor round, delegate once to `workflow-audit`
-   with the task, plan, executor result, and verification evidence. It is a small
+5. **Light audit (enabled={{WORKFLOW_AUDIT_ENABLED}}; {{WORKFLOW_AUDIT_MODEL}}, {{WORKFLOW_AUDIT_THINKING}} thinking).**
+   If enabled, after each successfully completed Planner → executor round,
+   delegate once to `workflow-audit` with the task, plan, executor identity
+   (`builder` or the specialist key), executor result, and verification evidence.
+   Skip this step when disabled or when the executor failed. It is a small
    read-only review, not the full direct-call Audit agent, and must not edit or
    delegate further.
 

@@ -384,6 +384,12 @@ async function plannerThenBuilder(task: string, ctx: ExtensionContext): Promise<
 		return { text: `Builder did not start: ${built.error}\n\n## Plan\n\n${capOutput(plan)}`, results };
 	}
 	results.push(built.result);
+	if (isFailed(built.result)) {
+		return {
+			text: `## Plan\n\n${capOutput(plan)}\n\n## Builder result\n\n${outcomeText(built.result)}`,
+			results,
+		};
+	}
 	const builderOutput = getResultOutput(built.result);
 	const audit = await runPostWorkflowAudit(task, plan, "Builder", builderOutput, ctx);
 	if (audit.result) results.push(audit.result);

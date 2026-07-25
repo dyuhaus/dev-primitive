@@ -83,7 +83,7 @@
         "inlineTrivial": { "type": "boolean" },
         "postWorkflowAudit": {
           "type": "object",
-          "required": ["enabled", "model", "thinking"],
+          "required": ["enabled"],
           "additionalProperties": true,
           "properties": {
             "enabled": { "type": "boolean" },

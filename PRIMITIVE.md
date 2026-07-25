@@ -84,8 +84,9 @@ use the host's `/goal` followed by `/pb` as documented by that harness.
   PB core and specialist registry. A harness can map profiles to its native
   agent mechanism.
 - **Pi:** the global PB addon reads the Pi-only overlay after project-local
-  configs but before the shared config. Completed Planner → Builder rounds run
-  the configured light workflow audit before reporting. `/route <task>` runs the same local
+  configs but before the shared config. Successfully completed Planner →
+  executor work—including each completed `/pbg` round—runs the configured light
+  workflow audit before reporting. `/route <task>` runs the same local
   recommendation router and asks for confirmation; see `adapters/pi/README.md`
   for precedence.
 

@@ -112,11 +112,12 @@ python3 router.py --explain "Update the Vault index and fix broken wikilinks"
 python3 router.py --json "Refactor the broker service architecture"
 ```
 
-After each completed Planner → Builder workflow, supporting adapters run one
-small post-workflow audit using `routing.postWorkflowAudit` (GPT-5.6 Sol,
-medium thinking by default). The reviewer receives the task, plan, and executor
-evidence; it is read-only, does not delegate, and appends an advisory verdict.
-It does not replace the full explicit `/audit` specialist.
+After each successfully completed Planner → executor workflow—including every
+completed `/pbg` round—supporting adapters run one small post-workflow audit
+using `routing.postWorkflowAudit` (GPT-5.6 Sol, medium thinking by default).
+The reviewer receives the task, plan, executor identity, and executor evidence;
+it is read-only, does not delegate, and appends an advisory verdict. It does not
+replace the full explicit `/audit` specialist.
 
 Claude and Pi expose the same deliberate flow through `/route <task>`: show the
 applicability result, ask for confirmation, then invoke the selected profile only
