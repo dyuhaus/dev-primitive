@@ -143,6 +143,13 @@ assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive"
 assert.equal(indexModule.shouldAutoRouteInput("/pb Update the README", "interactive"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "rpc"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive", true), false);
+const realRouter = "/home/dyadmin/dev-primitive/router.py";
+const sourceConfig = "/home/dyadmin/dev-primitive/roles.config.json";
+const genericImplementation = await indexModule.getRouteDecision("Implement authentication caching and tests", root, sourceConfig, undefined, { routerPath: realRouter, timeoutMs: 5000 });
+assert.equal(genericImplementation.selected, "planner", "planBeforeBuild must keep substantive generic implementation on the Planner → Builder path");
+assert.match(genericImplementation.reasons.join(" "), /Planner must produce the plan before Builder/);
+const outlinedImplementation = await indexModule.getRouteDecision("Following this exact outline, add a small parser script and unit test", root, sourceConfig, undefined, { routerPath: realRouter, timeoutMs: 5000 });
+assert.equal(outlinedImplementation.selected, "l1-programmer", "small explicitly outlined work may bypass PB");
 await assert.rejects(
 	() => indexModule.getRouteDecision("test", root, machinePath, undefined, { routerPath: path.join(root, "missing-router.py"), timeoutMs: 100 }),
 	/router.py exited|ENOENT/,

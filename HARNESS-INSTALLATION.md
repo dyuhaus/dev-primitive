@@ -70,10 +70,14 @@ alternative is:
 python3 /home/dyadmin/dev-primitive/router.py --explain 'task'
 ```
 
-Runner is the low-confidence fallback. Team Leader and Audit have
-`direct-call-only` semantics in every adapter and are hard-excluded from
-routing. Invoke `/audit` explicitly for GPT-5.6 Sol harness/runtime audits that
-must work directly without Planner, Builder, or other delegated agents.
+Runner is the low-confidence fallback. With `planBeforeBuild` enabled, generic
+substantive implementation is confirmed as a Planner handoff and Pi then runs
+Planner → Builder; direct specialist matches and explicitly outlined L1 work do
+not pay that planning round-trip. Planner recommends specialists but does not
+invoke them. Team Leader and Audit have `direct-call-only` semantics in every
+adapter and are hard-excluded from routing. Invoke `/audit` explicitly for
+GPT-5.6 Sol harness/runtime audits that must work directly without Planner,
+Builder, or other delegated agents.
 
 Run `python3 /home/dyadmin/dev-primitive/apply.py knowledge` to refresh the
 generated specialty profiles. It preserves `agent-knowledge/*/LESSONS.md`.

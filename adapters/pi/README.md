@@ -76,8 +76,11 @@ PB and specialist resolution when a project explicitly needs that behavior. `/ro
 passes that resolved configuration to `router.py`, so its applicability result uses
 the same profile registry. When `routing.automaticSelection.enabled` is true, Pi
 also recognizes ordinary interactive tasks and offers a confirmation-required
-handoff. It never silently invokes an agent or selects direct-call-only Team
-Leader or Audit.
+handoff. With `routing.planBeforeBuild` enabled, generic substantive
+implementation enters the full Planner → Builder flow; confirmed domain
+specialists and explicitly outlined L1 work remain direct. Planner recommends
+rather than invokes specialists. Pi never silently invokes an agent or selects
+direct-call-only Team Leader or Audit.
 
 Every profile's generated specialty and information-gathering documentation is
 in `/home/dyadmin/dev-primitive/agent-knowledge/<key>/PROFILE.md`; durable

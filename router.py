@@ -171,13 +171,24 @@ def route(task: str, config: Dict[str, Any], cwd: str = "") -> Dict[str, Any]:
     confidence = _confidence(int(top["score"]), int(second["score"]), bool(signals["ambiguous"]))
     needs_clarification = bool(signals["ambiguous"]) or confidence < threshold or int(top["score"]) < 4
     selected = fallback if needs_clarification else top["agent"]
+    # The PB invariant is stronger than the raw implementation score: generic
+    # substantive engineering enters through Planner, then Builder receives the
+    # verified plan. Explicitly outlined small work and domain specialists have
+    # already outscored Builder and therefore bypass this conversion.
+    plan_before_build = routing.get("planBeforeBuild") is True
+    selected_for_plan_first = selected == "builder" and plan_before_build and not needs_clarification
+    if selected_for_plan_first:
+        selected = "planner"
     # Absolute safety rule independent of config and scores.
     if selected == "team-leader":
         selected = fallback
         needs_clarification = True
 
     reasons: List[str] = []
-    if selected == top["agent"]:
+    if selected_for_plan_first:
+        reasons.extend(top["reasons"] or [f"highest eligible score ({top['score']})"])
+        reasons.append("planBeforeBuild is enabled: Planner must produce the plan before Builder implements it")
+    elif selected == top["agent"]:
         reasons.extend(top["reasons"] or [f"highest eligible score ({top['score']})"])
     else:
         reasons.append(f"confidence {confidence:.2f} is below the {threshold:.2f} recommendation threshold; using {fallback} as the safe front door")

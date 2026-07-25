@@ -93,7 +93,9 @@ category: agent-framework
 The harness-level specialist profiles are installed under `agent-*`. Use
 **Runner** as the everyday front door for routine work and maintenance. Use
 Planner → Builder for substantive software work. Builder is the senior engineer
-and may delegate a clearly outlined subtask to L1 Programmer.
+and may delegate a clearly outlined subtask to L1 Programmer or a separable
+frontend implementation to FE-Designer. Planner recommends the next role but
+does not invoke specialists itself; the parent orchestrator owns handoffs.
 
 Available skills:
 - `/agent-runner`

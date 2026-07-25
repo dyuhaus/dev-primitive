@@ -15,7 +15,12 @@ routing design, and agent-creation process.
 
 **Loop:** reason with Planner → hand the plan to Builder → build → verify.
 Trivial lookups and one-line edits may remain inline. The existing `/pb` and
-`/pbg` commands remain the PB interface.
+`/pbg` commands remain the PB interface. Planner is not the universal default:
+domain-specific work may route directly to a confirmed specialist, ambiguous or
+routine work uses Runner, and a small explicitly outlined implementation may use
+L1. Planner does not call specialists itself; it recommends the next role and
+the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
+FE-Designer when its harness exposes those tools.
 
 ## Single source of truth
 

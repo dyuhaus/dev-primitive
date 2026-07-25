@@ -34,6 +34,18 @@ class RouterTests(unittest.TestCase):
         self.assert_route("Refactor the broker service architecture and analyze trade-offs", "planner")
         self.assert_route("Clean up routine service logs", "runner")
 
+    def test_generic_implementation_enters_plan_then_build(self):
+        decision = router.route("Implement authentication caching and tests", self.config)
+        self.assertEqual(decision["selected"], "planner")
+        self.assertIn("Planner must produce the plan before Builder", " ".join(decision["reasons"]))
+        self.assertEqual(decision["candidates"][0]["agent"], "builder")
+
+    def test_plan_before_build_can_be_disabled(self):
+        config = copy.deepcopy(self.config)
+        config["routing"]["planBeforeBuild"] = False
+        decision = router.route("Implement authentication caching and tests", config)
+        self.assertEqual(decision["selected"], "builder")
+
     def test_ambiguous_task_falls_back_to_runner(self):
         decision = router.route("Help with this thing", self.config)
         self.assertEqual(decision["selected"], "runner")

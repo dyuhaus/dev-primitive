@@ -12,7 +12,8 @@ models; other harnesses never consume that file.
   and escalation. It identifies whether a task belongs with another specialist.
 - **Planner** and **Builder** are the PB development core. Planner is the
   read-only reasoning specialist. Builder is the senior engineer for complex
-  systems and may delegate a clearly outlined, well-scoped subtask to L1.
+  systems and may delegate a clearly outlined, well-scoped subtask to L1 or a
+  separable frontend implementation to FE-Designer.
 - **L1 Programmer** is the junior/intern implementation specialist for basic
   scripts, tests, small fixes, and explicitly outlined work. It must escalate
   architecture or unclear scope to Builder/Planner.
@@ -108,7 +109,13 @@ Claude and Pi expose the same deliberate flow through `/route <task>`: show the
 applicability result, ask for confirmation, then invoke the selected profile only
 if approved. With `enabled: true`, Pi also offers this confirmation gate for
 eligible ordinary interactive tasks. In noninteractive contexts Pi reports the
-result but does not invoke.
+result but does not invoke. When `planBeforeBuild` is true, a generic substantive
+implementation score is converted to Planner so the confirmed Pi handoff runs
+the complete Planner → Builder workflow; an explicit specialist match or a small,
+clearly outlined L1 task bypasses PB. Planner itself does not spawn specialists:
+it names the recommended next role, and the parent orchestrator performs the
+approved handoff. Builder is the only PB child permitted to delegate, narrowly to
+L1 Programmer or FE-Designer when the harness exposes those delegation tools.
 Low confidence and material ambiguity fall back to Runner. The router hard
 excludes `direct-call-only` profiles and `team-leader` regardless of malformed
 metadata. Multi-workstream language is reported as a cue to explicitly call Team

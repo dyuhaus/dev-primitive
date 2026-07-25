@@ -57,7 +57,16 @@ overrides the changed Pi overlay in the current session.
 
 The extension's prompt metadata tells the parent orchestrator to delegate
 substantive reasoning to `planner_agent`, then substantive implementation to
-`builder_agent`. Trivial lookups and one-line edits can remain inline.
+`builder_agent`. Trivial lookups and one-line edits can remain inline. Planner is
+not run for every prompt: confirmed domain specialists run directly, ambiguous
+or routine work remains with the parent/Runner, and explicitly outlined small
+work may route to L1 Programmer. Generic substantive implementation is normalized
+to the complete Planner → Builder path when `routing.planBeforeBuild` is enabled.
+Planner does not invoke specialists from its isolated read-only child; it names
+the recommended next role for the parent orchestrator. Builder may delegate only
+to L1 Programmer or FE-Designer, and child Pi currently loads with
+`--no-extensions`, so its safe fallback is direct implementation or a handoff
+recommendation to the parent.
 
 ## Config precedence
 

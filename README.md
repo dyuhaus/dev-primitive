@@ -15,7 +15,10 @@ builder  →  coding-tier model     →  writing/editing code, running builds & 
 **Loop:** reason with the planner → hand its plan to the builder → build → verify.
 The session's main loop is an *orchestrator* that routes each kind of work to the
 right model instead of doing both itself. Trivial lookups and one-line edits stay
-inline.
+inline. Planner is the entry point for substantive generic engineering, not for
+every prompt: confirmed domain specialists, Runner, and explicitly outlined L1
+work can be direct destinations. Planner recommends handoffs; it does not spawn
+other specialists itself.
 
 ## Quickstart
 
