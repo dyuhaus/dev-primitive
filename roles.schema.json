@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dyadmin.local/dev-primitive/roles.schema.json",
-  "title": "Dev Primitive Roles Config",
-  "description": "Configuration for the two-role (planner/builder) development primitive. The exact model class for each role is customizable here and drives every harness adapter.",
+  "title": "Configurable Agent Framework",
+  "description": "Planner and Builder are the legacy-compatible PB core. The optional agents registry defines specialist profiles.",
   "type": "object",
   "required": ["version", "roles", "providers"],
   "additionalProperties": true,
@@ -19,15 +19,11 @@
         "builder": { "$ref": "#/$defs/role" }
       }
     },
-    "routing": {
+    "agents": {
       "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "planBeforeBuild": { "type": "boolean" },
-        "inlineTrivial": { "type": "boolean" },
-        "note": { "type": "string" }
-      }
+      "additionalProperties": { "$ref": "#/$defs/agentProfile" }
     },
+    "routing": { "$ref": "#/$defs/routing" },
     "providers": {
       "type": "object",
       "minProperties": 1,
@@ -35,31 +31,72 @@
     }
   },
   "$defs": {
+    "model": {
+      "type": "object",
+      "required": ["class", "provider"],
+      "additionalProperties": true,
+      "properties": {
+        "class": { "type": "string", "minLength": 1 },
+        "id": { "type": "string" },
+        "provider": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stringList": { "type": "array", "items": { "type": "string" } },
     "role": {
       "type": "object",
       "required": ["purpose", "model"],
       "additionalProperties": true,
       "properties": {
         "purpose": { "type": "string", "minLength": 1 },
+        "model": { "$ref": "#/$defs/model" },
         "readOnly": { "type": "boolean" },
-        "model": {
+        "canDelegate": { "type": "boolean" },
+        "delegateTo": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "agentProfile": {
+      "type": "object",
+      "required": ["displayName", "purpose", "model", "readOnly", "tools", "invocation", "autoSelectEligible", "capabilities", "boundaries", "escalateTo", "canDelegate", "delegateTo", "outputContract"],
+      "additionalProperties": true,
+      "properties": {
+        "displayName": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "model": { "$ref": "#/$defs/model" },
+        "readOnly": { "type": "boolean" },
+        "tools": { "$ref": "#/$defs/stringList" },
+        "invocation": { "type": "string", "enum": ["default", "direct-call-only"] },
+        "autoSelectEligible": { "type": "boolean" },
+        "capabilities": { "$ref": "#/$defs/stringList" },
+        "boundaries": { "$ref": "#/$defs/stringList" },
+        "escalateTo": { "$ref": "#/$defs/stringList" },
+        "canDelegate": { "type": "boolean" },
+        "delegateTo": { "$ref": "#/$defs/stringList" },
+        "outputContract": { "$ref": "#/$defs/stringList" },
+        "infoSources": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "planBeforeBuild": { "type": "boolean" },
+        "inlineTrivial": { "type": "boolean" },
+        "note": { "type": "string" },
+        "automaticSelection": {
           "type": "object",
-          "required": ["class", "provider"],
           "additionalProperties": true,
           "properties": {
-            "class": {
-              "type": "string",
-              "minLength": 1,
-              "description": "The customizable model class/alias for this role (e.g. fable, opus, sonnet, or a provider-specific class). Resolves to the newest model in that family on harnesses that support aliases."
-            },
-            "id": {
-              "type": "string",
-              "description": "Optional exact model id to pin (e.g. claude-opus-4-8). When non-empty it overrides class for resolution."
-            },
-            "provider": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Key into the top-level providers map."
+            "enabled": { "type": "boolean" },
+            "status": { "type": "string" },
+            "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+            "fallback": { "type": "string", "minLength": 1 },
+            "audit": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "path": { "type": "string", "minLength": 1 }
+              }
             }
           }
         }
@@ -70,11 +107,7 @@
       "required": ["type", "apiKeyEnv"],
       "additionalProperties": true,
       "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["anthropic", "openai", "google", "local"],
-          "description": "Wire protocol / SDK family the harness should use for this provider."
-        },
+        "type": { "type": "string", "enum": ["anthropic", "openai", "google", "local"] },
         "apiKeyEnv": { "type": "string" },
         "baseUrlEnv": { "type": "string" }
       }

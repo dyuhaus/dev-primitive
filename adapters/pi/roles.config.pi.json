@@ -1,23 +1,23 @@
 {
   "$schema": "./roles.schema.json",
   "version": 2,
-  "description": "Configurable multi-agent primitive. Planner and Builder are the portable PB development core; specialist profiles are registered here for explicit invocation and future routing. Pi may apply its own runtime-only overlay.",
+  "description": "Pi-only runtime agent configuration. It overrides the shared harness-neutral Planner/Builder models only in the Pi extension when no project-level roles config exists.",
   "roles": {
     "planner": {
       "purpose": "planning and reasoning about the project: architecture, design, root-cause analysis, trade-off calls, sequencing work, and reviewing an approach before it is built",
       "model": {
-        "class": "fable",
-        "id": "",
-        "provider": "anthropic"
+        "class": "moonshotai/kimi-k3",
+        "id": "moonshotai/kimi-k3",
+        "provider": "openrouter"
       },
       "readOnly": true
     },
     "builder": {
       "purpose": "senior engineering implementation: designing and building complex systems, writing and editing code, running builds and tests, and delegating clearly outlined, well-scoped subtasks to the L1 Programmer",
       "model": {
-        "class": "opus",
-        "id": "",
-        "provider": "anthropic"
+        "class": "openai/gpt-5.6-terra",
+        "id": "openai/gpt-5.6-terra",
+        "provider": "openrouter"
       },
       "readOnly": false,
       "canDelegate": true,
@@ -32,9 +32,9 @@
       "displayName": "Runner",
       "purpose": "everyday tasks and maintenance; identify the kind of work, perform routine work, and recommend or escalate to the appropriate specialist",
       "model": {
-        "class": "sonnet",
+        "class": "openai/gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -48,10 +48,6 @@
       ],
       "invocation": "default",
       "autoSelectEligible": true,
-      "infoSources": [
-        "Read the nearest AGENTS.md, README, manifest, and native task documentation before acting",
-        "Inspect relevant files and native status or validation commands before classifying routine work"
-      ],
       "capabilities": [
         "routine maintenance",
         "task triage",
@@ -79,15 +75,19 @@
         "State what was done",
         "Name any specialist escalation or recommendation",
         "Report validation and remaining risk"
+      ],
+      "infoSources": [
+        "Read the nearest AGENTS.md, README, manifest, and native task documentation before acting",
+        "Inspect relevant files and native status or validation commands before classifying routine work"
       ]
     },
     "tech-writer": {
       "displayName": "Tech Writer",
       "purpose": "create, update, and organize technical documentation, including READMEs, API references, runbooks, architecture notes, and implementation guides",
       "model": {
-        "class": "sonnet",
+        "class": "moonshotai/kimi-k3",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -100,10 +100,6 @@
       ],
       "invocation": "default",
       "autoSelectEligible": true,
-      "infoSources": [
-        "Read the nearest README, manifests, source code, configuration, and existing documentation",
-        "Verify behavior with native commands or code inspection; distinguish verified facts from assumptions"
-      ],
       "capabilities": [
         "technical prose",
         "documentation discovery",
@@ -127,15 +123,19 @@
         "Identify source material consulted",
         "Separate verified facts from assumptions",
         "List changed documentation and follow-up gaps"
+      ],
+      "infoSources": [
+        "Read the nearest README, manifests, source code, configuration, and existing documentation",
+        "Verify behavior with native commands or code inspection; distinguish verified facts from assumptions"
       ]
     },
     "prose-writer": {
       "displayName": "Prose Writer",
       "purpose": "write and revise non-technical prose such as correspondence, proposals, narratives, speeches, and general-purpose communications",
       "model": {
-        "class": "sonnet",
+        "class": "moonshotai/kimi-k3",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -147,10 +147,6 @@
       ],
       "invocation": "default",
       "autoSelectEligible": true,
-      "infoSources": [
-        "Confirm supplied facts, audience, intended outcome, and tone before drafting",
-        "For branded communications, read the applicable /home/dyadmin/brand/<company>/BRAND-PROFILE.md"
-      ],
       "capabilities": [
         "audience-aware writing",
         "editing and revision",
@@ -174,15 +170,19 @@
         "State audience and intended outcome",
         "Provide polished prose with no hidden commentary",
         "Call out placeholders or factual gaps"
+      ],
+      "infoSources": [
+        "Confirm supplied facts, audience, intended outcome, and tone before drafting",
+        "For branded communications, read the applicable /home/dyadmin/brand/<company>/BRAND-PROFILE.md"
       ]
     },
     "team-leader": {
       "displayName": "Team Leader",
       "purpose": "coordinate large tasks that genuinely require multiple agents, establish workstreams, sequence dependencies, reconcile outputs, and report an integrated result",
       "model": {
-        "class": "opus",
+        "class": "anthropic/claude-fable-5",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -196,10 +196,6 @@
       ],
       "invocation": "direct-call-only",
       "autoSelectEligible": false,
-      "infoSources": [
-        "Read participating agent profiles, the nearest AGENTS.md, relevant project documentation, and task dependencies",
-        "Gather only the evidence needed to define workstreams and reconcile their results"
-      ],
       "capabilities": [
         "multi-agent decomposition",
         "workstream coordination",
@@ -235,15 +231,19 @@
         "Present the work breakdown and assignments",
         "Track dependencies and unresolved conflicts",
         "Report each workstream result and the integrated acceptance status"
+      ],
+      "infoSources": [
+        "Read participating agent profiles, the nearest AGENTS.md, relevant project documentation, and task dependencies",
+        "Gather only the evidence needed to define workstreams and reconcile their results"
       ]
     },
     "l1-programmer": {
       "displayName": "L1 Programmer",
       "purpose": "implement basic scripts, small fixes, tests, and explicitly outlined programming tasks under the direction of a senior engineer or clear plan",
       "model": {
-        "class": "haiku",
+        "class": "openai/gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -256,10 +256,6 @@
       ],
       "invocation": "default",
       "autoSelectEligible": true,
-      "infoSources": [
-        "Read the supplied plan or explicit outline, affected source files, and existing tests",
-        "Run the focused native validation named by the plan before reporting completion"
-      ],
       "capabilities": [
         "basic scripting",
         "small isolated fixes",
@@ -284,15 +280,19 @@
         "Restate the supplied outline and scope",
         "Report files changed and tests run",
         "List deviations, blocked decisions, and escalation needs"
+      ],
+      "infoSources": [
+        "Read the supplied plan or explicit outline, affected source files, and existing tests",
+        "Run the focused native validation named by the plan before reporting completion"
       ]
     },
     "librarian": {
       "displayName": "Librarian",
       "purpose": "maintain the Vault and documentation information architecture, including organization, navigation, naming, cross-links, indexes, and structural consistency",
       "model": {
-        "class": "sonnet",
+        "class": "x-ai/grok-4.5",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -305,10 +305,6 @@
       ],
       "invocation": "default",
       "autoSelectEligible": true,
-      "infoSources": [
-        "Read the Vault Guide, applicable navigation hub, and existing naming/category conventions before changing structure",
-        "Run /home/dyadmin/homelab/scripts/vault-link-check.py after Vault navigation changes"
-      ],
       "capabilities": [
         "Vault organization",
         "navigation and index maintenance",
@@ -332,15 +328,19 @@
         "List notes or documents structurally affected",
         "Verify links and organization with native checks",
         "Report orphaned, ambiguous, or intentionally unlinked material"
+      ],
+      "infoSources": [
+        "Read the Vault Guide, applicable navigation hub, and existing naming/category conventions before changing structure",
+        "Run /home/dyadmin/homelab/scripts/vault-link-check.py after Vault navigation changes"
       ]
     },
     "fe-designer": {
       "displayName": "FE-Designer",
       "purpose": "design and implement polished frontend interfaces: translate product requirements and design-system guidance into accessible, responsive UI components, layouts, interactions, and visual refinements",
       "model": {
-        "class": "sonnet",
+        "class": "moonshotai/kimi-k3",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openrouter"
       },
       "readOnly": false,
       "tools": [
@@ -353,10 +353,6 @@
       ],
       "invocation": "default",
       "autoSelectEligible": true,
-      "infoSources": [
-        "Read the nearest AGENTS.md, existing components, styles, tests, and project design-system guidance",
-        "Before branded work, read /home/dyadmin/brand/<company>/BRAND-PROFILE.md; inspect semantic, keyboard, and responsive behavior"
-      ],
       "capabilities": [
         "frontend component implementation",
         "responsive layout and styling",
@@ -382,6 +378,10 @@
         "State the implemented UI scope, responsive behavior, and accessibility considerations",
         "List changed components, styles, and assets",
         "Report visual, lint, build, and test evidence plus remaining design or product decisions"
+      ],
+      "infoSources": [
+        "Read the nearest AGENTS.md, existing components, styles, tests, and project design-system guidance",
+        "Before branded work, read /home/dyadmin/brand/<company>/BRAND-PROFILE.md; inspect semantic, keyboard, and responsive behavior"
       ]
     }
   },
