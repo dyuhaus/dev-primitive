@@ -243,17 +243,22 @@ export async function runPostWorkflowAudit(
 	if (errors.length) return { text: `## Light audit\n\nAudit did not start: ${errors.join("; ")}` };
 	const view = roleView(syntheticConfig, "workflow-audit");
 	const prompt = `Original task:\n${task}\n\nPlanner output:\n---\n${plan}\n---\n\nExecutor: ${executorName}\n\nExecutor result and evidence:\n---\n${executorOutput}\n---`;
-	const result = await withRouteProgress(ctx, "Light workflow audit", `${executorName} result review`, (signal) =>
-		runRole({
-			cwd: ctx.cwd,
-			view,
-			systemPrompt: workflowAuditSystemPrompt(),
-			prompt,
-			thinking: spec.thinking ?? "medium",
-			signal,
-			label,
-		}),
-	);
+	let result: RunResult;
+	try {
+		result = await withRouteProgress(ctx, "Light workflow audit", `${executorName} result review`, (signal) =>
+			runRole({
+				cwd: ctx.cwd,
+				view,
+				systemPrompt: workflowAuditSystemPrompt(),
+				prompt,
+				thinking: spec.thinking ?? "medium",
+				signal,
+				label,
+			}),
+		);
+	} catch (error) {
+		return { text: `## Light audit\n\nAudit did not complete; the primary executor result is preserved.\n\n${(error as Error).message}` };
+	}
 	if (isFailed(result)) return { text: `## Light audit\n\nAudit failed without changing the primary result:\n\n${outcomeText(result)}`, result };
 	return { text: outcomeText(result), result };
 }

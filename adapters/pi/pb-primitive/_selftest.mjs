@@ -273,6 +273,17 @@ const auditRunArgs = JSON.parse(await fs.readFile(argsFile, "utf8"));
 assert.equal(auditRunArgs[auditRunArgs.indexOf("--model") + 1], "openai/gpt-5.6-sol");
 assert.equal(auditRunArgs[auditRunArgs.indexOf("--thinking") + 1], "medium");
 assert.equal(auditRunArgs[auditRunArgs.indexOf("--tools") + 1], "read,grep,find,ls");
+const savedPathForFailure = process.env.PATH;
+process.env.PATH = "/nonexistent";
+const failedAudit = await indexModule.runPostWorkflowAudit(
+	"Implement feature",
+	"Plan",
+	"Builder",
+	"Primary result must survive",
+	{ cwd: auditCwd, signal: undefined },
+);
+process.env.PATH = savedPathForFailure;
+assert.match(failedAudit.text, /primary executor result is preserved|failed without changing the primary result/);
 process.argv[1] = savedArgv1;
 process.env.PATH = oldPath;
 
