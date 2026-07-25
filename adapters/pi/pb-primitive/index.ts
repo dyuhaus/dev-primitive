@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { Type } from "typebox";
 import {
@@ -21,6 +21,7 @@ import { renderReportMessage, renderRoleResult } from "./render.ts";
 import { builderSystemPrompt, plannerSystemPrompt, specialistSystemPrompt, verifierSystemPrompt } from "./roles.ts";
 import {
 	capOutput,
+	cleanupStalePromptDirs,
 	getResultOutput,
 	isFailed,
 	killAllStragglers,
@@ -98,6 +99,11 @@ function formatRouteDecision(decision: RouteDecision): string {
 	return lines.join("\n");
 }
 
+/** Durable transcript acknowledgement emitted before a confirmed child starts. */
+export function formatAcceptedRoute(decision: RouteDecision, displayName: string, task: string): string {
+	return `${formatRouteDecision(decision)}\n\n## Accepted task\n\n${task.trim()}\n\nDelegating to **${displayName}** now. Progress is shown below; press Esc to cancel.`;
+}
+
 /** True only for plain, interactive text that can safely enter confirmed routing. */
 export function shouldAutoRouteInput(text: string, source: string | undefined, hasImages = false): boolean {
 	const trimmed = text.trim();
@@ -163,12 +169,66 @@ function outcomeText(result: RunResult): string {
 	return capOutput(getResultOutput(result));
 }
 
+const ROUTE_CLASSIFY_STATUS = "pb-primitive-classify";
+const ROUTE_PROGRESS_STATUS = "pb-primitive-route";
+const ROUTE_PROGRESS_WIDGET = "pb-primitive-route-progress";
+
+/** Keep accepted routed work visible while an isolated child Pi is running. */
+export async function withRouteProgress<T>(
+	ctx: ExtensionContext,
+	displayName: string,
+	task: string,
+	work: (signal?: AbortSignal) => Promise<T>,
+): Promise<T> {
+	if (!ctx.hasUI) return work(ctx.signal);
+	const taskPreview = task.replace(/\s+/g, " ").trim().slice(0, 180);
+
+	// A cancellable modal is the clearest acknowledgement in the TUI and gives
+	// Esc a real AbortSignal to propagate to the isolated child process.
+	if (ctx.mode === "tui") {
+		let workError: unknown;
+		const result = await ctx.ui.custom<{ ok: true; value: T } | null>((tui, theme, _keybindings, done) => {
+			const loader = new BorderedLoader(tui, theme, `Accepted → ${displayName}\n${taskPreview}\nRunning in an isolated Pi process...`);
+			loader.onAbort = () => done(null);
+			work(loader.signal)
+				.then((value) => done({ ok: true, value }))
+				.catch((error) => {
+					workError = error;
+					done(null);
+				});
+			return loader;
+		});
+		if (workError) throw workError;
+		if (!result) throw new Error(`${displayName} delegation canceled.`);
+		return result.value;
+	}
+
+	// RPC has UI notifications/status but no terminal component. Keep a visible
+	// status and widget until completion, and always clean both up.
+	const started = Date.now();
+	const render = () => {
+		const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000));
+		ctx.ui.setStatus(ROUTE_PROGRESS_STATUS, `Running ${displayName} · ${elapsed}s`);
+		ctx.ui.setWidget(ROUTE_PROGRESS_WIDGET, [`Accepted → ${displayName}`, taskPreview, `${elapsed}s elapsed`]);
+	};
+	render();
+	const ticker = setInterval(render, 1000);
+	try {
+		return await work(ctx.signal);
+	} finally {
+		clearInterval(ticker);
+		ctx.ui.setStatus(ROUTE_PROGRESS_STATUS, undefined);
+		ctx.ui.setWidget(ROUTE_PROGRESS_WIDGET, undefined);
+	}
+}
+
 async function runConfiguredRole(
 	key: string,
 	task: string,
 	ctx: ExtensionContext,
 	onUpdate?: Parameters<typeof runRole>[0]["onUpdate"],
 	label?: string,
+	signal?: AbortSignal,
 ): Promise<{ result?: RunResult; view?: RoleView; sourcePath: string; error?: string }> {
 	const resolved = resolveRole(ctx, key);
 	if (resolved.error || !resolved.view) {
@@ -181,7 +241,7 @@ async function runConfiguredRole(
 		view,
 		systemPrompt,
 		prompt: `Task: ${task}`,
-		signal: ctx.signal,
+		signal: signal ?? ctx.signal,
 		onUpdate,
 		label: label ?? `${key}_agent`,
 	});
@@ -190,9 +250,18 @@ async function runConfiguredRole(
 
 async function routeSelectedTask(selected: string, task: string, ctx: ExtensionContext): Promise<{ text: string; results: RunResult[] }> {
 	if (selected === "planner") return plannerThenBuilder(task, ctx);
-	const result = await runConfiguredRole(selected, task, ctx, undefined, `${selected} route`);
+	const resolved = resolveRole(ctx, selected);
+	const displayName = resolved.view?.displayName ?? selected;
+	let result: Awaited<ReturnType<typeof runConfiguredRole>>;
+	try {
+		result = await withRouteProgress(ctx, displayName, task, (signal) =>
+			runConfiguredRole(selected, task, ctx, undefined, `${selected} route`, signal),
+		);
+	} catch (error) {
+		return { text: `${displayName} did not complete: ${(error as Error).message}`, results: [] };
+	}
 	if (result.error || !result.result) return { text: `${selected} did not start: ${result.error ?? "unknown error"}`, results: [] };
-	return { text: `## ${result.view?.displayName ?? selected} result\n\n${outcomeText(result.result)}`, results: [result.result] };
+	return { text: `## ${displayName} result\n\n${outcomeText(result.result)}`, results: [result.result] };
 }
 
 async function plannerThenBuilder(task: string, ctx: ExtensionContext): Promise<{ text: string; results: RunResult[] }> {
@@ -399,11 +468,22 @@ export default function pbPrimitive(pi: ExtensionAPI): void {
 		pi.registerCommand(key, {
 			description: `Run the configured ${key} agent explicitly`,
 			handler: async (args, ctx) => {
-				if (!args.trim()) {
+				const task = args.trim();
+				if (!task) {
 					commandNotice(ctx, `Usage: /${key} <task>`, "warning");
 					return;
 				}
-				const result = await runConfiguredRole(key, args.trim(), ctx, undefined, `${key} command`);
+				const resolved = resolveRole(ctx, key);
+				const displayName = resolved.view?.displayName ?? key;
+				let result: Awaited<ReturnType<typeof runConfiguredRole>>;
+				try {
+					result = await withRouteProgress(ctx, displayName, task, (signal) =>
+						runConfiguredRole(key, task, ctx, undefined, `${key} command`, signal),
+					);
+				} catch (error) {
+					commandNotice(ctx, `${displayName} did not complete: ${(error as Error).message}`, "error");
+					return;
+				}
 				if (result.error || !result.result) {
 					commandNotice(ctx, `${key} did not start: ${result.error ?? "unknown error"}`, "error");
 					return;
@@ -513,6 +593,7 @@ export default function pbPrimitive(pi: ExtensionAPI): void {
 				pi.sendMessage({ customType: "pb-primitive-report", content: `${report}\n\nDelegation canceled.`, display: true }, { triggerTurn: false });
 				return;
 			}
+			pi.sendMessage({ customType: "pb-primitive-report", content: formatAcceptedRoute(decision, selected.view.displayName, task), display: true }, { triggerTurn: false });
 			const routed = await routeSelectedTask(decision.selected, task, ctx);
 			pi.sendMessage({ customType: "pb-primitive-report", content: `${report}\n\n${routed.text}`, display: true }, { triggerTurn: false });
 		},
@@ -600,17 +681,21 @@ export default function pbPrimitive(pi: ExtensionAPI): void {
 		const error = configError(loaded);
 		if (error || !loaded.cfg || loaded.cfg.routing?.automaticSelection?.enabled !== true) return { action: "continue" };
 		let decision: RouteDecision;
+		if (ctx.hasUI) ctx.ui.setStatus(ROUTE_CLASSIFY_STATUS, "Request accepted · checking specialist fit…");
 		try {
 			decision = await getRouteDecision(event.text, ctx.cwd, loaded.sourcePath, ctx.signal);
 		} catch (cause) {
 			commandNotice(ctx, `Router unavailable; continuing normally: ${(cause as Error).message}`, "warning");
 			return { action: "continue" };
+		} finally {
+			if (ctx.hasUI) ctx.ui.setStatus(ROUTE_CLASSIFY_STATUS, undefined);
 		}
 		if (decision.needs_clarification) return { action: "continue" };
 		const selected = resolveRole(ctx, decision.selected);
 		if (decision.selected === "team-leader" || selected.error || !selected.view || selected.view.invocation === "direct-call-only") return { action: "continue" };
 		const approved = await ctx.ui.confirm(`Route to ${selected.view.displayName}?`, formatRouteDecision(decision));
 		if (!approved) return { action: "continue" };
+		pi.sendMessage({ customType: "pb-primitive-report", content: formatAcceptedRoute(decision, selected.view.displayName, event.text), display: true }, { triggerTurn: false });
 		const routed = await routeSelectedTask(decision.selected, event.text, ctx);
 		pi.sendMessage({ customType: "pb-primitive-report", content: `${formatRouteDecision(decision)}\n\n${routed.text}`, display: true }, { triggerTurn: false });
 		return { action: "handled" };
@@ -618,6 +703,8 @@ export default function pbPrimitive(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async () => killAllStragglers());
 	pi.on("session_start", async (_event, ctx) => {
+		const stalePromptDirs = cleanupStalePromptDirs();
+		if (stalePromptDirs > 0 && ctx.hasUI) ctx.ui.notify(`pb-primitive removed ${stalePromptDirs} stale temporary prompt director${stalePromptDirs === 1 ? "y" : "ies"}.`, "info");
 		const loaded = loadResolved(ctx.cwd);
 		const error = configError(loaded);
 		if (error && ctx.hasUI) ctx.ui.notify(`pb-primitive disabled: ${error}`, "error");

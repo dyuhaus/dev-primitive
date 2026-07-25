@@ -87,6 +87,7 @@ assert.deepEqual(config.parseTaskAndUntil("task until: one until: final conditio
 
 const plannerArgs = roles.buildChildArgs(config.roleView(valid, "planner"), { thinking: "high" });
 assert.ok(plannerArgs.includes("--no-session"));
+assert.ok(plannerArgs.includes("--no-extensions"), "child Pi must not recursively load global routing/extensions");
 assert.ok(plannerArgs.includes("anthropic"));
 assert.ok(plannerArgs.includes("fable"));
 assert.equal(plannerArgs[plannerArgs.indexOf("--tools") + 1], "read,grep,find,ls");
@@ -137,6 +138,13 @@ assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive"
 assert.equal(indexModule.shouldAutoRouteInput("/pb Update the README", "interactive"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "rpc"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive", true), false);
+const acceptedRoute = indexModule.formatAcceptedRoute({
+	status: "recommendation", selected: "fe-designer", confidence: 0.95, reasons: ["frontend"],
+	candidates: [{ agent: "fe-designer", score: 12 }], needs_clarification: false, questions: [],
+}, "FE-Designer", "Build the original frontend prompt");
+assert.match(acceptedRoute, /## Accepted task/);
+assert.match(acceptedRoute, /Build the original frontend prompt/);
+assert.match(acceptedRoute, /Delegating to \*\*FE-Designer\*\*/);
 assert.equal(config.loadResolved("/home/dyadmin").cfg.routing.automaticSelection.enabled, true);
 for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer"]) {
 	assert.ok(commands.has(key), `missing /${key} command`);
@@ -144,6 +152,31 @@ for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer"
 }
 assert.ok(renderers.has("pb-primitive-report"));
 assert.ok(events.has("session_shutdown"));
+
+// Routed work must acknowledge acceptance and clean up RPC-compatible progress
+// UI on both success and failure.
+const statusUpdates = [];
+const widgetUpdates = [];
+const progressCtx = {
+	hasUI: true,
+	mode: "rpc",
+	signal: undefined,
+	ui: {
+		setStatus: (key, value) => statusUpdates.push([key, value]),
+		setWidget: (key, value) => widgetUpdates.push([key, value]),
+	},
+};
+assert.equal(await indexModule.withRouteProgress(progressCtx, "FE-Designer", "Build the frontend", async () => "done"), "done");
+assert.match(statusUpdates[0][1], /Running FE-Designer/);
+assert.match(widgetUpdates[0][1][0], /Accepted → FE-Designer/);
+assert.equal(statusUpdates.at(-1)[1], undefined);
+assert.equal(widgetUpdates.at(-1)[1], undefined);
+await assert.rejects(
+	() => indexModule.withRouteProgress(progressCtx, "FE-Designer", "Fail", async () => { throw new Error("test failure"); }),
+	/test failure/,
+);
+assert.equal(statusUpdates.at(-1)[1], undefined);
+assert.equal(widgetUpdates.at(-1)[1], undefined);
 
 // Offline child-process smoke test. A fake `pi` executable emits canonical JSON
 // events, allowing JSONL parsing, temp-prompt lifecycle, result handling, and
@@ -180,6 +213,18 @@ assert.equal(await fs.readFile(promptCopy, "utf8"), "OFFLINE ROLE PROMPT");
 const tempPromptPath = fakeArgs[fakeArgs.indexOf("--append-system-prompt") + 1];
 await assert.rejects(fs.access(tempPromptPath));
 assert.equal(subagent.liveChildCount(), 0);
+
+// Startup hygiene removes only stale, owned pb prompt directories and leaves
+// fresh directories alone.
+const staleDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-pb-primitive-stale-test-"));
+const freshDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-pb-primitive-fresh-test-"));
+await fs.writeFile(path.join(staleDir, "prompt-test.md"), "stale", { mode: 0o600 });
+const oldTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+await fs.utimes(staleDir, oldTime, oldTime);
+assert.ok(subagent.cleanupStalePromptDirs() >= 1);
+await assert.rejects(fs.access(staleDir));
+await fs.access(freshDir);
+await fs.rm(freshDir, { recursive: true, force: true });
 
 assert.deepEqual(indexModule.parseModelCommandArguments("moonshotai/kimi-k3 --provider openrouter --id exact/kimi"), {
 	model: "moonshotai/kimi-k3", provider: "openrouter", id: "exact/kimi",

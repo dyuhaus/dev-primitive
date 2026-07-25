@@ -15,6 +15,7 @@ export function buildChildArgs(view: RoleView, opts: ChildArgOptions = {}): stri
 		"json",
 		"-p",
 		"--no-session",
+		"--no-extensions",
 		"--provider",
 		view.provider,
 		"--model",

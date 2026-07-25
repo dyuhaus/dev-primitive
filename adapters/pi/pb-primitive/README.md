@@ -13,7 +13,9 @@ configuration is present. The portable, harness-neutral registry remains
 - `/route <task>` — show the deterministic applicability result and require
   confirmation before the selected profile runs. When routing is enabled, plain
   interactive text receives the same confirmation gate; ambiguous tasks continue
-  normally so the user can answer the router's clarification questions.
+  normally so the user can answer the router's clarification questions. Accepted
+  handoffs immediately show a cancellable progress panel until the specialist
+  finishes, fails, or is canceled.
 - `/pb-show` — show the selected config and resolved provider/model table.
 - `/pb <task>` — one read-only planner pass followed by a builder pass. The
   builder receives the original task and planner output verbatim.
@@ -79,7 +81,8 @@ class/alias for the configured provider.
 
 ## Security model
 
-- Each role runs in a separate `pi --mode json -p --no-session` process.
+- Each role runs in a separate `pi --mode json -p --no-session --no-extensions`
+  process. Child roles cannot recursively load the global routing extension.
 - Provider and model are always passed explicitly; child processes cannot
   silently inherit the parent's model.
 - A read-only role is structurally restricted to `read,grep,find,ls`. It has no
@@ -88,8 +91,10 @@ class/alias for the configured provider.
   the parent user. Review the plan before approving the interactive build.
 - Children inherit pi authentication/environment. This extension never reads,
   logs, stores, or forwards secret values itself.
-- Temporary role prompts are mode `0600`, removed in `finally`, bounded by a
-  wall-clock timeout, and killed on abort or session shutdown.
+- Temporary role prompts are mode `0600`, removed recursively in `finally`,
+  bounded by a wall-clock timeout, and killed on abort or session shutdown.
+  Startup also removes owned prompt directories older than one hour that were
+  left behind by a hard-killed process.
 - Model-visible child output is capped at 50 KiB. Full parsed child messages
   remain in tool-result details for the current session.
 - `/pbg` stops after acceptance, a verifier block, a failed child, repeated

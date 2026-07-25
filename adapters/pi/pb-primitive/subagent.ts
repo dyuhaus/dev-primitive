@@ -29,6 +29,8 @@ export const OUTPUT_CAP = 50 * 1024;
 /** Default per-child wall-clock timeout (ms). Generous; roles do real work. */
 export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const KILL_GRACE_MS = 5000;
+const TEMP_DIR_PREFIX = "pi-pb-primitive-";
+const STALE_TEMP_MAX_AGE_MS = 60 * 60 * 1000;
 
 export interface UsageStats {
 	input: number;
@@ -88,6 +90,33 @@ export function liveChildCount(): number {
 	return liveChildren.size;
 }
 
+/** Remove only old, owned prompt directories left behind by hard-killed Pi processes. */
+export function cleanupStalePromptDirs(now = Date.now()): number {
+	const root = os.tmpdir();
+	let removed = 0;
+	let names: string[];
+	try {
+		names = fs.readdirSync(root);
+	} catch {
+		return 0;
+	}
+	for (const name of names) {
+		if (!name.startsWith(TEMP_DIR_PREFIX)) continue;
+		const candidate = path.join(root, name);
+		try {
+			const stat = fs.lstatSync(candidate);
+			if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
+			if (typeof process.getuid === "function" && stat.uid !== process.getuid()) continue;
+			if (now - stat.mtimeMs < STALE_TEMP_MAX_AGE_MS) continue;
+			fs.rmSync(candidate, { recursive: true, force: true });
+			removed++;
+		} catch {
+			// Best-effort startup hygiene; never disable the extension for cleanup.
+		}
+	}
+	return removed;
+}
+
 /* ------------------------------------------------------- helpers */
 
 export function getFinalOutput(messages: Message[]): string {
@@ -129,7 +158,7 @@ export function capOutput(output: string): string {
 }
 
 async function writePromptToTempFile(label: string, prompt: string): Promise<{ dir: string; filePath: string }> {
-	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-pb-primitive-"));
+	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), TEMP_DIR_PREFIX));
 	const safeName = label.replace(/[^\w.-]+/g, "_");
 	const filePath = path.join(tmpDir, `prompt-${safeName}.md`);
 	await fs.promises.writeFile(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
@@ -333,7 +362,7 @@ export async function runRole(params: RunRoleParams): Promise<RunResult> {
 		}
 		if (tmpDir) {
 			try {
-				fs.rmdirSync(tmpDir);
+				fs.rmSync(tmpDir, { recursive: true, force: true });
 			} catch {
 				/* ignore */
 			}
