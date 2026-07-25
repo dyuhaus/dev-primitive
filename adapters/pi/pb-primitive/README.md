@@ -25,10 +25,11 @@ configuration is present. The portable, harness-neutral registry remains
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
 - `/planner`, `/builder`, `/runner`, `/tech-writer`, `/prose-writer`,
-  `/team-leader`, `/l1-programmer`, `/librarian`, and `/fe-designer` — explicitly run the
-  corresponding configured agent. Team Leader remains direct-call-only: it only
-  runs when `/team-leader` is explicitly entered. Its tool surface rejects calls
-  so the parent model cannot invoke it automatically.
+  `/team-leader`, `/l1-programmer`, `/librarian`, `/fe-designer`, and `/audit` —
+  explicitly run the corresponding configured agent. Team Leader and Audit are
+  direct-call-only: they run only through their explicit slash commands, and
+  their tool surfaces reject model-initiated calls. Audit uses GPT-5.6 Sol and
+  performs harness/runtime audits directly without delegated agents.
 - `/<agent>-model` for every agent above — show or change that agent's **Pi-only**
   model in the Pi overlay.
 
@@ -56,7 +57,16 @@ overrides the changed Pi overlay in the current session.
 
 The extension's prompt metadata tells the parent orchestrator to delegate
 substantive reasoning to `planner_agent`, then substantive implementation to
-`builder_agent`. Trivial lookups and one-line edits can remain inline.
+`builder_agent`. Trivial lookups and one-line edits can remain inline. Planner is
+not run for every prompt: confirmed domain specialists run directly, ambiguous
+or routine work remains with the parent/Runner, and explicitly outlined small
+work may route to L1 Programmer. Generic substantive implementation is normalized
+to the complete Planner → Builder path when `routing.planBeforeBuild` is enabled.
+Planner does not invoke specialists from its isolated read-only child; it names
+the recommended next role for the parent orchestrator. Builder may delegate only
+to L1 Programmer or FE-Designer, and child Pi currently loads with
+`--no-extensions`, so its safe fallback is direct implementation or a handoff
+recommendation to the parent.
 
 ## Config precedence
 

@@ -475,21 +475,24 @@ export default function pbPrimitive(pi: ExtensionAPI): void {
 	const loadedForAgents = loadResolved(process.cwd());
 	for (const key of Object.keys(loadedForAgents.cfg?.agents ?? {})) {
 		const name = `${key.replace(/-/g, "_")}_agent`;
+		const agentConfig = loadedForAgents.cfg?.agents?.[key];
+		const directCallOnly = agentConfig?.invocation === "direct-call-only";
+		const displayName = agentConfig?.displayName ?? key;
 		pi.registerTool({
 			name,
-			label: loadedForAgents.cfg?.agents?.[key]?.displayName ?? key,
-			description: key === "team-leader"
-				? "Team Leader is direct-call-only; use /team-leader only after an explicit user request."
+			label: displayName,
+			description: directCallOnly
+				? `${displayName} is direct-call-only; use /${key} only after an explicit user request.`
 				: `Run the configured ${key} specialist explicitly.`,
-			promptSnippet: key === "team-leader"
-				? "Do not invoke this tool; Team Leader may only be run by an explicit /team-leader user command."
+			promptSnippet: directCallOnly
+				? `Do not invoke this tool; ${displayName} may only be run by the explicit /${key} user command.`
 				: `Delegate a task explicitly to the configured ${key} specialist`,
-			promptGuidelines: key === "team-leader"
-				? ["Never invoke team_leader_agent. Team Leader is direct-call-only; only the user-entered /team-leader command may start it."]
+			promptGuidelines: directCallOnly
+				? [`Never invoke ${name}. ${displayName} is direct-call-only; only the user-entered /${key} command may start it.`]
 				: [`Use ${name} only for work within the ${key} specialist profile. Do not automatically invoke direct-call-only agents.`, "router.py recognition requires confirmation; use /route for an explainable handoff."],
 			parameters: TaskParameters,
 			async execute(_id, params, signal, onUpdate, ctx) {
-				if (key === "team-leader") throw new Error("Team Leader is direct-call-only. It may be run only with the explicit /team-leader command after a user request.");
+				if (directCallOnly) throw new Error(`${displayName} is direct-call-only. It may be run only with the explicit /${key} command after a user request.`);
 				const resolved = resolveRole(ctx, key);
 				if (resolved.error || !resolved.view) throw new Error(resolved.error ?? `unable to resolve ${key}`);
 				const result = await runRole({ cwd: ctx.cwd, view: resolved.view, systemPrompt: specialistSystemPrompt(resolved.view), prompt: `Task: ${params.task}`, signal, onUpdate, label: name });

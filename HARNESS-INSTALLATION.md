@@ -21,7 +21,7 @@ Installed surfaces:
 |---|---|---|
 | Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus specialist tools such as `runner_agent` and `team_leader_agent` |
 | Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | PB subagents/commands and specialist subagents |
-| Hermes | `~/.hermes/skills/agent-*/SKILL.md` | `/agent-runner`, `/agent-tech-writer`, `/agent-prose-writer`, `/agent-team-leader`, `/agent-l1-programmer`, `/agent-librarian`, `/agent-fe-designer`, and the framework reference skill |
+| Hermes | `~/.hermes/skills/agent-*/SKILL.md` | `/agent-runner`, `/agent-tech-writer`, `/agent-prose-writer`, `/agent-team-leader`, `/agent-l1-programmer`, `/agent-librarian`, `/agent-fe-designer`, `/agent-audit`, and the framework reference skill |
 
 Refresh all supported harnesses:
 
@@ -70,9 +70,14 @@ alternative is:
 python3 /home/dyadmin/dev-primitive/router.py --explain 'task'
 ```
 
-Runner is the low-confidence fallback. Team Leader has `direct-call-only`
-semantics in every adapter and is hard-excluded from routing even for
-multi-workstream language; invoke it explicitly only.
+Runner is the low-confidence fallback. With `planBeforeBuild` enabled, generic
+substantive implementation is confirmed as a Planner handoff and Pi then runs
+Planner → Builder; direct specialist matches and explicitly outlined L1 work do
+not pay that planning round-trip. Planner recommends specialists but does not
+invoke them. Team Leader and Audit have `direct-call-only` semantics in every
+adapter and are hard-excluded from routing. Invoke `/audit` explicitly for
+GPT-5.6 Sol harness/runtime audits that must work directly without Planner,
+Builder, or other delegated agents.
 
 Run `python3 /home/dyadmin/dev-primitive/apply.py knowledge` to refresh the
 generated specialty profiles. It preserves `agent-knowledge/*/LESSONS.md`.

@@ -84,7 +84,7 @@ responses, and report assumptions, validation, escalation, and remaining risk.
 def framework_skill():
     return '''---
 name: agent-framework
-description: Use the machine-level specialist-agent framework: Runner, writers, Librarian, Team Leader, L1 Programmer, Planner, and Builder.
+description: Use the machine-level specialist-agent framework: Runner, writers, Librarian, FE-Designer, Audit, Team Leader, L1 Programmer, Planner, and Builder.
 category: agent-framework
 ---
 
@@ -93,7 +93,9 @@ category: agent-framework
 The harness-level specialist profiles are installed under `agent-*`. Use
 **Runner** as the everyday front door for routine work and maintenance. Use
 Planner → Builder for substantive software work. Builder is the senior engineer
-and may delegate a clearly outlined subtask to L1 Programmer.
+and may delegate a clearly outlined subtask to L1 Programmer or a separable
+frontend implementation to FE-Designer. Planner recommends the next role but
+does not invoke specialists itself; the parent orchestrator owns handoffs.
 
 Available skills:
 - `/agent-runner`
@@ -103,12 +105,14 @@ Available skills:
 - `/agent-l1-programmer`
 - `/agent-librarian`
 - `/agent-fe-designer`
+- `/agent-audit` — direct-call-only harness/tooling audit and repair
 
 The deterministic router recognizes applicable agents: use the portable command
 `python3 /home/dyadmin/dev-primitive/router.py --explain 'task'`, or `/route`
 in supporting Claude/Pi adapters. Show the reasons and obtain confirmation before
-invoking a handoff. Team Leader requires an explicit user call because it
-coordinates multiple agents and is never an automatic routing destination.
+invoking a handoff. Team Leader and Audit require explicit user calls and are
+never automatic routing destinations. Audit directly inspects and repairs
+harness/runtime failures without invoking delegated agents.
 
 The registry source of truth is `/home/dyadmin/dev-primitive/roles.config.json`.
 Generated harness adapters must not be hand-edited. Model metadata in this skill
@@ -175,8 +179,9 @@ def main():
         primitive.install_claude(cfg, home, args.dry_run)
     if args.target in ("hermes", "all"):
         if args.dry_run:
+            agent_keys = list(cfg.get("agents", {}))
             print(f"--- would write {home / '.hermes/skills/agent-*' } ---")
-            print("agent-framework and seven agent-* Hermes skills")
+            print(f"agent-framework and {len(agent_keys)} agent-* Hermes skills: {', '.join(agent_keys)}")
         else:
             install_hermes(cfg, home / ".hermes")
 

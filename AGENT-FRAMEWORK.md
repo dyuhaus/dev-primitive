@@ -12,7 +12,8 @@ models; other harnesses never consume that file.
   and escalation. It identifies whether a task belongs with another specialist.
 - **Planner** and **Builder** are the PB development core. Planner is the
   read-only reasoning specialist. Builder is the senior engineer for complex
-  systems and may delegate a clearly outlined, well-scoped subtask to L1.
+  systems and may delegate a clearly outlined, well-scoped subtask to L1 or a
+  separable frontend implementation to FE-Designer.
 - **L1 Programmer** is the junior/intern implementation specialist for basic
   scripts, tests, small fixes, and explicitly outlined work. It must escalate
   architecture or unclear scope to Builder/Planner.
@@ -26,6 +27,11 @@ models; other harnesses never consume that file.
   components, layouts, interactions, and design-system refinements. Builder
   owns complex system integration; FE-Designer escalates backend, architecture,
   product, and brand decisions rather than guessing them.
+- **Audit** reproduces and repairs failures in AI harnesses, routing,
+  extensions, runtime processes, and developer-tool integrations. It works
+  directly without delegated agents, updates both durable source and installed
+  surfaces, and verifies reinstall/PR preservation. It uses GPT-5.6 Sol through
+  OpenRouter and is **direct-call-only**.
 - **Team Leader** coordinates genuinely large tasks that require multiple
   workstreams. It is **direct-call-only** and must never be automatically
   selected or self-invoked.
@@ -53,7 +59,7 @@ Each specialist profile has:
 |---|---|
 | `displayName` | Human-facing name |
 | `purpose` | Mission statement |
-| `model` | Independent `{class, id, provider}` selection; non-empty class or id is required |
+| `model` | Independent `{class, id, provider}` selection; `class` is always required and `id` optionally pins an exact model |
 | `readOnly` / `tools` | Operational permission intent and harness tool list |
 | `invocation` | `default` or `direct-call-only` |
 | `autoSelectEligible` | Future selector eligibility; must be false for direct-call-only profiles |
@@ -62,6 +68,7 @@ Each specialist profile has:
 | `escalateTo` | Agent keys that can receive escalation/recommendations |
 | `canDelegate` / `delegateTo` | Whether and where this profile may delegate |
 | `outputContract` | Required report/result behaviors |
+| `infoSources` | Required evidence sources and native inspection/validation guidance |
 
 Pi uses `adapters/pi/roles.config.pi.json` only after project-local configs
 have been considered. It currently sets Planner to Kimi K3 and Builder to
@@ -102,7 +109,13 @@ Claude and Pi expose the same deliberate flow through `/route <task>`: show the
 applicability result, ask for confirmation, then invoke the selected profile only
 if approved. With `enabled: true`, Pi also offers this confirmation gate for
 eligible ordinary interactive tasks. In noninteractive contexts Pi reports the
-result but does not invoke.
+result but does not invoke. When `planBeforeBuild` is true, a generic substantive
+implementation score is converted to Planner so the confirmed Pi handoff runs
+the complete Planner → Builder workflow; an explicit specialist match or a small,
+clearly outlined L1 task bypasses PB. Planner itself does not spawn specialists:
+it names the recommended next role, and the parent orchestrator performs the
+approved handoff. Builder is the only PB child permitted to delegate, narrowly to
+L1 Programmer or FE-Designer when the harness exposes those delegation tools.
 Low confidence and material ambiguity fall back to Runner. The router hard
 excludes `direct-call-only` profiles and `team-leader` regardless of malformed
 metadata. Multi-workstream language is reported as a cue to explicitly call Team
@@ -124,6 +137,9 @@ Examples:
   → Planner then Builder; Builder may delegate isolated scripts to L1.
 - “Implement the supplied component spec as a responsive, keyboard-accessible
   interface using this project’s design system” → FE-Designer.
+- “Audit this stalled Pi handoff, fix feedback/cancellation, reinstall the
+  extension, and preserve the repair in its PR without using other agents” →
+  the user explicitly calls Audit.
 - “Coordinate the website, docs, launch email, and Vault index across four
   workstreams” → the user explicitly calls Team Leader.
 

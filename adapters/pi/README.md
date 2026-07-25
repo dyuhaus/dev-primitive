@@ -18,8 +18,9 @@ The live adapter provides:
 
 - `planner_agent` and `builder_agent` tools;
 - `runner_agent`, `tech_writer_agent`, `prose_writer_agent`,
-  `team_leader_agent`, `l1_programmer_agent`, `librarian_agent`, and
-  `fe_designer_agent` tools;
+  `team_leader_agent`, `l1_programmer_agent`, `librarian_agent`,
+  `fe_designer_agent`, and `audit_agent` tools; `team_leader_agent` and
+  `audit_agent` reject model-initiated calls because both are direct-call-only;
 - `/pb` for one plan-to-build pass;
 - `/pbg` for a bounded plan/build/verify loop;
 - `/agents` to list every agent command, matching model command, and active
@@ -28,8 +29,9 @@ The live adapter provides:
   alternatives, then request confirmation before invoking the recommendation.
 - `/pb-show` for config and model resolution diagnostics.
 - Explicit agent commands: `/planner`, `/builder`, `/runner`, `/tech-writer`,
-  `/prose-writer`, `/team-leader`, `/l1-programmer`, `/librarian`, and
-  `/fe-designer`.
+  `/prose-writer`, `/team-leader`, `/l1-programmer`, `/librarian`,
+  `/fe-designer`, and `/audit`. Audit runs directly on GPT-5.6 Sol without
+  delegated agents and is intended for harness/runtime bug audits.
 - A `/<agent>-model` command for every agent, which shows or changes only the
   Pi overlay model. For example: `/planner-model moonshotai/kimi-k3 --provider
   openrouter --id moonshotai/kimi-k3`. Team Leader runs only via its explicit
@@ -74,7 +76,11 @@ PB and specialist resolution when a project explicitly needs that behavior. `/ro
 passes that resolved configuration to `router.py`, so its applicability result uses
 the same profile registry. When `routing.automaticSelection.enabled` is true, Pi
 also recognizes ordinary interactive tasks and offers a confirmation-required
-handoff. It never silently invokes an agent or selects direct-call-only Team Leader.
+handoff. With `routing.planBeforeBuild` enabled, generic substantive
+implementation enters the full Planner → Builder flow; confirmed domain
+specialists and explicitly outlined L1 work remain direct. Planner recommends
+rather than invokes specialists. Pi never silently invokes an agent or selects
+direct-call-only Team Leader or Audit.
 
 Every profile's generated specialty and information-gathering documentation is
 in `/home/dyadmin/dev-primitive/agent-knowledge/<key>/PROFILE.md`; durable

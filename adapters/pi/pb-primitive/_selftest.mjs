@@ -110,6 +110,7 @@ const pi = {
 const factory = indexModule.default ?? indexModule;
 await factory(pi);
 assert.deepEqual([...tools.keys()].sort(), [
+	"audit_agent",
 	"builder_agent",
 	"fe_designer_agent",
 	"l1_programmer_agent",
@@ -129,6 +130,10 @@ await assert.rejects(
 	() => tools.get("team_leader_agent").execute("test", { task: "coordinate" }, new AbortController().signal, () => {}, { cwd: root }),
 	/direct-call-only/,
 );
+await assert.rejects(
+	() => tools.get("audit_agent").execute("test", { task: "audit Pi" }, new AbortController().signal, () => {}, { cwd: root }),
+	/direct-call-only/,
+);
 assert.deepEqual(indexModule.parseRouterDecision(JSON.stringify({
 	status: "recommendation", selected: "runner", confidence: 0.6, reasons: ["test"],
 	candidates: [{ agent: "runner", score: 1 }], needs_clarification: true, questions: ["question"],
@@ -138,6 +143,13 @@ assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive"
 assert.equal(indexModule.shouldAutoRouteInput("/pb Update the README", "interactive"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "rpc"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive", true), false);
+const realRouter = "/home/dyadmin/dev-primitive/router.py";
+const sourceConfig = "/home/dyadmin/dev-primitive/roles.config.json";
+const genericImplementation = await indexModule.getRouteDecision("Implement authentication caching and tests", root, sourceConfig, undefined, { routerPath: realRouter, timeoutMs: 5000 });
+assert.equal(genericImplementation.selected, "planner", "planBeforeBuild must keep substantive generic implementation on the Planner → Builder path");
+assert.match(genericImplementation.reasons.join(" "), /Planner must produce the plan before Builder/);
+const outlinedImplementation = await indexModule.getRouteDecision("Following this exact outline, add a small parser script and unit test", root, sourceConfig, undefined, { routerPath: realRouter, timeoutMs: 5000 });
+assert.equal(outlinedImplementation.selected, "l1-programmer", "small explicitly outlined work may bypass PB");
 await assert.rejects(
 	() => indexModule.getRouteDecision("test", root, machinePath, undefined, { routerPath: path.join(root, "missing-router.py"), timeoutMs: 100 }),
 	/router.py exited|ENOENT/,
@@ -156,7 +168,7 @@ assert.match(acceptedRoute, /## Accepted task/);
 assert.match(acceptedRoute, /Build the original frontend prompt/);
 assert.match(acceptedRoute, /Delegating to \*\*FE-Designer\*\*/);
 assert.equal(overlay.routing?.automaticSelection?.enabled ?? false, false);
-for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer"]) {
+for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer", "audit"]) {
 	assert.ok(commands.has(key), `missing /${key} command`);
 	assert.ok(commands.has(`${key}-model`), `missing /${key}-model command`);
 }

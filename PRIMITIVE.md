@@ -15,7 +15,12 @@ routing design, and agent-creation process.
 
 **Loop:** reason with Planner → hand the plan to Builder → build → verify.
 Trivial lookups and one-line edits may remain inline. The existing `/pb` and
-`/pbg` commands remain the PB interface.
+`/pbg` commands remain the PB interface. Planner is not the universal default:
+domain-specific work may route directly to a confirmed specialist, ambiguous or
+routine work uses Runner, and a small explicitly outlined implementation may use
+L1. Planner does not call specialists itself; it recommends the next role and
+the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
+FE-Designer when its harness exposes those tools.
 
 ## Single source of truth
 
@@ -23,7 +28,7 @@ Everything is driven by [`roles.config.json`](./roles.config.json):
 
 - `roles.planner` and `roles.builder` preserve the PB compatibility surface.
 - `agents` contains specialist profiles: Runner, Tech Writer, Prose Writer,
-  FE-Designer, Team Leader, L1 Programmer, and Librarian.
+  FE-Designer, Audit, Team Leader, L1 Programmer, and Librarian.
 - `providers` names wire protocols and environment-variable names. Secrets do
   not belong in this file.
 
@@ -41,7 +46,9 @@ The config is checked by [`roles.schema.json`](./roles.schema.json) and
 `apply.py validate`. `router.py` supplies deterministic, explainable applicability recognition.
 When `routing.automaticSelection.enabled` is true, a supporting harness may
 offer a handoff but must obtain confirmation before delegation; no agent is
-silently dispatched. Team Leader is always direct-call-only.
+silently dispatched. Team Leader and Audit are always direct-call-only. Audit
+uses GPT-5.6 Sol through OpenRouter and directly investigates and repairs
+harness/runtime failures without invoking delegated agents.
 
 ## Usage
 
