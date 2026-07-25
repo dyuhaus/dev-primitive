@@ -3,7 +3,7 @@
 A small, portable, provider-neutral primitive for configurable task agents.
 The original two-model loop remains the **PB core**: one model *plans and
 reasons*, another *scripts and builds*. It now also registers purpose-specific
-specialists such as Runner, writers, Librarian, FE-Designer, Team Leader, and L1 Programmer.
+specialists such as Runner, writers, Librarian, FE-Designer, Audit, Team Leader, and L1 Programmer.
 See [`AGENT-FRAMEWORK.md`](./AGENT-FRAMEWORK.md) for the architecture and
 future agent-creation process.
 
@@ -38,8 +38,10 @@ profiles live under the optional `agents` registry and each has its own model,
 capabilities, boundaries, invocation policy, and escalation/delegation rules.
 `router.py` deterministically recognizes applicable agents and supplies an
 explainable handoff. Pi can offer that handoff automatically, but it always
-requires the user's confirmation before delegation. Team Leader is direct-call-only
-and cannot be selected by the router.
+requires the user's confirmation before delegation. Team Leader and Audit are
+direct-call-only and cannot be selected by the router. Audit is explicitly
+invoked for AI-harness/runtime bug audits and runs on GPT-5.6 Sol without
+calling delegated agents.
 
 Everything is driven by [`roles.config.json`](./roles.config.json) — the single
 source of truth. Each role has a **customizable model class**:

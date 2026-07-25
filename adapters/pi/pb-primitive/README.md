@@ -25,10 +25,11 @@ configuration is present. The portable, harness-neutral registry remains
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
 - `/planner`, `/builder`, `/runner`, `/tech-writer`, `/prose-writer`,
-  `/team-leader`, `/l1-programmer`, `/librarian`, and `/fe-designer` — explicitly run the
-  corresponding configured agent. Team Leader remains direct-call-only: it only
-  runs when `/team-leader` is explicitly entered. Its tool surface rejects calls
-  so the parent model cannot invoke it automatically.
+  `/team-leader`, `/l1-programmer`, `/librarian`, `/fe-designer`, and `/audit` —
+  explicitly run the corresponding configured agent. Team Leader and Audit are
+  direct-call-only: they run only through their explicit slash commands, and
+  their tool surfaces reject model-initiated calls. Audit uses GPT-5.6 Sol and
+  performs harness/runtime audits directly without delegated agents.
 - `/<agent>-model` for every agent above — show or change that agent's **Pi-only**
   model in the Pi overlay.
 

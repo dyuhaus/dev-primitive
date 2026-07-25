@@ -23,6 +23,7 @@ class RouterTests(unittest.TestCase):
         self.assertIn("confidence", decision)
         self.assertIn("candidates", decision)
         self.assertNotIn("team-leader", [item["agent"] for item in decision["candidates"]])
+        self.assertNotIn("audit", [item["agent"] for item in decision["candidates"]])
 
     def test_canonical_specialist_routes(self):
         self.assert_route("Update the Vault index and fix broken wikilinks", "librarian")
@@ -38,6 +39,11 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(decision["selected"], "runner")
         self.assertTrue(decision["needs_clarification"])
         self.assertTrue(decision["questions"])
+
+    def test_audit_is_explicit_only(self):
+        decision = router.route("Audit and repair a stalled Pi agent routing process", self.config)
+        self.assertNotEqual(decision["selected"], "audit")
+        self.assertNotIn("audit", [item["agent"] for item in decision["candidates"]])
 
     def test_team_leader_is_impossible_to_auto_select(self):
         bad = copy.deepcopy(self.config)
