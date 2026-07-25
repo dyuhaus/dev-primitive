@@ -18,7 +18,7 @@ import {
 	type RolesConfig,
 } from "./config.ts";
 import { renderReportMessage, renderRoleResult } from "./render.ts";
-import { builderSystemPrompt, plannerSystemPrompt, specialistSystemPrompt, verifierSystemPrompt } from "./roles.ts";
+import { builderSystemPrompt, plannerSystemPrompt, specialistSystemPrompt, verifierSystemPrompt, workflowAuditSystemPrompt } from "./roles.ts";
 import {
 	capOutput,
 	cleanupStalePromptDirs,
@@ -37,6 +37,12 @@ const ROUTER_KILL_GRACE_MS = 1_000;
 const ROUTER_TASK_ARG_MAX = 32 * 1024;
 const TaskParameters = Type.Object({
 	task: Type.String({ description: "The complete task to delegate to this role." }),
+});
+const WorkflowAuditParameters = Type.Object({
+	task: Type.String({ description: "The original user task." }),
+	plan: Type.String({ description: "The completed planner output." }),
+	executor: Type.String({ description: "The executor role name, such as Builder or FE-Designer." }),
+	executorResult: Type.String({ description: "The executor's result and validation evidence." }),
 });
 
 export interface ModelCommandArguments {
@@ -208,6 +214,50 @@ function outcomeText(result: RunResult): string {
 	return capOutput(getResultOutput(result));
 }
 
+interface WorkflowAuditReport {
+	text: string;
+	result?: RunResult;
+}
+
+/** Run the small read-only Sol review that follows a Planner → executor pass. */
+export async function runPostWorkflowAudit(
+	task: string,
+	plan: string,
+	executorName: string,
+	executorOutput: string,
+	ctx: ExtensionContext,
+	label = "light workflow audit",
+): Promise<WorkflowAuditReport> {
+	const loaded = loadResolved(ctx.cwd);
+	const cfg = loaded.cfg;
+	const spec = cfg?.routing?.postWorkflowAudit;
+	if (!spec?.enabled) return { text: "" };
+	if (!spec.model) return { text: "## Light audit\n\nAudit did not start: routing.postWorkflowAudit.model is not configured." };
+	const syntheticConfig: RolesConfig = {
+		version: cfg?.version ?? 1,
+		roles: { planner: cfg?.roles?.planner ?? {}, builder: cfg?.roles?.builder ?? {} },
+		providers: cfg?.providers ?? {},
+		agents: { "workflow-audit": { purpose: "focused read-only post-workflow review", readOnly: true, model: spec.model } },
+	};
+	const errors = validateConfig(syntheticConfig).filter((error) => error.startsWith("providers.") || error.includes("workflow-audit.model"));
+	if (errors.length) return { text: `## Light audit\n\nAudit did not start: ${errors.join("; ")}` };
+	const view = roleView(syntheticConfig, "workflow-audit");
+	const prompt = `Original task:\n${task}\n\nPlanner output:\n---\n${plan}\n---\n\nExecutor: ${executorName}\n\nExecutor result and evidence:\n---\n${executorOutput}\n---`;
+	const result = await withRouteProgress(ctx, "Light workflow audit", `${executorName} result review`, (signal) =>
+		runRole({
+			cwd: ctx.cwd,
+			view,
+			systemPrompt: workflowAuditSystemPrompt(),
+			prompt,
+			thinking: spec.thinking ?? "medium",
+			signal,
+			label,
+		}),
+	);
+	if (isFailed(result)) return { text: `## Light audit\n\nAudit failed without changing the primary result:\n\n${outcomeText(result)}`, result };
+	return { text: outcomeText(result), result };
+}
+
 const ROUTE_CLASSIFY_STATUS = "pb-primitive-classify";
 const ROUTE_PROGRESS_STATUS = "pb-primitive-route";
 const ROUTE_PROGRESS_WIDGET = "pb-primitive-route-progress";
@@ -329,8 +379,11 @@ async function plannerThenBuilder(task: string, ctx: ExtensionContext): Promise<
 		return { text: `Builder did not start: ${built.error}\n\n## Plan\n\n${capOutput(plan)}`, results };
 	}
 	results.push(built.result);
+	const builderOutput = getResultOutput(built.result);
+	const audit = await runPostWorkflowAudit(task, plan, "Builder", builderOutput, ctx);
+	if (audit.result) results.push(audit.result);
 	return {
-		text: `## Plan\n\n${capOutput(plan)}\n\n## Builder result\n\n${outcomeText(built.result)}`,
+		text: `## Plan\n\n${capOutput(plan)}\n\n## Builder result\n\n${outcomeText(built.result)}${audit.text ? `\n\n${audit.text}` : ""}`,
 		results,
 	};
 }
@@ -388,6 +441,10 @@ async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: str
 		sections.push(`## Round ${round}\n\n### Plan\n\n${capOutput(plan)}\n\n### Builder\n\n${outcomeText(built.result)}`);
 		if (isFailed(built.result)) break;
 
+		const audit = await runPostWorkflowAudit(task, plan, "Builder", buildOutput, ctx, `light workflow audit round ${round}`);
+		if (audit.result) results.push(audit.result);
+		if (audit.text) sections.push(`\n### Post-workflow audit\n\n${audit.text}`);
+
 		const planner = resolveRole(ctx, "planner");
 		if (planner.error || !planner.view) {
 			sections.push(`\n### Verification\n\nCould not resolve verifier: ${planner.error}`);
@@ -419,6 +476,31 @@ async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: str
 }
 
 export default function pbPrimitive(pi: ExtensionAPI): void {
+	pi.registerTool({
+		name: "workflow_audit",
+		label: "Light Workflow Audit",
+		description: "Run the configured lightweight read-only audit after a completed Planner → Builder or Planner → specialist workflow.",
+		promptSnippet: "Review a completed Planner → executor workflow with the configured lightweight Sol auditor",
+		promptGuidelines: [
+			"After planner_agent is followed by builder_agent or another implementation specialist, call workflow_audit exactly once with the original task, planner output, and executor result before the final report.",
+			"Do not use workflow_audit for standalone specialist calls, routine inline work, or the direct-call-only full Audit agent.",
+		],
+		parameters: WorkflowAuditParameters,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const audit = await runPostWorkflowAudit(params.task, params.plan, params.executor, params.executorResult, ctx);
+			return {
+				content: [{ type: "text", text: audit.text || "Light workflow audit is disabled." }],
+				details: details("light workflow audit", audit.result ? [audit.result] : []),
+			};
+		},
+		renderCall(args, theme) {
+			return renderReportMessage({ content: `**Light workflow audit**\n\nExecutor: ${String(args.executor ?? "unknown")}` }, { expanded: false }, theme);
+		},
+		renderResult(result, options, theme) {
+			return renderRoleResult(result.details as RunResultDetails | undefined, result, options.expanded, theme);
+		},
+	});
+
 	for (const key of ["planner", "builder"] as const) {
 		const name = `${key}_agent`;
 		pi.registerTool({
@@ -434,6 +516,7 @@ export default function pbPrimitive(pi: ExtensionAPI): void {
 				key === "planner"
 					? "Use planner_agent before substantive implementation for architecture, design, root-cause analysis, trade-offs, sequencing, and approach review; trivial lookups and one-line edits may stay inline."
 					: "Use builder_agent for substantive implementation after obtaining and reviewing a plan; include the task and plan in full, then verify the result.",
+				"After a Planner → Builder or Planner → specialist implementation completes, call workflow_audit exactly once before the final report.",
 			],
 			parameters: TaskParameters,
 			async execute(_id, params, signal, onUpdate, ctx) {

@@ -49,7 +49,13 @@ Steps:
    tests / build / linters or exercise the behavior; do not just assert it. Capture
    the concrete result. Delegate the check to the `builder` when commands must run.
 
-5. **Decide.**
+5. **Light audit ({{WORKFLOW_AUDIT_MODEL}}, {{WORKFLOW_AUDIT_THINKING}} thinking).**
+   After each completed Planner → executor round, delegate once to `workflow-audit`
+   with the task, plan, executor result, and verification evidence. It is a small
+   read-only review, not the full direct-call Audit agent, and must not edit or
+   delegate further.
+
+6. **Decide.**
    - **Condition met:** report what was built, the evidence that the condition
      holds, and stop.
    - **Not met:** summarize the specific gap (which check failed and why), then loop

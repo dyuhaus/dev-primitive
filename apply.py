@@ -134,6 +134,16 @@ def validate(cfg: dict) -> list:
         if not isinstance(routing, dict):
             errs.append("routing must be an object")
         else:
+            post_audit = routing.get("postWorkflowAudit")
+            if post_audit is not None:
+                if not isinstance(post_audit, dict):
+                    errs.append("routing.postWorkflowAudit must be an object")
+                else:
+                    if not isinstance(post_audit.get("enabled"), bool):
+                        errs.append("routing.postWorkflowAudit.enabled must be boolean")
+                    validate_model(post_audit.get("model"), "routing.postWorkflowAudit.model")
+                    if post_audit.get("thinking") not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
+                        errs.append("routing.postWorkflowAudit.thinking must be a supported thinking level")
             selection = routing.get("automaticSelection")
             if selection is not None:
                 if not isinstance(selection, dict):
@@ -236,7 +246,18 @@ def render(text: str, mapping: dict) -> str:
 
 def template_mapping(cfg: dict) -> dict:
     p, b = role_view(cfg, "planner"), role_view(cfg, "builder")
-    return {"PLANNER_MODEL": p["model"], "BUILDER_MODEL": b["model"], "PLANNER_PURPOSE": p["purpose"], "BUILDER_PURPOSE": b["purpose"], "PLANNER_PROVIDER": p["provider"], "BUILDER_PROVIDER": b["provider"]}
+    post_audit = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {})
+    audit_model = resolve_model({"model": post_audit.get("model", {})})
+    return {
+        "PLANNER_MODEL": p["model"],
+        "BUILDER_MODEL": b["model"],
+        "PLANNER_PURPOSE": p["purpose"],
+        "BUILDER_PURPOSE": b["purpose"],
+        "PLANNER_PROVIDER": p["provider"],
+        "BUILDER_PROVIDER": b["provider"],
+        "WORKFLOW_AUDIT_MODEL": audit_model,
+        "WORKFLOW_AUDIT_THINKING": post_audit.get("thinking", "medium"),
+    }
 
 
 def write_out(target: Path, content: str, dry: bool) -> None:
@@ -259,6 +280,7 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
     jobs = [
         (tdir / "planner.md.tmpl", home / ".claude" / "agents" / "planner.md"),
         (tdir / "builder.md.tmpl", home / ".claude" / "agents" / "builder.md"),
+        (tdir / "workflow-audit.md.tmpl", home / ".claude" / "agents" / "workflow-audit.md"),
         (tdir / "pb.md.tmpl", home / ".claude" / "commands" / "pb.md"),
         (tdir / "pbg.md.tmpl", home / ".claude" / "commands" / "pbg.md"),
         (tdir / "pbg-builder.md.tmpl", home / ".claude" / "commands" / "pbg-builder.md"),

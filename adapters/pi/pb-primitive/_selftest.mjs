@@ -58,12 +58,20 @@ const overlay = structuredClone(valid);
 overlay.roles.planner.model = { class: "moonshotai/kimi-k3", id: "moonshotai/kimi-k3", provider: "openrouter" };
 overlay.roles.builder.model = { class: "openai/gpt-5.6-terra", id: "openai/gpt-5.6-terra", provider: "openrouter" };
 overlay.providers.openrouter = { type: "openai", apiKeyEnv: "OPENROUTER_API_KEY", baseUrlEnv: "OPENROUTER_BASE_URL" };
+overlay.routing = {
+	postWorkflowAudit: {
+		enabled: true,
+		model: { class: "openai/gpt-5.6-sol", id: "openai/gpt-5.6-sol", provider: "openrouter" },
+		thinking: "medium",
+	},
+};
 await fs.writeFile(machinePath, JSON.stringify(valid));
 await fs.writeFile(overlayPath, JSON.stringify(overlay));
 let resolved = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: overlayPath });
 assert.equal(resolved.sourceKind, "pi-overlay");
 assert.equal(config.roleView(resolved.cfg, "planner").model, "moonshotai/kimi-k3");
 assert.equal(config.roleView(resolved.cfg, "builder").model, "openai/gpt-5.6-terra");
+assert.equal(resolved.cfg.routing.postWorkflowAudit.thinking, "medium");
 await fs.writeFile(path.join(defaultsRoot, "roles.config.json"), JSON.stringify(valid));
 resolved = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: overlayPath });
 assert.equal(resolved.sourceKind, "project");
@@ -95,6 +103,12 @@ assert.ok(!plannerArgs.includes("bash"));
 const builderArgs = roles.buildChildArgs(config.roleView(valid, "builder"));
 assert.ok(builderArgs.includes("claude-opus-pinned"));
 assert.ok(!builderArgs.includes("--tools"));
+const auditView = config.roleView({ ...overlay, agents: { "workflow-audit": { purpose: "audit", readOnly: true, model: overlay.routing.postWorkflowAudit.model } } }, "workflow-audit");
+const auditArgs = roles.buildChildArgs(auditView, { thinking: "medium" });
+assert.equal(auditView.model, "openai/gpt-5.6-sol");
+assert.equal(auditArgs[auditArgs.indexOf("--thinking") + 1], "medium");
+assert.equal(auditArgs[auditArgs.indexOf("--tools") + 1], "read,grep,find,ls");
+assert.match(roles.workflowAuditSystemPrompt(), /smaller and more focused than the direct-call Audit specialist/);
 
 const tools = new Map();
 const commands = new Map();
@@ -120,12 +134,15 @@ assert.deepEqual([...tools.keys()].sort(), [
 	"runner_agent",
 	"team_leader_agent",
 	"tech_writer_agent",
+	"workflow_audit",
 ]);
 assert.ok(commands.has("pb"));
 assert.ok(commands.has("pbg"));
 assert.ok(commands.has("pb-show"));
 assert.ok(commands.has("agents"), "missing /agents command");
 assert.ok(commands.has("route"), "missing /route command");
+assert.ok(tools.has("workflow_audit"), "missing lightweight post-workflow audit tool");
+assert.match(tools.get("workflow_audit").promptGuidelines.join(" "), /exactly once/);
 await assert.rejects(
 	() => tools.get("team_leader_agent").execute("test", { task: "coordinate" }, new AbortController().signal, () => {}, { cwd: root }),
 	/direct-call-only/,
@@ -227,8 +244,6 @@ const fakeResult = await subagent.runRole({
 	prompt: "Task: offline smoke",
 	timeoutMs: 5000,
 });
-process.argv[1] = savedArgv1;
-process.env.PATH = oldPath;
 assert.equal(subagent.isFailed(fakeResult), false);
 assert.equal(subagent.getFinalOutput(fakeResult.messages), "FAKE CHILD OK");
 const fakeArgs = JSON.parse(await fs.readFile(argsFile, "utf8"));
@@ -242,6 +257,24 @@ const tempPromptPath = fakeArgs[fakeArgs.indexOf("--append-system-prompt") + 1];
 await assert.rejects(fs.access(tempPromptPath));
 await assert.rejects(fs.access(taskArg.slice(1)));
 assert.equal(subagent.liveChildCount(), 0);
+
+const auditCwd = path.join(fakeDir, "audit-work");
+await fs.mkdir(auditCwd, { recursive: true });
+await fs.writeFile(path.join(auditCwd, "roles.config.json"), JSON.stringify(overlay));
+const auditReport = await indexModule.runPostWorkflowAudit(
+	"Implement feature",
+	"Plan with acceptance criteria",
+	"Builder",
+	"Changed files and tests pass",
+	{ cwd: auditCwd, signal: undefined },
+);
+assert.match(auditReport.text, /FAKE CHILD OK/);
+const auditRunArgs = JSON.parse(await fs.readFile(argsFile, "utf8"));
+assert.equal(auditRunArgs[auditRunArgs.indexOf("--model") + 1], "openai/gpt-5.6-sol");
+assert.equal(auditRunArgs[auditRunArgs.indexOf("--thinking") + 1], "medium");
+assert.equal(auditRunArgs[auditRunArgs.indexOf("--tools") + 1], "read,grep,find,ls");
+process.argv[1] = savedArgv1;
+process.env.PATH = oldPath;
 
 // Startup hygiene removes only stale, owned pb prompt directories and leaves
 // fresh directories alone.

@@ -41,7 +41,10 @@ profiles live under the optional `agents` registry and each has its own model,
 capabilities, boundaries, invocation policy, and escalation/delegation rules.
 `router.py` deterministically recognizes applicable agents and supplies an
 explainable handoff. Pi can offer that handoff automatically, but it always
-requires the user's confirmation before delegation. Team Leader and Audit are
+requires the user's confirmation before delegation. Completed Planner →
+Builder/specialist workflows receive a small read-only GPT-5.6 Sol audit at
+medium thinking before the final report. This is separate from the full Audit
+agent. Team Leader and Audit are
 direct-call-only and cannot be selected by the router. Audit is explicitly
 invoked for AI-harness/runtime bug audits and runs on GPT-5.6 Sol without
 calling delegated agents.
@@ -66,8 +69,10 @@ source of truth. Each role has a **customizable model class**:
 This shared file is harness-neutral: Claude Code, Codex/generic consumers, and
 other harnesses use its Planner/Builder values (`fable`/`opus` on Anthropic by
 default). Pi alone has a complete runtime overlay at
-`adapters/pi/roles.config.pi.json`, which currently selects Kimi K3 and GPT-5.6
-Terra through OpenRouter only when no project-level config overrides it.
+`adapters/pi/roles.config.pi.json`, which currently selects the configured
+Planner and GPT-5.6 Terra Builder through OpenRouter only when no project-level
+config overrides it. `routing.postWorkflowAudit` independently pins GPT-5.6 Sol
+at medium thinking for the compact post-workflow review.
 
 Change a shared cross-harness model by editing this file and re-running
 `apply.py`. Change a Pi-only model with `apply.py set --config

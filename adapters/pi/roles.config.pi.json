@@ -438,6 +438,15 @@
   "routing": {
     "planBeforeBuild": true,
     "inlineTrivial": true,
+    "postWorkflowAudit": {
+      "enabled": true,
+      "model": {
+        "class": "openai/gpt-5.6-sol",
+        "id": "openai/gpt-5.6-sol",
+        "provider": "openrouter"
+      },
+      "thinking": "medium"
+    },
     "automaticSelection": {
       "enabled": true,
       "status": "confirmation-required",

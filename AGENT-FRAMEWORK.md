@@ -27,6 +27,11 @@ models; other harnesses never consume that file.
   components, layouts, interactions, and design-system refinements. Builder
   owns complex system integration; FE-Designer escalates backend, architecture,
   product, and brand decisions rather than guessing them.
+- **Light workflow audit** is an automatic, read-only post-step after completed
+  Planner → Builder or Planner → specialist work. It uses GPT-5.6 Sol with
+  medium thinking to check plan adherence, evidence, omissions, and follow-up;
+  it is intentionally smaller than the direct-call Audit specialist and never
+  edits or delegates.
 - **Audit** reproduces and repairs failures in AI harnesses, routing,
   extensions, runtime processes, and developer-tool integrations. It works
   directly without delegated agents, updates both durable source and installed
@@ -49,6 +54,8 @@ change, not a prompt edit.
 - `agents`: specialist profiles keyed by stable machine names.
 - `providers`: provider protocol and environment-variable *names*. Secrets never
   belong in this file.
+- `routing.postWorkflowAudit`: configures the lightweight model and thinking
+  level used after completed Planner → executor workflows.
 - `routing.automaticSelection`: configures the deterministic `router.py`.
   `enabled` permits a supporting harness to offer automatic applicability
   recognition; every harness must still obtain confirmation before delegation.
@@ -104,6 +111,12 @@ clarifying questions. It never calls a model or silently dispatches work.
 python3 router.py --explain "Update the Vault index and fix broken wikilinks"
 python3 router.py --json "Refactor the broker service architecture"
 ```
+
+After each completed Planner → Builder workflow, supporting adapters run one
+small post-workflow audit using `routing.postWorkflowAudit` (GPT-5.6 Sol,
+medium thinking by default). The reviewer receives the task, plan, and executor
+evidence; it is read-only, does not delegate, and appends an advisory verdict.
+It does not replace the full explicit `/audit` specialist.
 
 Claude and Pi expose the same deliberate flow through `/route <task>`: show the
 applicability result, ask for confirmation, then invoke the selected profile only

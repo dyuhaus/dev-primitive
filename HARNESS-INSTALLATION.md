@@ -54,11 +54,18 @@ explicit `/<agent>` slash commands for every profile and `/<agent>-model`
 commands to manage the Pi overlay only. `/agents` is the native catalog: it
 lists every available agent command and the effective active model assignment.
 Those model commands never change the
-shared registry, Claude Code, Codex, Hermes, or a project configuration. Hermes
+shared registry, Claude Code, Codex, Hermes, or a project configuration.
+Completed Planner → executor workflows also run the configured lightweight
+GPT-5.6 Sol audit at medium thinking; it is read-only and distinct from `/audit`.
+Hermes
 skills carry profile metadata and instructions, while Hermes's active model
 remains controlled by its native harness configuration.
 
 ## Routing behavior
+
+`routing.postWorkflowAudit` configures the small post-workflow reviewer used by
+Pi and generated Claude PB flows. It receives the task, plan, and executor
+evidence, then appends a concise advisory verdict without editing or delegation.
 
 `router.py` classifies a task deterministically and returns an explainable
 applicability result. Pi automatically offers an eligible handoff when
