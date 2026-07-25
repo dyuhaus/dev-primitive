@@ -91,10 +91,11 @@ class/alias for the configured provider.
   the parent user. Review the plan before approving the interactive build.
 - Children inherit pi authentication/environment. This extension never reads,
   logs, stores, or forwards secret values itself.
-- Temporary role prompts are mode `0600`, removed recursively in `finally`,
-  bounded by a wall-clock timeout, and killed on abort or session shutdown.
-  Startup also removes owned prompt directories older than one hour that were
-  left behind by a hard-killed process.
+- Temporary role and task prompts are mode `0600`, supplied through Pi's
+  file-input support rather than large process arguments, and removed recursively
+  in `finally`. Child work is bounded by a wall-clock timeout and killed on abort
+  or session shutdown. Startup also removes owned prompt directories older than
+  one hour that were left behind by a hard-killed process.
 - Model-visible child output is capped at 50 KiB. Full parsed child messages
   remain in tool-result details for the current session.
 - `/pbg` stops after acceptance, a verifier block, a failed child, repeated
@@ -102,8 +103,8 @@ class/alias for the configured provider.
   autonomous approval mechanism.
 
 Project-local pi resources are executable. The machine currently sets
-`defaultProjectTrust` to `always`; this review recommends changing that to
-`ask`, but this extension does not change settings.
+`defaultProjectTrust` to `always`; consider changing it to `ask` for stronger
+isolation. This extension does not change that setting.
 
 ## Validation
 

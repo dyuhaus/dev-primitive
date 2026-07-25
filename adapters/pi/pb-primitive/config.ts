@@ -303,7 +303,8 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 		if (agent.invocation !== "default" && agent.invocation !== "direct-call-only") errs.push(`${pathName}.invocation must be default or direct-call-only`);
 		if (typeof agent.autoSelectEligible !== "boolean") errs.push(`${pathName}.autoSelectEligible must be boolean`);
 		else if (agent.invocation === "direct-call-only" && agent.autoSelectEligible) errs.push(`${pathName}: direct-call-only agents cannot be auto-select eligible`);
-		for (const field of ["tools", "capabilities", "boundaries", "escalateTo", "outputContract"] as const) {
+		if (agent.canDelegate === undefined) errs.push(`${pathName}.canDelegate is required`);
+		for (const field of ["tools", "capabilities", "boundaries", "escalateTo", "delegateTo", "outputContract", "infoSources"] as const) {
 			if (!Array.isArray(agent[field]) || !agent[field]!.every((x) => typeof x === "string")) errs.push(`${pathName}.${field} must be a list of strings`);
 		}
 	}
@@ -341,7 +342,9 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 			const known = new Set([...Object.keys(roles ?? {}), ...Object.keys(cfg.agents)]);
 			for (const [namespace, entries] of [["roles", roles ?? {}], ["agents", cfg.agents]] as const) {
 				for (const [key, entry] of Object.entries(entries)) for (const field of ["delegateTo", "escalateTo"] as const) {
-					for (const target of ((entry as AgentSpec)[field] ?? [])) if (!known.has(target)) errs.push(`${namespace}.${key}.${field} references unknown agent '${target}'`);
+					const targets = (entry as AgentSpec)[field];
+					if (!Array.isArray(targets)) continue;
+					for (const target of targets) if (typeof target === "string" && !known.has(target)) errs.push(`${namespace}.${key}.${field} references unknown agent '${target}'`);
 				}
 			}
 		}

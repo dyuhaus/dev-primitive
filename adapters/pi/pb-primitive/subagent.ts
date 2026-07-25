@@ -223,18 +223,25 @@ export async function runRole(params: RunRoleParams): Promise<RunResult> {
 		});
 	};
 
-	let tmpDir: string | null = null;
-	let tmpPath: string | null = null;
+	let systemTmpDir: string | null = null;
+	let systemTmpPath: string | null = null;
+	let taskTmpDir: string | null = null;
+	let taskTmpPath: string | null = null;
 
 	try {
 		if (systemPrompt.trim()) {
-			const tmp = await writePromptToTempFile(label, systemPrompt);
-			tmpDir = tmp.dir;
-			tmpPath = tmp.filePath;
+			const tmp = await writePromptToTempFile(`${label}-system`, systemPrompt);
+			systemTmpDir = tmp.dir;
+			systemTmpPath = tmp.filePath;
 		}
+		const taskTmp = await writePromptToTempFile(`${label}-task`, prompt);
+		taskTmpDir = taskTmp.dir;
+		taskTmpPath = taskTmp.filePath;
 
-		const args = buildChildArgs(view, { appendSystemPromptFile: tmpPath ?? undefined });
-		args.push(prompt);
+		const args = buildChildArgs(view, { appendSystemPromptFile: systemTmpPath ?? undefined });
+		// Pi expands @text-file arguments into the initial user message. Keep task
+		// content out of argv so large plans/evidence cannot hit execve E2BIG.
+		args.push(`@${taskTmpPath}`);
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
@@ -353,14 +360,8 @@ export async function runRole(params: RunRoleParams): Promise<RunResult> {
 		}
 		return result;
 	} finally {
-		if (tmpPath) {
-			try {
-				fs.unlinkSync(tmpPath);
-			} catch {
-				/* ignore */
-			}
-		}
-		if (tmpDir) {
+		for (const tmpDir of [systemTmpDir, taskTmpDir]) {
+			if (!tmpDir) continue;
 			try {
 				fs.rmSync(tmpDir, { recursive: true, force: true });
 			} catch {

@@ -32,6 +32,9 @@ import {
 
 const MAX_GOAL_ROUNDS = 3;
 const ROUTER_PATH = "/home/dyadmin/dev-primitive/router.py";
+const ROUTER_TIMEOUT_MS = 10_000;
+const ROUTER_KILL_GRACE_MS = 1_000;
+const ROUTER_TASK_ARG_MAX = 32 * 1024;
 const TaskParameters = Type.Object({
 	task: Type.String({ description: "The complete task to delegate to this role." }),
 });
@@ -63,25 +66,61 @@ export function parseRouterDecision(raw: string): RouteDecision {
 	return value as RouteDecision;
 }
 
-/** Invoke router.py without a shell, so task text can never become shell code. */
-async function getRouteDecision(task: string, cwd: string, configPath: string, signal?: AbortSignal): Promise<RouteDecision> {
+/** Invoke router.py without a shell, with bounded runtime and cancellation. */
+export async function getRouteDecision(
+	task: string,
+	cwd: string,
+	configPath: string,
+	signal?: AbortSignal,
+	options: { routerPath?: string; timeoutMs?: number } = {},
+): Promise<RouteDecision> {
 	return new Promise((resolve, reject) => {
-		const child = spawn("python3", [ROUTER_PATH, "--json", "--cwd", cwd, "--config", configPath, task], {
+		// Classification does not need an unbounded prompt, and this keeps the
+		// router's positional argument safely below Linux's per-argument limit.
+		const classificationText = task.slice(0, ROUTER_TASK_ARG_MAX);
+		const child = spawn("python3", [options.routerPath ?? ROUTER_PATH, "--json", "--cwd", cwd, "--config", configPath, classificationText], {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			shell: false,
 		});
 		let stdout = "";
 		let stderr = "";
+		let settled = false;
+		let terminationReason: "aborted" | "timed out" | null = null;
+		let killTimer: NodeJS.Timeout | undefined;
+		const timeout = setTimeout(() => terminate("timed out"), options.timeoutMs ?? ROUTER_TIMEOUT_MS);
 		child.stdout.on("data", (chunk) => { stdout += String(chunk); });
 		child.stderr.on("data", (chunk) => { stderr += String(chunk); });
-		const abort = () => child.kill("SIGTERM");
-		signal?.addEventListener("abort", abort, { once: true });
-		child.on("error", (error) => reject(error));
-		child.on("close", (code) => {
+
+		function cleanup(): void {
+			clearTimeout(timeout);
+			if (killTimer) clearTimeout(killTimer);
 			signal?.removeEventListener("abort", abort);
-			if (code !== 0) return reject(new Error(`router.py exited ${code}: ${stderr.trim() || "no diagnostic"}`));
-			try { resolve(parseRouterDecision(stdout)); } catch (error) { reject(error); }
+		}
+		function finish(error?: unknown, decision?: RouteDecision): void {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (error) reject(error);
+			else resolve(decision!);
+		}
+		function terminate(reason: "aborted" | "timed out"): void {
+			if (settled || terminationReason) return;
+			terminationReason = reason;
+			try { child.kill("SIGTERM"); } catch { /* close/error will settle */ }
+			killTimer = setTimeout(() => {
+				try { child.kill("SIGKILL"); } catch { /* close/error will settle */ }
+			}, ROUTER_KILL_GRACE_MS);
+		}
+		function abort(): void { terminate("aborted"); }
+
+		if (signal?.aborted) abort();
+		else signal?.addEventListener("abort", abort, { once: true });
+		child.on("error", (error) => finish(error));
+		child.on("close", (code) => {
+			if (terminationReason) return finish(new Error(`router.py ${terminationReason}`));
+			if (code !== 0) return finish(new Error(`router.py exited ${code}: ${stderr.trim() || "no diagnostic"}`));
+			try { finish(undefined, parseRouterDecision(stdout)); } catch (error) { finish(error); }
 		});
 	});
 }

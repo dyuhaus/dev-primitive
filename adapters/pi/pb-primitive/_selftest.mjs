@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PIROOT = "/home/dyadmin/.hermes/node/lib/node_modules/@earendil-works/pi-coding-agent";
+const PIROOT = process.env.PI_CODING_AGENT_ROOT ?? "/home/dyadmin/.hermes/node/lib/node_modules/@earendil-works/pi-coding-agent";
 const { createJiti } = await import(`${PIROOT}/node_modules/jiti/lib/jiti.mjs`);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const jiti = createJiti(import.meta.url, {
@@ -138,6 +138,16 @@ assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive"
 assert.equal(indexModule.shouldAutoRouteInput("/pb Update the README", "interactive"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "rpc"), false);
 assert.equal(indexModule.shouldAutoRouteInput("Update the README", "interactive", true), false);
+await assert.rejects(
+	() => indexModule.getRouteDecision("test", root, machinePath, undefined, { routerPath: path.join(root, "missing-router.py"), timeoutMs: 100 }),
+	/router.py exited|ENOENT/,
+);
+const slowRouter = path.join(root, "slow-router.py");
+await fs.writeFile(slowRouter, "import time\ntime.sleep(5)\n");
+await assert.rejects(
+	() => indexModule.getRouteDecision("test", root, machinePath, undefined, { routerPath: slowRouter, timeoutMs: 50 }),
+	/timed out/,
+);
 const acceptedRoute = indexModule.formatAcceptedRoute({
 	status: "recommendation", selected: "fe-designer", confidence: 0.95, reasons: ["frontend"],
 	candidates: [{ agent: "fe-designer", score: 12 }], needs_clarification: false, questions: [],
@@ -145,7 +155,7 @@ const acceptedRoute = indexModule.formatAcceptedRoute({
 assert.match(acceptedRoute, /## Accepted task/);
 assert.match(acceptedRoute, /Build the original frontend prompt/);
 assert.match(acceptedRoute, /Delegating to \*\*FE-Designer\*\*/);
-assert.equal(config.loadResolved("/home/dyadmin").cfg.routing.automaticSelection.enabled, true);
+assert.equal(overlay.routing?.automaticSelection?.enabled ?? false, false);
 for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer"]) {
 	assert.ok(commands.has(key), `missing /${key} command`);
 	assert.ok(commands.has(`${key}-model`), `missing /${key}-model command`);
@@ -185,15 +195,17 @@ const fakeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pb-fake-pi-"));
 const fakePi = path.join(fakeDir, "pi");
 const argsFile = path.join(fakeDir, "args.json");
 const promptCopy = path.join(fakeDir, "prompt-copy.txt");
+const taskCopy = path.join(fakeDir, "task-copy.txt");
 await fs.writeFile(
 	fakePi,
-	`#!/usr/bin/env node\nconst fs=require("node:fs");\nconst args=process.argv.slice(2);\nfs.writeFileSync(process.env.PB_ARGS_FILE, JSON.stringify(args));\nconst i=args.indexOf("--append-system-prompt");\nif(i>=0) fs.writeFileSync(process.env.PB_PROMPT_COPY, fs.readFileSync(args[i+1], "utf8"));\nconst message={role:"assistant",content:[{type:"text",text:"FAKE CHILD OK"}],api:"test",provider:"test",model:"test-model",usage:{input:3,output:2,cacheRead:0,cacheWrite:0,totalTokens:5,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()};\nconsole.log(JSON.stringify({type:"message_end",message}));\n`,
+	`#!/usr/bin/env node\nconst fs=require("node:fs");\nconst args=process.argv.slice(2);\nfs.writeFileSync(process.env.PB_ARGS_FILE, JSON.stringify(args));\nconst i=args.indexOf("--append-system-prompt");\nif(i>=0) fs.writeFileSync(process.env.PB_PROMPT_COPY, fs.readFileSync(args[i+1], "utf8"));\nconst taskArg=args.find((arg)=>arg.startsWith("@"));\nif(taskArg) fs.writeFileSync(process.env.PB_TASK_COPY, fs.readFileSync(taskArg.slice(1), "utf8"));\nconst message={role:"assistant",content:[{type:"text",text:"FAKE CHILD OK"}],api:"test",provider:"test",model:"test-model",usage:{input:3,output:2,cacheRead:0,cacheWrite:0,totalTokens:5,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()};\nconsole.log(JSON.stringify({type:"message_end",message}));\n`,
 	{ mode: 0o755 },
 );
 const oldPath = process.env.PATH;
 process.env.PATH = `${fakeDir}:${oldPath ?? ""}`;
 process.env.PB_ARGS_FILE = argsFile;
 process.env.PB_PROMPT_COPY = promptCopy;
+process.env.PB_TASK_COPY = taskCopy;
 const savedArgv1 = process.argv[1];
 process.argv[1] = "/nonexistent/pi-entry.js";
 const fakeResult = await subagent.runRole({
@@ -210,8 +222,13 @@ assert.equal(subagent.getFinalOutput(fakeResult.messages), "FAKE CHILD OK");
 const fakeArgs = JSON.parse(await fs.readFile(argsFile, "utf8"));
 assert.equal(fakeArgs[fakeArgs.indexOf("--tools") + 1], "read,grep,find,ls");
 assert.equal(await fs.readFile(promptCopy, "utf8"), "OFFLINE ROLE PROMPT");
+assert.equal(await fs.readFile(taskCopy, "utf8"), "Task: offline smoke");
+assert.ok(!fakeArgs.includes("Task: offline smoke"), "task text must not be passed directly in argv");
+const taskArg = fakeArgs.find((arg) => arg.startsWith("@"));
+assert.ok(taskArg, "task must be supplied through Pi's @file input");
 const tempPromptPath = fakeArgs[fakeArgs.indexOf("--append-system-prompt") + 1];
 await assert.rejects(fs.access(tempPromptPath));
+await assert.rejects(fs.access(taskArg.slice(1)));
 assert.equal(subagent.liveChildCount(), 0);
 
 // Startup hygiene removes only stale, owned pb prompt directories and leaves
@@ -248,13 +265,18 @@ const routed = structuredClone(valid);
 routed.agents = { runner: { displayName: "Runner", purpose: "routine", readOnly: false, model: { class: "sonnet", provider: "anthropic" }, tools: [], invocation: "default", autoSelectEligible: true, capabilities: [], boundaries: [], escalateTo: [], canDelegate: false, delegateTo: [], outputContract: [], infoSources: ["read docs"] } };
 routed.routing = { automaticSelection: { enabled: true, status: "confirmation-required", threshold: 0.6, fallback: "runner", audit: { enabled: false, path: "runtime/audit.jsonl" } } };
 assert.deepEqual(config.validateConfig(routed), []);
+const missingDelegation = structuredClone(routed);
+delete missingDelegation.agents.runner.canDelegate;
+delete missingDelegation.agents.runner.delegateTo;
+assert.ok(config.validateConfig(missingDelegation).some((error) => error.includes("canDelegate is required")));
+assert.ok(config.validateConfig(missingDelegation).some((error) => error.includes("delegateTo must be a list")));
 config.writeConfigAtomic(writableConfigPath, writable);
 const persisted = JSON.parse(await fs.readFile(writableConfigPath, "utf8"));
 assert.equal(persisted.roles.builder.model.id, "openai/gpt-5.6-terra");
 assert.equal(persisted.roles.planner.model.class, "moonshotai/kimi-k3");
 assert.equal(valid.roles.planner.model.class, "fable");
 
-const machine = config.loadResolved("/home/dyadmin");
+const machine = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: writableConfigPath });
 assert.equal(machine.loadError, null);
 assert.equal(machine.sourceKind, "pi-overlay");
 assert.equal(machine.overlayWarning, null);
