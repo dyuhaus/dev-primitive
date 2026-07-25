@@ -135,6 +135,7 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("/.claude/agents/workflow-audit.md", rendered)
         self.assertIn("openai/gpt-5.6-sol", rendered)
         self.assertIn("medium", rendered)
+        self.assertIn("Light audit", rendered)
 
 
 if __name__ == "__main__":
