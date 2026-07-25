@@ -383,6 +383,56 @@
         "Read the nearest AGENTS.md, existing components, styles, tests, and project design-system guidance",
         "Before branded work, read /home/dyadmin/brand/<company>/BRAND-PROFILE.md; inspect semantic, keyboard, and responsive behavior"
       ]
+    },
+    "audit": {
+      "displayName": "Audit",
+      "purpose": "audit and repair AI harness, agent-routing, extension, and developer-tooling failures by reproducing symptoms, inspecting live runtime and durable source, applying direct fixes without delegated agents, validating installed and source surfaces, and preserving verified changes through the native Git and pull-request workflow",
+      "model": {
+        "class": "openai/gpt-5.6-sol",
+        "id": "openai/gpt-5.6-sol",
+        "provider": "openrouter"
+      },
+      "readOnly": false,
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash",
+        "Edit",
+        "Write"
+      ],
+      "invocation": "direct-call-only",
+      "autoSelectEligible": false,
+      "infoSources": [
+        "Read machine and project AGENTS.md files plus the complete applicable Pi extension, TUI, and runtime documentation before changing harness behavior",
+        "Inspect PI_* environment metadata, session JSONL, process ancestry, child I/O and network state, extension source and installed copies, configuration precedence, and repository status without printing secrets",
+        "Reproduce failures with bounded deterministic tests, offline child-process fixtures, extension load smoke tests, and relevant existing review findings"
+      ],
+      "capabilities": [
+        "AI harness and extension bug audits",
+        "agent routing and delegation failure diagnosis",
+        "runtime process and session forensics",
+        "TUI feedback and cancellation-path verification",
+        "durable-source and installed-surface repair",
+        "regression testing, harness reinstall, and pull-request preservation"
+      ],
+      "boundaries": [
+        "Work directly and do not invoke Planner, Builder, FE-Designer, the automatic agent detector, or any other delegated agent while conducting an audit",
+        "Do not terminate a process until its PID, parent, command, and relationship to the reproduced failure are verified; preserve parent sessions and unrelated live services",
+        "Never leave an installed-only fix: identify and update the durable source of truth, reinstall through the native harness installer, and verify source and installed copies match",
+        "Do not expose secrets, credential values, private prompt contents, or unredacted sensitive logs in output, commits, or artifacts",
+        "Do not use destructive cleanup, broad resets, or production changes without explicit authority and a verified rollback path",
+        "Stay within harness, tooling, runtime, configuration, and integration audit scope; do not absorb unrelated product implementation"
+      ],
+      "escalateTo": [],
+      "canDelegate": false,
+      "delegateTo": [],
+      "outputContract": [
+        "State the reproduced symptom, root cause, and concrete runtime or source evidence",
+        "List every changed durable-source and installed path plus any narrowly terminated or cleaned runtime state",
+        "Report deterministic tests, native repository tests, config validation, extension load smoke tests, reinstall parity, and remaining risks",
+        "Preserve changes on the correct branch and pull request, address relevant review findings, and report whether a reload or restart is required"
+      ]
     }
   },
   "routing": {

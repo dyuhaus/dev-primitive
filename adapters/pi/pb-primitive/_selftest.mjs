@@ -110,6 +110,7 @@ const pi = {
 const factory = indexModule.default ?? indexModule;
 await factory(pi);
 assert.deepEqual([...tools.keys()].sort(), [
+	"audit_agent",
 	"builder_agent",
 	"fe_designer_agent",
 	"l1_programmer_agent",
@@ -127,6 +128,10 @@ assert.ok(commands.has("agents"), "missing /agents command");
 assert.ok(commands.has("route"), "missing /route command");
 await assert.rejects(
 	() => tools.get("team_leader_agent").execute("test", { task: "coordinate" }, new AbortController().signal, () => {}, { cwd: root }),
+	/direct-call-only/,
+);
+await assert.rejects(
+	() => tools.get("audit_agent").execute("test", { task: "audit Pi" }, new AbortController().signal, () => {}, { cwd: root }),
 	/direct-call-only/,
 );
 assert.deepEqual(indexModule.parseRouterDecision(JSON.stringify({
@@ -156,7 +161,7 @@ assert.match(acceptedRoute, /## Accepted task/);
 assert.match(acceptedRoute, /Build the original frontend prompt/);
 assert.match(acceptedRoute, /Delegating to \*\*FE-Designer\*\*/);
 assert.equal(overlay.routing?.automaticSelection?.enabled ?? false, false);
-for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer"]) {
+for (const key of ["planner", "builder", "runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer", "audit"]) {
 	assert.ok(commands.has(key), `missing /${key} command`);
 	assert.ok(commands.has(`${key}-model`), `missing /${key}-model command`);
 }

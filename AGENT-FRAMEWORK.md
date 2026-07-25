@@ -26,6 +26,11 @@ models; other harnesses never consume that file.
   components, layouts, interactions, and design-system refinements. Builder
   owns complex system integration; FE-Designer escalates backend, architecture,
   product, and brand decisions rather than guessing them.
+- **Audit** reproduces and repairs failures in AI harnesses, routing,
+  extensions, runtime processes, and developer-tool integrations. It works
+  directly without delegated agents, updates both durable source and installed
+  surfaces, and verifies reinstall/PR preservation. It uses GPT-5.6 Sol through
+  OpenRouter and is **direct-call-only**.
 - **Team Leader** coordinates genuinely large tasks that require multiple
   workstreams. It is **direct-call-only** and must never be automatically
   selected or self-invoked.
@@ -53,7 +58,7 @@ Each specialist profile has:
 |---|---|
 | `displayName` | Human-facing name |
 | `purpose` | Mission statement |
-| `model` | Independent `{class, id, provider}` selection; non-empty class or id is required |
+| `model` | Independent `{class, id, provider}` selection; `class` is always required and `id` optionally pins an exact model |
 | `readOnly` / `tools` | Operational permission intent and harness tool list |
 | `invocation` | `default` or `direct-call-only` |
 | `autoSelectEligible` | Future selector eligibility; must be false for direct-call-only profiles |
@@ -62,6 +67,7 @@ Each specialist profile has:
 | `escalateTo` | Agent keys that can receive escalation/recommendations |
 | `canDelegate` / `delegateTo` | Whether and where this profile may delegate |
 | `outputContract` | Required report/result behaviors |
+| `infoSources` | Required evidence sources and native inspection/validation guidance |
 
 Pi uses `adapters/pi/roles.config.pi.json` only after project-local configs
 have been considered. It currently sets Planner to Kimi K3 and Builder to
@@ -124,6 +130,9 @@ Examples:
   → Planner then Builder; Builder may delegate isolated scripts to L1.
 - “Implement the supplied component spec as a responsive, keyboard-accessible
   interface using this project’s design system” → FE-Designer.
+- “Audit this stalled Pi handoff, fix feedback/cancellation, reinstall the
+  extension, and preserve the repair in its PR without using other agents” →
+  the user explicitly calls Audit.
 - “Coordinate the website, docs, launch email, and Vault index across four
   workstreams” → the user explicitly calls Team Leader.
 

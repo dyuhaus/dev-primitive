@@ -56,7 +56,7 @@
     },
     "agentProfile": {
       "type": "object",
-      "required": ["displayName", "purpose", "model", "readOnly", "tools", "invocation", "autoSelectEligible", "capabilities", "boundaries", "escalateTo", "canDelegate", "delegateTo", "outputContract"],
+      "required": ["displayName", "purpose", "model", "readOnly", "tools", "invocation", "autoSelectEligible", "capabilities", "boundaries", "escalateTo", "canDelegate", "delegateTo", "outputContract", "infoSources"],
       "additionalProperties": true,
       "properties": {
         "displayName": { "type": "string", "minLength": 1 },

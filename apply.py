@@ -13,7 +13,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROLE_KEYS = ("planner", "builder")
-SPECIALIST_KEYS = ("runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer")
+SPECIALIST_KEYS = ("runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer", "audit")
 ALL_AGENT_KEYS = ROLE_KEYS + SPECIALIST_KEYS
 
 
@@ -87,7 +87,7 @@ def validate(cfg: dict) -> list:
             if field in entry and (not isinstance(entry[field], list) or not all(isinstance(x, str) for x in entry[field])):
                 errs.append(f"{path}.{field} must be a list of strings")
         if specialist:
-            fields = ("displayName", "tools", "invocation", "autoSelectEligible", "capabilities", "boundaries", "escalateTo", "canDelegate", "delegateTo", "outputContract")
+            fields = ("displayName", "tools", "invocation", "autoSelectEligible", "capabilities", "boundaries", "escalateTo", "canDelegate", "delegateTo", "outputContract", "infoSources")
             for field in fields:
                 if field not in entry:
                     errs.append(f"{path}.{field} is required")
@@ -122,8 +122,11 @@ def validate(cfg: dict) -> list:
                     if not isinstance(entry, dict):
                         continue
                     for field in ("escalateTo", "delegateTo"):
-                        for target in entry.get(field, []):
-                            if target not in known:
+                        targets = entry.get(field, [])
+                        if not isinstance(targets, list):
+                            continue
+                        for target in targets:
+                            if isinstance(target, str) and target not in known:
                                 errs.append(f"{namespace}.{key}.{field} references unknown agent '{target}'")
 
     routing = cfg.get("routing")

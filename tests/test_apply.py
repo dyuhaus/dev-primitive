@@ -30,11 +30,19 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(fe["displayName"], "FE-Designer")
         self.assertTrue(fe["autoSelectEligible"])
         self.assertEqual(fe["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
+        audit = self.config["agents"]["audit"]
+        self.assertEqual(audit["displayName"], "Audit")
+        self.assertEqual(audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        self.assertEqual(audit["invocation"], "direct-call-only")
+        self.assertFalse(audit["autoSelectEligible"])
+        self.assertFalse(audit["canDelegate"])
+        self.assertEqual(audit["delegateTo"], [])
 
     def test_pi_overlay_is_valid_and_preserves_shared_agent_metadata(self):
         self.assertEqual(apply.validate(self.pi_overlay), [])
         self.assertEqual(self.pi_overlay["roles"]["planner"]["model"], {"class": "moonshotai/kimi-k3", "id": "moonshotai/kimi-k3", "provider": "openrouter"})
         self.assertEqual(self.pi_overlay["roles"]["builder"]["model"], {"class": "openai/gpt-5.6-terra", "id": "openai/gpt-5.6-terra", "provider": "openrouter"})
+        self.assertEqual(self.pi_overlay["agents"]["audit"]["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
         self.assertEqual(set(self.pi_overlay["agents"]), set(self.config["agents"]))
         for key in self.config["agents"]:
             shared = copy.deepcopy(self.config["agents"][key])
