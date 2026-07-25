@@ -83,6 +83,11 @@ export interface RolesConfig {
 	agents?: Record<string, AgentSpec>;
 	routing?: {
 		note?: string;
+		postWorkflowAudit?: {
+			enabled?: boolean;
+			model?: ModelSpec;
+			thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+		};
 		automaticSelection?: {
 			enabled?: boolean;
 			status?: string;
@@ -311,6 +316,15 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 	for (const key of ROLE_KEYS) {
 		if (!roles?.[key]) errs.push(`roles.${key} is required and must be an object`);
 		else validateEntry(roles[key], `roles.${key}`);
+	}
+	const postAudit = cfg.routing?.postWorkflowAudit;
+	if (postAudit !== undefined) {
+		if (typeof postAudit !== "object" || postAudit === null) errs.push("routing.postWorkflowAudit must be an object");
+		else {
+			if (typeof postAudit.enabled !== "boolean") errs.push("routing.postWorkflowAudit.enabled must be boolean");
+			if (postAudit.enabled === true || postAudit.model !== undefined) validateEntry({ purpose: "post-workflow audit", model: postAudit.model }, "routing.postWorkflowAudit");
+			if (postAudit.thinking !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(postAudit.thinking))) errs.push("routing.postWorkflowAudit.thinking must be a supported thinking level");
+		}
 	}
 	const selection = cfg.routing?.automaticSelection;
 	if (selection !== undefined) {

@@ -17,13 +17,17 @@ configuration is present. The portable, harness-neutral registry remains
   handoffs immediately show a cancellable progress panel until the specialist
   finishes, fails, or is canceled.
 - `/pb-show` — show the selected config and resolved provider/model table.
-- `/pb <task>` — one read-only planner pass followed by a builder pass. The
-  builder receives the original task and planner output verbatim.
-- `/pbg <task> [until: <done-condition>]` — bounded planner/build/verification
-  loop, at most three rounds. If `until:` is omitted, the first planner derives
-  explicit acceptance criteria.
+- `/pb <task>` — one read-only planner pass followed by a builder pass and a
+  compact read-only post-workflow audit. The builder receives the original task
+  and planner output verbatim; the audit uses GPT-5.6 Sol at medium thinking.
+- `/pbg <task> [until: <done-condition>]` — bounded planner/build/light-audit/
+  verification loop, at most three rounds. If `until:` is omitted, the first
+  planner derives explicit acceptance criteria.
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
+- `workflow_audit` — internal post-workflow tool the parent invokes exactly once
+  after Planner → Builder/specialist work; it is read-only Sol/medium review,
+  not the full direct-call Audit agent.
 - `/planner`, `/builder`, `/runner`, `/tech-writer`, `/prose-writer`,
   `/team-leader`, `/l1-programmer`, `/librarian`, `/fe-designer`, and `/audit` —
   explicitly run the corresponding configured agent. Team Leader and Audit are
@@ -91,7 +95,8 @@ class/alias for the configured provider.
 
 ## Security model
 
-- Each role runs in a separate `pi --mode json -p --no-session --no-extensions`
+- Each role and the lightweight reviewer run in separate
+  `pi --mode json -p --no-session --no-extensions`
   process. Child roles cannot recursively load the global routing extension.
 - Provider and model are always passed explicitly; child processes cannot
   silently inherit the parent's model.

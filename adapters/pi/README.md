@@ -16,13 +16,15 @@ Code, Codex/generic consumers, and other harnesses use the shared config.
 
 The live adapter provides:
 
-- `planner_agent` and `builder_agent` tools;
+- `planner_agent` and `builder_agent` tools plus the internal `workflow_audit`
+  post-workflow review tool;
 - `runner_agent`, `tech_writer_agent`, `prose_writer_agent`,
   `team_leader_agent`, `l1_programmer_agent`, `librarian_agent`,
   `fe_designer_agent`, and `audit_agent` tools; `team_leader_agent` and
   `audit_agent` reject model-initiated calls because both are direct-call-only;
-- `/pb` for one plan-to-build pass;
-- `/pbg` for a bounded plan/build/verify loop;
+- `/pb` for one Planner → Builder pass followed by a lightweight GPT-5.6 Sol
+  audit at medium thinking;
+- `/pbg` for a bounded plan/build/light-audit/verify loop;
 - `/agents` to list every agent command, matching model command, and active
   provider/model assignment (or not-configured status).
 - `/route <task>` to run the deterministic local router, show its reasons and
@@ -37,9 +39,10 @@ The live adapter provides:
   openrouter --id moonshotai/kimi-k3`. Team Leader runs only via its explicit
   `/team-leader` command.
 
-Planner read-only behavior is enforced by the child pi tool allowlist
-`read,grep,find,ls`. Provider and model are passed explicitly for both child
-roles. See the installed extension's `README.md` for operation, validation, and
+Planner and lightweight-auditor read-only behavior is enforced by the child Pi
+tool allowlist `read,grep,find,ls`. Provider, model, and the audit's medium
+thinking level are passed explicitly. The light reviewer is narrower than the
+full direct-call `/audit` agent and cannot edit or delegate. See the installed extension's `README.md` for operation, validation, and
 security details.
 
 Validate without a model call:

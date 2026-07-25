@@ -96,6 +96,9 @@ Planner → Builder for substantive software work. Builder is the senior enginee
 and may delegate a clearly outlined subtask to L1 Programmer or a separable
 frontend implementation to FE-Designer. Planner recommends the next role but
 does not invoke specialists itself; the parent orchestrator owns handoffs.
+After each completed Planner → Builder or Planner → specialist workflow, run the
+configured lightweight GPT-5.6 Sol audit at medium thinking before the final
+report. This review is read-only and narrower than the direct-call Audit agent.
 
 Available skills:
 - `/agent-runner`

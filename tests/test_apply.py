@@ -30,6 +30,10 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(fe["displayName"], "FE-Designer")
         self.assertTrue(fe["autoSelectEligible"])
         self.assertEqual(fe["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
+        workflow_audit = self.config["routing"]["postWorkflowAudit"]
+        self.assertTrue(workflow_audit["enabled"])
+        self.assertEqual(workflow_audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        self.assertEqual(workflow_audit["thinking"], "medium")
         audit = self.config["agents"]["audit"]
         self.assertEqual(audit["displayName"], "Audit")
         self.assertEqual(audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
@@ -40,9 +44,18 @@ class ApplyTests(unittest.TestCase):
 
     def test_pi_overlay_is_valid_and_preserves_shared_agent_metadata(self):
         self.assertEqual(apply.validate(self.pi_overlay), [])
-        self.assertEqual(self.pi_overlay["roles"]["planner"]["model"], {"class": "moonshotai/kimi-k3", "id": "moonshotai/kimi-k3", "provider": "openrouter"})
+        planner_model = self.pi_overlay["roles"]["planner"]["model"]
+        self.assertEqual(planner_model["provider"], "openrouter")
+        self.assertIn(
+            (planner_model.get("class"), planner_model.get("id")),
+            {
+                ("moonshotai/kimi-k3", "moonshotai/kimi-k3"),
+                ("anthropic/claude-opus-5", ""),
+            },
+        )
         self.assertEqual(self.pi_overlay["roles"]["builder"]["model"], {"class": "openai/gpt-5.6-terra", "id": "openai/gpt-5.6-terra", "provider": "openrouter"})
         self.assertEqual(self.pi_overlay["agents"]["audit"]["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        self.assertEqual(self.pi_overlay["routing"]["postWorkflowAudit"], self.config["routing"]["postWorkflowAudit"])
         self.assertEqual(set(self.pi_overlay["agents"]), set(self.config["agents"]))
         for key in self.config["agents"]:
             shared = copy.deepcopy(self.config["agents"][key])
@@ -65,6 +78,15 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(self.config["routing"]["automaticSelection"]["fallback"], "runner")
         for key, entry in self.config["agents"].items():
             self.assertTrue(entry["infoSources"], key)
+        disabled_audit = copy.deepcopy(self.config)
+        disabled_audit["routing"]["postWorkflowAudit"] = {"enabled": False}
+        self.assertEqual(apply.validate(disabled_audit), [])
+        default_thinking_audit = copy.deepcopy(self.config)
+        default_thinking_audit["routing"]["postWorkflowAudit"].pop("thinking")
+        self.assertEqual(apply.validate(default_thinking_audit), [])
+        bad_audit = copy.deepcopy(self.config)
+        bad_audit["routing"]["postWorkflowAudit"]["thinking"] = "extreme"
+        self.assertTrue(any("postWorkflowAudit.thinking" in error for error in apply.validate(bad_audit)))
         bad_threshold = copy.deepcopy(self.config)
         bad_threshold["routing"]["automaticSelection"]["threshold"] = 2
         self.assertTrue(any("threshold" in error for error in apply.validate(bad_threshold)))
@@ -122,6 +144,11 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("never self-invoke", rendered)
         self.assertIn("/route.md", rendered)
         self.assertIn("Knowledge directory", rendered)
+        self.assertIn("/.claude/agents/workflow-audit.md", rendered)
+        self.assertIn("openai/gpt-5.6-sol", rendered)
+        self.assertIn("enabled=true", rendered)
+        self.assertIn("medium", rendered)
+        self.assertIn("Light audit", rendered)
 
 
 if __name__ == "__main__":

@@ -43,7 +43,11 @@ Pinned ids win over classes. Use aliases when automatic provider upgrades are
 wanted. Run `apply.py set <role-or-agent> <class>` to change a model.
 
 The config is checked by [`roles.schema.json`](./roles.schema.json) and
-`apply.py validate`. `router.py` supplies deterministic, explainable applicability recognition.
+`apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only
+GPT-5.6 Sol review at medium thinking after completed Planner → executor work;
+it checks the plan, result evidence, omissions, and follow-up without editing or
+delegating. This is separate from the full direct-call Audit specialist.
+`router.py` supplies deterministic, explainable applicability recognition.
 When `routing.automaticSelection.enabled` is true, a supporting harness may
 offer a handoff but must obtain confirmation before delegation; no agent is
 silently dispatched. Team Leader and Audit are always direct-call-only. Audit
@@ -80,7 +84,9 @@ use the host's `/goal` followed by `/pb` as documented by that harness.
   PB core and specialist registry. A harness can map profiles to its native
   agent mechanism.
 - **Pi:** the global PB addon reads the Pi-only overlay after project-local
-  configs but before the shared config. `/route <task>` runs the same local
+  configs but before the shared config. Successfully completed Planner →
+  executor work—including each completed `/pbg` round—runs the configured light
+  workflow audit before reporting. `/route <task>` runs the same local
   recommendation router and asks for confirmation; see `adapters/pi/README.md`
   for precedence.
 

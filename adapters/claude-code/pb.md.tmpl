@@ -28,9 +28,16 @@ Steps:
    configured builder model class, implements the plan end to end, runs the
    relevant build/tests, and reports what changed and how it verified it.
 
-4. **Report.** Relay to the user what was built, how it was verified, and anything
-   left open. If the build surfaced something that invalidates the plan, loop back
-   to step 1 with the new information rather than pushing through.
+4. **Light audit (enabled={{WORKFLOW_AUDIT_ENABLED}}; {{WORKFLOW_AUDIT_MODEL}}, {{WORKFLOW_AUDIT_THINKING}} thinking).**
+   If enabled, delegate once to `workflow-audit` with the original task, planner
+   output, executor identity (`builder` or the specialist key), and executor
+   result. Skip this step when disabled or when the executor failed. This is a
+   concise read-only review, not the full direct-call Audit agent. It must not
+   edit, delegate, or restart the workflow.
+
+5. **Report.** Relay what was built, how it was verified, the light-audit verdict,
+   and anything left open. If the build or audit surfaced something that
+   invalidates the plan, report the follow-up clearly rather than hiding it.
 
 Honor the local project `AGENTS.md`/`CLAUDE.md` conventions throughout.
 
