@@ -1,11 +1,19 @@
 # pi adapter
 
-The pi adapter is a **live, harness-level addon**, not a project-local
-adapter. It is installed globally at:
+The pi adapter is a set of **live, harness-level addons**, not project-local
+adapters. `install_harness.py pi` syncs every directory listed in
+`PI_EXTENSIONS` into Pi's auto-discovery path:
 
 ```text
 $HOME/.pi/agent/extensions/pb-primitive/
+$HOME/.pi/agent/extensions/subsite-scaffold/
 ```
+
+`pb-primitive` is the agent framework described below. `subsite-scaffold` is a
+separate extension documented in
+[`subsite-scaffold/README.md`](./subsite-scaffold/README.md); see
+"Sub-site scaffolding" at the end of this file for how it relates to the
+`subsite-scaffold` *skill* used by other harnesses.
 
 The extension first reads the nearest project `roles.config.json` or
 `.pi/roles.config.json`. Without a project override it uses the Pi-only runtime
@@ -89,3 +97,34 @@ Every profile's generated specialty and information-gathering documentation is
 in `/home/dyadmin/dev-primitive/agent-knowledge/<key>/PROFILE.md`; durable
 `LESSONS.md` files sit alongside it. Refresh profiles without overwriting lessons
 with `python3 /home/dyadmin/dev-primitive/apply.py knowledge`.
+
+## Sub-site scaffolding
+
+`subsite-scaffold/` is a second, independent Pi extension (`/new-subsite` and
+the `create_subsite` tool). It is vendored here so it is version-controlled and
+covered by `repo-backup`; it previously existed only inside `~/.pi`.
+
+**Its routing output is partly stale — read this before using it.** The
+extension writes Cloudflare ingress into the `dyuhaus.com` repo's
+`tunnel/config.yml`, which is a sanitized Windows-era copy of a *different*
+tunnel (`bfbfae39-…`) still listing decommissioned hostnames. The live
+`*.dyuhaus.com` path is the homelab compose stack: one `nginx:alpine` service
+per site plus the `apps-cloudflared-1` container reading
+`~/homelab/compose/apps/cloudflared.yml` (tunnel `1f32fde8-…`).
+
+Therefore:
+
+- For **routing and deployment**, follow the `subsite-scaffold` *skill*
+  (`~/githubStaging/homelab-skills/subsite-scaffold/SKILL.md`), which targets
+  the live compose + nginx + `cloudflared.yml` path. That skill is
+  authoritative for every harness, Pi included.
+- Use this extension for what it is uniquely good at: generating the static
+  skeleton and the **portable artifact bundle** (`site.manifest.json`,
+  `BRIEF.md`, `tokens.css`, `PROMPT.md`) that carries a design spec off this
+  headless box, plus the `.htaccess` block for the Hostinger-served apex.
+
+Validate without a model call:
+
+```bash
+node ~/.pi/agent/extensions/subsite-scaffold/_selftest.mjs
+```

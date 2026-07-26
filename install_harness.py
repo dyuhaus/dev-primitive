@@ -124,19 +124,17 @@ configuration unless an explicit model-routing integration is added later.
 '''
 
 
-def install_pi(home, dry_run):
-    source = ROOT / "adapters" / "pi" / "pb-primitive"
-    overlay = ROOT / "adapters" / "pi" / "roles.config.pi.json"
-    target = home / ".pi" / "agent" / "extensions" / "pb-primitive"
-    if not overlay.is_file():
-        raise SystemExit(f"Missing Pi-only overlay: {overlay}")
-    overlay_cfg = primitive.load_config(overlay)
-    overlay_errors = primitive.validate(overlay_cfg)
-    if overlay_errors:
-        raise SystemExit("Invalid Pi-only overlay:\n" + "\n".join(f"- {error}" for error in overlay_errors))
+# Versioned Pi extensions synced from this repo into ~/.pi/agent/extensions/.
+# Each entry is a directory name under adapters/pi/ that is also the extension
+# name Pi auto-discovers.
+PI_EXTENSIONS = ("pb-primitive", "subsite-scaffold")
+
+
+def sync_pi_extension(name, home, dry_run):
+    source = ROOT / "adapters" / "pi" / name
+    target = home / ".pi" / "agent" / "extensions" / name
     if dry_run:
         print(f"--- would sync {source} -> {target} ---")
-        print(f"Pi will read the live overlay at {overlay}; it is not copied into ~/.pi.")
         return
     if not source.is_dir():
         raise SystemExit(f"Missing Pi adapter source: {source}")
@@ -148,6 +146,20 @@ def install_pi(home, dry_run):
         if item.is_file():
             shutil.copy2(item, destination)
             print(f"wrote {destination}")
+
+
+def install_pi(home, dry_run):
+    overlay = ROOT / "adapters" / "pi" / "roles.config.pi.json"
+    if not overlay.is_file():
+        raise SystemExit(f"Missing Pi-only overlay: {overlay}")
+    overlay_cfg = primitive.load_config(overlay)
+    overlay_errors = primitive.validate(overlay_cfg)
+    if overlay_errors:
+        raise SystemExit("Invalid Pi-only overlay:\n" + "\n".join(f"- {error}" for error in overlay_errors))
+    for name in PI_EXTENSIONS:
+        sync_pi_extension(name, home, dry_run)
+    if dry_run:
+        print(f"Pi will read the live overlay at {overlay}; it is not copied into ~/.pi.")
 
 
 def install_hermes(cfg, home):
