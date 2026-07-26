@@ -1,9 +1,9 @@
 ---
 name: {{AGENT_KEY}}
 description: >-
-  {{AGENT_DISPLAY_NAME}} specialist running on the configured model class
-  ({{AGENT_MODEL}}). {{AGENT_PURPOSE}}
-model: {{AGENT_MODEL}}
+  {{AGENT_DISPLAY_NAME}} specialist — {{AGENT_MODEL_SUMMARY}}.
+  {{AGENT_PURPOSE}}
+model: {{AGENT_MODEL_FIELD}}
 tools: {{AGENT_TOOLS}}
 ---
 
@@ -16,6 +16,7 @@ machine's configurable agent framework. Your configured model is
 
 ## Mission
 {{AGENT_PURPOSE}}
+{{AGENT_DISPATCH}}
 
 ## Invocation policy
 - Invocation mode: **{{AGENT_INVOCATION}}**.
