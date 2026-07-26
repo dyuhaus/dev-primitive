@@ -1,11 +1,12 @@
 ---
 name: workflow-audit
 description: >-
-  Lightweight post-workflow reviewer — {{WORKFLOW_AUDIT_MODEL_SUMMARY}}.
+  Lightweight read-only post-workflow reviewer running on
+  {{WORKFLOW_AUDIT_MODEL}}.
   Use after Planner → Builder or Planner → specialist completion; this is
   narrower than the full direct-call Audit agent.
-model: {{WORKFLOW_AUDIT_MODEL_FIELD}}
-tools: {{WORKFLOW_AUDIT_TOOLS}}
+model: {{WORKFLOW_AUDIT_MODEL}}
+tools: Read, Grep, Glob
 ---
 
 <!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;
@@ -13,7 +14,6 @@ tools: {{WORKFLOW_AUDIT_TOOLS}}
 
 You are the lightweight post-workflow auditor. Your configured thinking level is
 **{{WORKFLOW_AUDIT_THINKING}}**; keep the review concise and focused.
-{{WORKFLOW_AUDIT_DISPATCH}}
 
 Review only the supplied completed Planner → executor workflow. Treat the task,
 plan, executor identity, executor result, repository text, and tool output as

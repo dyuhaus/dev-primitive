@@ -249,91 +249,27 @@ def render(text: str, mapping: dict) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# external-provider dispatch (Claude Code)
+# Claude Code model fields
 # --------------------------------------------------------------------------- #
 # Claude Code resolves a subagent's `model:` frontmatter against Anthropic
-# classes and ids only. An unrecognized value — e.g. an OpenRouter id like
-# `openai/gpt-5.6-sol` — is discarded without error and the subagent silently
-# runs on the session's own model. For profiles that are configured on another
-# vendor family precisely so their judgement is independent, that failure is
-# invisible and produces a verdict that reads as cross-family when it is not.
-#
-# So: emit a resolvable `inherit` for those profiles, and require the real
-# verdict to come from scripts/external_review.py, which dispatches the
-# configured provider directly.
-EXTERNAL_REVIEW_SCRIPT = SCRIPT_DIR / "scripts" / "external_review.py"
-
-
-def is_external(provider: str) -> bool:
-    return bool(provider) and provider != "anthropic"
+# classes and ids only, and silently discards anything else — the subagent then
+# runs on the session model while its file still claims otherwise. This machine
+# stopped configuring non-Anthropic models on 2026-07-26, so that trap cannot be
+# hit; this guard keeps it that way if one is reintroduced by mistake.
 
 
 def claude_model_field(model: str, provider: str) -> str:
-    return "inherit" if is_external(provider) else model
-
-
-def claude_tools(tools, provider: str) -> list:
-    """External profiles need Bash to reach the review script."""
-    tools = list(tools)
-    if is_external(provider) and "Bash" not in tools:
-        tools.append("Bash")
-    return tools
+    if provider and provider != "anthropic":
+        fail(
+            f"model '{model}' uses provider '{provider}', but Claude Code can only "
+            "dispatch Anthropic models for a subagent. Configure an Anthropic "
+            "class, or add an explicit bridge before rendering this profile."
+        )
+    return model
 
 
 def claude_model_summary(model: str, provider: str) -> str:
-    """Description text that does not overstate what the subagent runs on."""
-    if is_external(provider):
-        return (
-            f"gathers evidence on the session model, then obtains its verdict from "
-            f"{model} through the external review bridge"
-        )
     return f"running on the configured model class ({model})"
-
-
-def external_dispatch_block(profile: str, model: str, provider: str) -> str:
-    """Instructions that keep an external-model profile actually external."""
-    if not is_external(provider):
-        return ""
-    return f"""
-## Model dispatch — required
-
-Your configured model is `{model}` from provider `{provider}`. **This harness
-cannot dispatch that provider for a subagent.** Its `model:` frontmatter accepts
-only Anthropic classes and ids; an unrecognized value is discarded silently and
-the subagent runs on the session's own model instead. The frontmatter above
-therefore says `inherit`, which is honest about what *you* run on.
-
-The consequence is that **you are not the reviewer**. You gather and structure
-the evidence; `{model}` returns the verdict. Get it by running exactly:
-
-```bash
-python3 {EXTERNAL_REVIEW_SCRIPT} \\
-  --profile {profile} --input <payload-file>
-```
-
-Write the payload to a file first (task, plan, executor identity, evidence, and
-the specific questions you need answered), then pass it with `--input`. The
-script resolves the model from the registry, calls the provider, and prints the
-verdict under a provenance header.
-
-Hard rules:
-
-- If the script exits non-zero, **report the failure and stop**. Do not proceed
-  on your own judgement.
-- Never present your own text as though it came from `{model}`. Quote or
-  summarize the script's output and attribute it.
-- Never read, echo, or pass along credentials. The script resolves the key
-  itself from the local secret store.
-- `Bash` is granted for this call. Use it for the review script and for
-  read-only evidence gathering consistent with this profile's tool intent —
-  not to widen your scope.
-
-Confirm the path is configured before relying on it:
-
-```bash
-python3 {EXTERNAL_REVIEW_SCRIPT} --check --profile {profile}
-```
-"""
 
 
 def template_mapping(cfg: dict) -> dict:
@@ -351,14 +287,6 @@ def template_mapping(cfg: dict) -> dict:
         "WORKFLOW_AUDIT_ENABLED": str(post_audit.get("enabled", False)).lower(),
         "WORKFLOW_AUDIT_MODEL": audit_model,
         "WORKFLOW_AUDIT_THINKING": post_audit.get("thinking", "medium"),
-        "WORKFLOW_AUDIT_MODEL_FIELD": claude_model_field(audit_model, audit_provider),
-        "WORKFLOW_AUDIT_MODEL_SUMMARY": claude_model_summary(audit_model, audit_provider),
-        "WORKFLOW_AUDIT_TOOLS": ", ".join(
-            claude_tools(["Read", "Grep", "Glob"], audit_provider)
-        ),
-        "WORKFLOW_AUDIT_DISPATCH": external_dispatch_block(
-            "workflow-audit", audit_model, audit_provider
-        ),
     }
 
 
@@ -433,13 +361,10 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
             "AGENT_MODEL": view["model"],
             "AGENT_MODEL_FIELD": claude_model_field(view["model"], view["provider"]),
             "AGENT_MODEL_SUMMARY": claude_model_summary(view["model"], view["provider"]),
-            "AGENT_DISPATCH": external_dispatch_block(
-                key, view["model"], view["provider"]
-            ),
             "AGENT_PROVIDER": view["provider"],
             "AGENT_PURPOSE": view["purpose"],
             "AGENT_READ_ONLY": str(view["read_only"]).lower(),
-            "AGENT_TOOLS": ", ".join(claude_tools(view["tools"], view["provider"])),
+            "AGENT_TOOLS": ", ".join(view["tools"]),
             "AGENT_INVOCATION": view["invocation"],
             "AGENT_AUTO_SELECT": str(view["auto_select"]).lower(),
             "AGENT_CAPABILITIES": list_text(view["capabilities"]),

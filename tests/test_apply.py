@@ -18,8 +18,6 @@ class ApplyTests(unittest.TestCase):
     def setUpClass(cls):
         with (ROOT / "roles.config.json").open(encoding="utf-8") as fh:
             cls.config = json.load(fh)
-        with (ROOT / "adapters" / "pi" / "roles.config.pi.json").open(encoding="utf-8") as fh:
-            cls.pi_overlay = json.load(fh)
 
     def test_current_config_and_all_specialists_validate(self):
         self.assertEqual(apply.validate(self.config), [])
@@ -32,39 +30,38 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(fe["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
         workflow_audit = self.config["routing"]["postWorkflowAudit"]
         self.assertTrue(workflow_audit["enabled"])
-        self.assertEqual(workflow_audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        self.assertEqual(workflow_audit["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
         self.assertEqual(workflow_audit["thinking"], "medium")
         audit = self.config["agents"]["audit"]
         self.assertEqual(audit["displayName"], "Audit")
-        self.assertEqual(audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        # Deliberately not the builder's model: an audit should not be the same
+        # model reviewing its own work.
+        self.assertEqual(audit["model"], {"class": "fable", "id": "", "provider": "anthropic"})
+        self.assertNotEqual(audit["model"]["class"], self.config["roles"]["builder"]["model"]["class"])
         self.assertEqual(audit["invocation"], "direct-call-only")
         self.assertFalse(audit["autoSelectEligible"])
         self.assertFalse(audit["canDelegate"])
         self.assertEqual(audit["delegateTo"], [])
 
-    def test_pi_overlay_is_valid_and_preserves_shared_agent_metadata(self):
-        self.assertEqual(apply.validate(self.pi_overlay), [])
-        planner_model = self.pi_overlay["roles"]["planner"]["model"]
-        self.assertEqual(planner_model["provider"], "openrouter")
-        self.assertIn(
-            (planner_model.get("class"), planner_model.get("id")),
-            {
-                ("moonshotai/kimi-k3", "moonshotai/kimi-k3"),
-                ("anthropic/claude-opus-5", ""),
-            },
-        )
-        self.assertEqual(self.pi_overlay["roles"]["builder"]["model"], {"class": "openai/gpt-5.6-terra", "id": "openai/gpt-5.6-terra", "provider": "openrouter"})
-        self.assertEqual(self.pi_overlay["agents"]["audit"]["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
-        self.assertEqual(self.pi_overlay["routing"]["postWorkflowAudit"], self.config["routing"]["postWorkflowAudit"])
-        self.assertEqual(set(self.pi_overlay["agents"]), set(self.config["agents"]))
-        for key in self.config["agents"]:
-            shared = copy.deepcopy(self.config["agents"][key])
-            overlay = copy.deepcopy(self.pi_overlay["agents"][key])
-            shared.pop("model")
-            overlay.pop("model")
-            self.assertEqual(overlay, shared, key)
-        self.assertEqual(self.pi_overlay["routing"], self.config["routing"])
-        self.assertEqual(self.pi_overlay["providers"], self.config["providers"])
+    def test_every_configured_model_is_anthropic(self):
+        """This machine no longer uses external models (2026-07-26)."""
+        self.assertEqual(set(self.config["providers"]), {"anthropic"})
+        models = [entry["model"] for entry in self.config["roles"].values()]
+        models += [entry["model"] for entry in self.config["agents"].values()]
+        models.append(self.config["routing"]["postWorkflowAudit"]["model"])
+        for model in models:
+            self.assertEqual(model["provider"], "anthropic", model)
+            self.assertNotIn("/", model.get("class", ""), model)
+            self.assertNotIn("/", model.get("id", ""), model)
+
+    def test_no_pi_openrouter_overlay_remains(self):
+        self.assertFalse((ROOT / "adapters" / "pi" / "roles.config.pi.json").exists())
+
+    def test_rendering_a_non_anthropic_profile_fails_loudly(self):
+        """The trap this replaced: Claude Code silently discards such a value."""
+        with self.assertRaises(SystemExit):
+            apply.claude_model_field("openai/gpt-5.6-sol", "openrouter")
+        self.assertEqual(apply.claude_model_field("opus", "anthropic"), "opus")
 
     def test_direct_call_only_cannot_be_auto_selected(self):
         bad = copy.deepcopy(self.config)
@@ -145,43 +142,9 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("/route.md", rendered)
         self.assertIn("Knowledge directory", rendered)
         self.assertIn("/.claude/agents/workflow-audit.md", rendered)
-        self.assertIn("openai/gpt-5.6-sol", rendered)
         self.assertIn("enabled=true", rendered)
         self.assertIn("medium", rendered)
         self.assertIn("Light audit", rendered)
-
-    # --- external-provider dispatch -------------------------------------- #
-    # Claude Code discards an unrecognized `model:` value and silently runs the
-    # subagent on the session model. A profile configured on another vendor
-    # family for independence must therefore never emit its raw provider id as
-    # frontmatter, or the resulting verdict reads as cross-family when it is not.
-
-    def test_external_provider_frontmatter_is_resolvable(self):
-        self.assertEqual(apply.claude_model_field("openai/gpt-5.6-sol", "openrouter"), "inherit")
-        self.assertEqual(apply.claude_model_field("opus", "anthropic"), "opus")
-
-    def test_external_provider_gains_bash_without_disturbing_native(self):
-        self.assertIn("Bash", apply.claude_tools(["Read", "Grep"], "openrouter"))
-        self.assertEqual(apply.claude_tools(["Read", "Grep"], "anthropic"), ["Read", "Grep"])
-        # already present -> not duplicated
-        self.assertEqual(
-            apply.claude_tools(["Read", "Bash"], "openrouter").count("Bash"), 1
-        )
-
-    def test_dispatch_block_only_for_external_providers(self):
-        self.assertEqual(apply.external_dispatch_block("runner", "sonnet", "anthropic"), "")
-        block = apply.external_dispatch_block("audit", "openai/gpt-5.6-sol", "openrouter")
-        self.assertIn("external_review.py", block)
-        self.assertIn("--profile audit", block)
-        self.assertIn("report the failure and stop", block)
-
-    def test_model_summary_does_not_overstate_external_agents(self):
-        summary = apply.claude_model_summary("openai/gpt-5.6-sol", "openrouter")
-        self.assertIn("session model", summary)
-        self.assertIn("openai/gpt-5.6-sol", summary)
-        self.assertNotIn("running on the configured model class", summary)
-
-    # --- per-agent command surface (Pi parity) ---------------------------- #
 
     def test_every_agent_gets_invoke_and_model_commands(self):
         output = io.StringIO()

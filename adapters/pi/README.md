@@ -16,11 +16,13 @@ separate extension documented in
 `subsite-scaffold` *skill* used by other harnesses.
 
 The extension first reads the nearest project `roles.config.json` or
-`.pi/roles.config.json`. Without a project override it uses the Pi-only runtime
-overlay at `adapters/pi/roles.config.pi.json`, then safely falls back to this
-repository's shared, harness-neutral `roles.config.json` if the overlay is
-missing or invalid. The overlay is intentionally read **only by Pi**: Claude
-Code, Codex/generic consumers, and other harnesses use the shared config.
+`.pi/roles.config.json`, then falls back to this repository's shared,
+harness-neutral `roles.config.json`.
+
+**The Pi-only OpenRouter overlay was removed on 2026-07-26** when this machine
+stopped using external models. Pi now resolves the same Anthropic registry as
+every other harness. `config.ts` already treated a missing overlay as a fallback
+condition, so nothing in the extension changed.
 
 The live adapter provides:
 
@@ -42,10 +44,10 @@ The live adapter provides:
   `/prose-writer`, `/team-leader`, `/l1-programmer`, `/librarian`,
   `/fe-designer`, and `/audit`. Audit runs directly on GPT-5.6 Sol without
   delegated agents and is intended for harness/runtime bug audits.
-- A `/<agent>-model` command for every agent, which shows or changes only the
-  Pi overlay model. For example: `/planner-model moonshotai/kimi-k3 --provider
-  openrouter --id moonshotai/kimi-k3`. Team Leader runs only via its explicit
-  `/team-leader` command.
+- A `/<agent>-model` command for every agent. With no overlay present these
+  report the shared registry value; writing one recreates a Pi-only overlay, so
+  prefer `apply.py set` unless a Pi-specific divergence is actually wanted.
+  Team Leader runs only via its explicit `/team-leader` command.
 
 Planner and lightweight-auditor read-only behavior is enforced by the child Pi
 tool allowlist `read,grep,find,ls`. Provider, model, and the audit's medium
@@ -57,26 +59,15 @@ Validate without a model call:
 
 ```bash
 node ~/.pi/agent/extensions/pb-primitive/_selftest.mjs
-pi --no-extensions -e ~/.pi/agent/extensions/pb-primitive/index.ts --list-models moonshotai/kimi-k3
+pi --no-extensions -e ~/.pi/agent/extensions/pb-primitive/index.ts --list-models opus
 python3 apply.py validate   # from the repository root
 ```
 
 This adapter intentionally does not change configuration. Use the shared
 `/home/dyadmin/dev-primitive/roles.config.json` and the normal `apply.py set`
-workflow for cross-harness model changes. Change Pi-only models with:
-
-```bash
-python3 /home/dyadmin/dev-primitive/apply.py set <role> <model> \
-  --provider openrouter \
-  --config /home/dyadmin/dev-primitive/adapters/pi/roles.config.pi.json \
-  --no-apply
-```
-
-`--no-apply` prevents accidental generation of Claude agents from Pi-only
-models. The native `/<agent>-model` slash commands are safer for interactive Pi
-changes because they atomically write only that overlay; they never touch
-Claude, Codex, shared registry, or project configuration. Install or refresh
-the harness surfaces with:
+workflow for model changes; with no Pi overlay, that is the only path and it
+applies to every harness at once. Install or refresh the harness surfaces
+with:
 
 ```bash
 python3 /home/dyadmin/dev-primitive/install_harness.py all

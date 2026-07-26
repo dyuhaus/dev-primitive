@@ -66,19 +66,20 @@ source of truth. Each role has a **customizable model class**:
   OpenAI-compatible endpoint incl. OpenRouter, Google, or a local model), which
   names the wire protocol and the **env vars** for the API key / base URL.
 
-This shared file is harness-neutral: Claude Code, Codex/generic consumers, and
-other harnesses use its Planner/Builder values (`fable`/`opus` on Anthropic by
-default). Pi alone has a complete runtime overlay at
-`adapters/pi/roles.config.pi.json`, whose defaults currently select the
-configured Planner and GPT-5.6 Terra Builder through OpenRouter when no
-project-level config overrides it. The Pi overlay also defaults
-`routing.postWorkflowAudit` to GPT-5.6 Sol at medium thinking; an effective
-project-level configuration may change or disable that reviewer.
+This shared file is harness-neutral: every harness — Claude Code, Pi,
+Codex/generic consumers — resolves its Planner/Builder values (`fable`/`opus` on
+Anthropic by default), unless a project-level config overrides them.
+`routing.postWorkflowAudit` defaults to `sonnet` at medium thinking; an
+effective project-level configuration may change or disable that reviewer.
 
-Change a shared cross-harness model by editing this file and re-running
-`apply.py`. Change a Pi-only model with `apply.py set --config
-adapters/pi/roles.config.pi.json --no-apply`; the final flag prevents generating
-Claude agents from Pi values. The config is validated by
+Pi previously carried its own OpenRouter overlay; it was removed on 2026-07-26
+when the reference machine stopped using external models. Reintroducing one is
+a supported path — drop a `roles.config.pi.json` back into `adapters/pi/` and
+`install_harness.py` will validate and honor it — but nothing requires it.
+
+Change a model by editing this file and re-running `apply.py`; with no overlay
+in play that single edit applies to every harness at once. The config is
+validated by
 [`roles.schema.json`](./roles.schema.json) and by `apply.py validate`. **No
 secrets live here — only the names of env vars.**
 

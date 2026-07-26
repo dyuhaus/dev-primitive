@@ -97,8 +97,10 @@ and may delegate a clearly outlined subtask to L1 Programmer or a separable
 frontend implementation to FE-Designer. Planner recommends the next role but
 does not invoke specialists itself; the parent orchestrator owns handoffs.
 After each completed Planner → Builder or Planner → specialist workflow, run the
-configured lightweight GPT-5.6 Sol audit at medium thinking before the final
-report. This review is read-only and narrower than the direct-call Audit agent.
+configured lightweight audit at medium thinking before the final report. It is
+read-only and narrower than the direct-call Audit agent. Both auditors run on
+Anthropic models chosen to differ from the builder's, which is model-level
+independence, not cross-family independence.
 
 Available skills:
 - `/agent-runner`
@@ -149,17 +151,25 @@ def sync_pi_extension(name, home, dry_run):
 
 
 def install_pi(home, dry_run):
+    # The Pi-only OpenRouter overlay was removed on 2026-07-26 when this machine
+    # stopped using external models. Pi's config.ts already falls back to the
+    # shared harness-neutral registry when the overlay file is absent, so its
+    # absence is the normal case. An overlay is still honored if one is
+    # reintroduced, and is validated before use.
     overlay = ROOT / "adapters" / "pi" / "roles.config.pi.json"
-    if not overlay.is_file():
-        raise SystemExit(f"Missing Pi-only overlay: {overlay}")
-    overlay_cfg = primitive.load_config(overlay)
-    overlay_errors = primitive.validate(overlay_cfg)
-    if overlay_errors:
-        raise SystemExit("Invalid Pi-only overlay:\n" + "\n".join(f"- {error}" for error in overlay_errors))
+    if overlay.is_file():
+        overlay_errors = primitive.validate(primitive.load_config(overlay))
+        if overlay_errors:
+            raise SystemExit(
+                "Invalid Pi-only overlay:\n" + "\n".join(f"- {error}" for error in overlay_errors)
+            )
     for name in PI_EXTENSIONS:
         sync_pi_extension(name, home, dry_run)
     if dry_run:
-        print(f"Pi will read the live overlay at {overlay}; it is not copied into ~/.pi.")
+        if overlay.is_file():
+            print(f"Pi will read the live overlay at {overlay}; it is not copied into ~/.pi.")
+        else:
+            print("No Pi overlay present; Pi resolves the shared roles.config.json.")
 
 
 def install_hermes(cfg, home):

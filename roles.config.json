@@ -388,9 +388,9 @@
       "displayName": "Audit",
       "purpose": "audit and repair AI harness, agent-routing, extension, and developer-tooling failures by reproducing symptoms, inspecting live runtime and durable source, applying direct fixes without delegated agents, validating installed and source surfaces, and preserving verified changes through the native Git and pull-request workflow",
       "model": {
-        "class": "openai/gpt-5.6-sol",
-        "id": "openai/gpt-5.6-sol",
-        "provider": "openrouter"
+        "class": "fable",
+        "id": "",
+        "provider": "anthropic"
       },
       "readOnly": false,
       "tools": [
@@ -441,9 +441,9 @@
     "postWorkflowAudit": {
       "enabled": true,
       "model": {
-        "class": "openai/gpt-5.6-sol",
-        "id": "openai/gpt-5.6-sol",
-        "provider": "openrouter"
+        "class": "sonnet",
+        "id": "",
+        "provider": "anthropic"
       },
       "thinking": "medium"
     },
@@ -465,11 +465,6 @@
       "type": "anthropic",
       "apiKeyEnv": "ANTHROPIC_API_KEY",
       "baseUrlEnv": ""
-    },
-    "openrouter": {
-      "type": "openai",
-      "apiKeyEnv": "OPENROUTER_API_KEY",
-      "baseUrlEnv": "OPENROUTER_BASE_URL"
     }
   }
 }

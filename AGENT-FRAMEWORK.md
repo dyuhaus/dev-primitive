@@ -3,8 +3,8 @@
 This repository defines a portable registry of purpose-specific agents. The
 shared `roles.config.json` is provider- and harness-neutral; `roles.schema.json`
 describes the data shape, and `apply.py` validates and renders adapters. Pi alone
-has a complete runtime overlay at `adapters/pi/roles.config.pi.json` for its PB
-models; other harnesses never consume that file.
+resolves the same shared registry as every other harness; its OpenRouter overlay
+was removed on 2026-07-26.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ models; other harnesses never consume that file.
   extensions, runtime processes, and developer-tool integrations. It works
   directly without delegated agents, updates both durable source and installed
   surfaces, and verifies reinstall/PR preservation. It uses GPT-5.6 Sol through
-  OpenRouter and is **direct-call-only**.
+  `fable` and is **direct-call-only**.
 - **Team Leader** coordinates genuinely large tasks that require multiple
   workstreams. It is **direct-call-only** and must never be automatically
   selected or self-invoked.
@@ -77,23 +77,21 @@ Each specialist profile has:
 | `outputContract` | Required report/result behaviors |
 | `infoSources` | Required evidence sources and native inspection/validation guidance |
 
-Pi uses `adapters/pi/roles.config.pi.json` only after project-local configs
-have been considered. It currently sets Planner to Kimi K3 and Builder to
-GPT-5.6 Terra through OpenRouter. Claude Code, Codex/generic consumers, and
-other harnesses continue to resolve shared Planner/Builder values.
+**This machine uses Anthropic models only.** The Pi-only OpenRouter overlay
+(`adapters/pi/roles.config.pi.json`) was removed on 2026-07-26; Pi now resolves
+the same shared registry as every other harness. Pi's `config.ts` already falls
+back to it when no overlay exists, and `install_harness.py` treats an absent
+overlay as normal. A project-local `roles.config.json` still overrides.
+
 
 Useful commands:
 
 ```bash
 python3 apply.py validate
-python3 apply.py validate --config adapters/pi/roles.config.pi.json
 python3 apply.py show
 python3 apply.py generic
 python3 apply.py set l1-programmer sonnet --no-apply
 python3 apply.py claude --dry-run
-# Pi only — --no-apply prevents generating Claude agents from the overlay:
-python3 apply.py set planner moonshotai/kimi-k3 --provider openrouter \
-  --config adapters/pi/roles.config.pi.json --no-apply
 ```
 
 `apply.py claude` renders the PB adapters and one generic Claude Code adapter
