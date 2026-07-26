@@ -376,6 +376,35 @@ def list_text(items):
     return "\n".join(f"- {item}" for item in items) or "- None specified"
 
 
+def short_purpose(purpose: str, limit: int = 90) -> str:
+    """First clause of a purpose, for a one-line command description.
+
+    Slash-command descriptions render on a single line, so the multi-clause
+    registry purposes have to be trimmed. Cut on a separator when one falls in
+    range so the result stays a readable phrase rather than a truncated word.
+    """
+    text = " ".join(purpose.split())
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    for sep in ("; ", ": ", ", "):
+        head, found, _ = window.rpartition(sep)
+        if found and len(head) > limit // 3:
+            return head
+    return window.rsplit(" ", 1)[0] + "…"
+
+
+def delegation_note(view: dict) -> str:
+    """One sentence on whether this profile may delegate, for the invoke command."""
+    if not view.get("can_delegate"):
+        return (
+            "does not delegate. If the work needs another specialist, it must say so "
+            "rather than hand off."
+        )
+    targets = ", ".join(view.get("delegate_to") or []) or "its registered targets"
+    return f"may delegate narrowly scoped subtasks to {targets}."
+
+
 def install_claude(cfg: dict, home: Path, dry: bool) -> None:
     mapping = template_mapping(cfg)
     tdir = SCRIPT_DIR / "adapters" / "claude-code"
@@ -388,8 +417,12 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
         (tdir / "pbg-builder.md.tmpl", home / ".claude" / "commands" / "pbg-builder.md"),
         (tdir / "pbg-planner.md.tmpl", home / ".claude" / "commands" / "pbg-planner.md"),
         (tdir / "route.md.tmpl", home / ".claude" / "commands" / "route.md"),
+        # Pi calls this /agents; that name is a Claude Code builtin.
+        (tdir / "agent-catalog.md.tmpl", home / ".claude" / "commands" / "agent-catalog.md"),
     ]
     agent_template = tdir / "agent.md.tmpl"
+    invoke_template = tdir / "agent-invoke.md.tmpl"
+    model_template = tdir / "agent-model.md.tmpl"
     if cfg.get("agents") and not agent_template.exists():
         fail(f"missing template: {agent_template}")
     for key in cfg.get("agents", {}):
@@ -417,8 +450,20 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
             "AGENT_OUTPUT_CONTRACT": list_text(view["output_contract"]),
             "AGENT_INFO_SOURCES": list_text(view["info_sources"]),
             "AGENT_KNOWLEDGE_DIR": str(SCRIPT_DIR / "agent-knowledge" / key),
+            "AGENT_PURPOSE_SHORT": short_purpose(view["purpose"]),
+            "AGENT_DELEGATION_NOTE": delegation_note(view),
         }
         jobs.append((agent_template, home / ".claude" / "agents" / f"{key}.md", values))
+        # Per-agent slash commands, matching Pi's /<agent> and /<agent>-model.
+        jobs.append((invoke_template, home / ".claude" / "commands" / f"{key}.md", values))
+        jobs.append((model_template, home / ".claude" / "commands" / f"{key}-model.md", values))
+    mapping["DIRECT_CALL_ONLY"] = (
+        ", ".join(
+            k for k, a in (cfg.get("agents") or {}).items()
+            if a.get("invocation") == "direct-call-only"
+        )
+        or "none"
+    )
     for item in jobs:
         template, target = item[0], item[1]
         values = item[2] if len(item) == 3 else mapping

@@ -181,6 +181,48 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("openai/gpt-5.6-sol", summary)
         self.assertNotIn("running on the configured model class", summary)
 
+    # --- per-agent command surface (Pi parity) ---------------------------- #
+
+    def test_every_agent_gets_invoke_and_model_commands(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        rendered = output.getvalue()
+        base = "/tmp/agent-framework-test-home/.claude/commands"
+        for key in apply.SPECIALIST_KEYS:
+            self.assertIn(f"{base}/{key}.md", rendered)
+            self.assertIn(f"{base}/{key}-model.md", rendered)
+        self.assertIn(f"{base}/agent-catalog.md", rendered)
+        # /agents is a Claude Code builtin; the catalog must not claim that name.
+        self.assertNotIn(f"{base}/agents.md", rendered)
+
+    def test_catalog_names_the_direct_call_only_profiles(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        rendered = output.getvalue()
+        self.assertIn("team-leader", rendered)
+        self.assertIn("audit", rendered)
+        self.assertNotIn("{{DIRECT_CALL_ONLY}}", rendered)
+
+    def test_no_unsubstituted_placeholders_remain(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        self.assertNotIn("{{", output.getvalue())
+
+    def test_short_purpose_trims_without_breaking_a_word(self):
+        long = "designs things; builds other things, and also reviews a third category of things"
+        short = apply.short_purpose(long, limit=40)
+        self.assertLessEqual(len(short), 41)
+        self.assertNotIn("  ", short)
+        self.assertEqual(apply.short_purpose("brief purpose"), "brief purpose")
+
+    def test_delegation_note_reflects_configuration(self):
+        may = apply.delegation_note({"can_delegate": True, "delegate_to": ["l1-programmer"]})
+        self.assertIn("l1-programmer", may)
+        self.assertIn("does not delegate", apply.delegation_note({"can_delegate": False}))
+
     def test_rendered_claude_agents_never_emit_a_provider_qualified_model(self):
         output = io.StringIO()
         with redirect_stdout(output):
