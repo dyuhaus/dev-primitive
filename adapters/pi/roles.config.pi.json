@@ -6,8 +6,8 @@
     "planner": {
       "purpose": "planning and reasoning about the project: architecture, design, root-cause analysis, trade-off calls, sequencing work, and reviewing an approach before it is built",
       "model": {
-        "class": "moonshotai/kimi-k3",
-        "id": "moonshotai/kimi-k3",
+        "class": "anthropic/claude-opus-5",
+        "id": "",
         "provider": "openrouter"
       },
       "readOnly": true
