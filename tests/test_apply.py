@@ -150,6 +150,46 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("medium", rendered)
         self.assertIn("Light audit", rendered)
 
+    # --- external-provider dispatch -------------------------------------- #
+    # Claude Code discards an unrecognized `model:` value and silently runs the
+    # subagent on the session model. A profile configured on another vendor
+    # family for independence must therefore never emit its raw provider id as
+    # frontmatter, or the resulting verdict reads as cross-family when it is not.
+
+    def test_external_provider_frontmatter_is_resolvable(self):
+        self.assertEqual(apply.claude_model_field("openai/gpt-5.6-sol", "openrouter"), "inherit")
+        self.assertEqual(apply.claude_model_field("opus", "anthropic"), "opus")
+
+    def test_external_provider_gains_bash_without_disturbing_native(self):
+        self.assertIn("Bash", apply.claude_tools(["Read", "Grep"], "openrouter"))
+        self.assertEqual(apply.claude_tools(["Read", "Grep"], "anthropic"), ["Read", "Grep"])
+        # already present -> not duplicated
+        self.assertEqual(
+            apply.claude_tools(["Read", "Bash"], "openrouter").count("Bash"), 1
+        )
+
+    def test_dispatch_block_only_for_external_providers(self):
+        self.assertEqual(apply.external_dispatch_block("runner", "sonnet", "anthropic"), "")
+        block = apply.external_dispatch_block("audit", "openai/gpt-5.6-sol", "openrouter")
+        self.assertIn("external_review.py", block)
+        self.assertIn("--profile audit", block)
+        self.assertIn("report the failure and stop", block)
+
+    def test_model_summary_does_not_overstate_external_agents(self):
+        summary = apply.claude_model_summary("openai/gpt-5.6-sol", "openrouter")
+        self.assertIn("session model", summary)
+        self.assertIn("openai/gpt-5.6-sol", summary)
+        self.assertNotIn("running on the configured model class", summary)
+
+    def test_rendered_claude_agents_never_emit_a_provider_qualified_model(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        for line in output.getvalue().splitlines():
+            if line.startswith("model:"):
+                value = line.split(":", 1)[1].strip()
+                self.assertNotIn("/", value, f"unresolvable frontmatter model: {value}")
+
 
 if __name__ == "__main__":
     unittest.main()
