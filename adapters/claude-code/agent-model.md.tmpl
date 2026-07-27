@@ -27,15 +27,14 @@ Do this:
 
 Scope of this command:
 
-- It edits the **shared** registry that Claude Code, Codex, and generic
-  consumers resolve. It does **not** change Pi's overlay at
-  `adapters/pi/roles.config.pi.json`; use Pi's own `/{{AGENT_KEY}}-model`
-  command for that.
-- Pointing this profile at a **non-Anthropic** provider does not make the
-  subagent run there — this harness cannot dispatch other providers for a
-  subagent. The generated agent will instead run on the session model and route
-  its verdict through `scripts/external_review.py`. Say so plainly if the
-  requested change crosses provider families, and verify afterward with:
-  `python3 /home/dyadmin/dev-primitive/scripts/external_review.py --check --profile {{AGENT_KEY}}`
+- It edits the **shared** registry that every harness resolves — Claude Code,
+  Pi, Codex, and generic consumers alike. There is no Pi overlay any more, so
+  one edit applies everywhere.
+- **Only Anthropic model classes are valid.** This machine removed external-model
+  use on 2026-07-26, and `apply.py` deliberately **fails** rather than accept a
+  non-Anthropic provider: Claude Code silently discards such a value and runs the
+  session model instead, which would look like it worked. If the user asks for a
+  non-Anthropic model, relay that error and explain the constraint rather than
+  editing the config by hand to force it through.
 
 Never hand-edit the generated agent files — `set` is the only supported path.

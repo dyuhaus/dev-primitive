@@ -168,6 +168,15 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("audit", rendered)
         self.assertNotIn("{{DIRECT_CALL_ONLY}}", rendered)
 
+    def test_generated_commands_reference_nothing_that_was_removed(self):
+        """A generated command must not instruct the user to run a deleted path."""
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        rendered = output.getvalue()
+        for gone in ("external_review.py", "roles.config.pi.json", "openrouter"):
+            self.assertNotIn(gone, rendered, f"generated output still references {gone}")
+
     def test_no_unsubstituted_placeholders_remain(self):
         output = io.StringIO()
         with redirect_stdout(output):
