@@ -18,8 +18,6 @@ class ApplyTests(unittest.TestCase):
     def setUpClass(cls):
         with (ROOT / "roles.config.json").open(encoding="utf-8") as fh:
             cls.config = json.load(fh)
-        with (ROOT / "adapters" / "pi" / "roles.config.pi.json").open(encoding="utf-8") as fh:
-            cls.pi_overlay = json.load(fh)
 
     def test_current_config_and_all_specialists_validate(self):
         self.assertEqual(apply.validate(self.config), [])
@@ -32,39 +30,38 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(fe["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
         workflow_audit = self.config["routing"]["postWorkflowAudit"]
         self.assertTrue(workflow_audit["enabled"])
-        self.assertEqual(workflow_audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        self.assertEqual(workflow_audit["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
         self.assertEqual(workflow_audit["thinking"], "medium")
         audit = self.config["agents"]["audit"]
         self.assertEqual(audit["displayName"], "Audit")
-        self.assertEqual(audit["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
+        # Deliberately not the builder's model: an audit should not be the same
+        # model reviewing its own work.
+        self.assertEqual(audit["model"], {"class": "fable", "id": "", "provider": "anthropic"})
+        self.assertNotEqual(audit["model"]["class"], self.config["roles"]["builder"]["model"]["class"])
         self.assertEqual(audit["invocation"], "direct-call-only")
         self.assertFalse(audit["autoSelectEligible"])
         self.assertFalse(audit["canDelegate"])
         self.assertEqual(audit["delegateTo"], [])
 
-    def test_pi_overlay_is_valid_and_preserves_shared_agent_metadata(self):
-        self.assertEqual(apply.validate(self.pi_overlay), [])
-        planner_model = self.pi_overlay["roles"]["planner"]["model"]
-        self.assertEqual(planner_model["provider"], "openrouter")
-        self.assertIn(
-            (planner_model.get("class"), planner_model.get("id")),
-            {
-                ("moonshotai/kimi-k3", "moonshotai/kimi-k3"),
-                ("anthropic/claude-opus-5", ""),
-            },
-        )
-        self.assertEqual(self.pi_overlay["roles"]["builder"]["model"], {"class": "openai/gpt-5.6-terra", "id": "openai/gpt-5.6-terra", "provider": "openrouter"})
-        self.assertEqual(self.pi_overlay["agents"]["audit"]["model"], {"class": "openai/gpt-5.6-sol", "id": "openai/gpt-5.6-sol", "provider": "openrouter"})
-        self.assertEqual(self.pi_overlay["routing"]["postWorkflowAudit"], self.config["routing"]["postWorkflowAudit"])
-        self.assertEqual(set(self.pi_overlay["agents"]), set(self.config["agents"]))
-        for key in self.config["agents"]:
-            shared = copy.deepcopy(self.config["agents"][key])
-            overlay = copy.deepcopy(self.pi_overlay["agents"][key])
-            shared.pop("model")
-            overlay.pop("model")
-            self.assertEqual(overlay, shared, key)
-        self.assertEqual(self.pi_overlay["routing"], self.config["routing"])
-        self.assertEqual(self.pi_overlay["providers"], self.config["providers"])
+    def test_every_configured_model_is_anthropic(self):
+        """This machine no longer uses external models (2026-07-26)."""
+        self.assertEqual(set(self.config["providers"]), {"anthropic"})
+        models = [entry["model"] for entry in self.config["roles"].values()]
+        models += [entry["model"] for entry in self.config["agents"].values()]
+        models.append(self.config["routing"]["postWorkflowAudit"]["model"])
+        for model in models:
+            self.assertEqual(model["provider"], "anthropic", model)
+            self.assertNotIn("/", model.get("class", ""), model)
+            self.assertNotIn("/", model.get("id", ""), model)
+
+    def test_no_pi_openrouter_overlay_remains(self):
+        self.assertFalse((ROOT / "adapters" / "pi" / "roles.config.pi.json").exists())
+
+    def test_rendering_a_non_anthropic_profile_fails_loudly(self):
+        """The trap this replaced: Claude Code silently discards such a value."""
+        with self.assertRaises(SystemExit):
+            apply.claude_model_field("openai/gpt-5.6-sol", "openrouter")
+        self.assertEqual(apply.claude_model_field("opus", "anthropic"), "opus")
 
     def test_direct_call_only_cannot_be_auto_selected(self):
         bad = copy.deepcopy(self.config)
@@ -145,10 +142,67 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("/route.md", rendered)
         self.assertIn("Knowledge directory", rendered)
         self.assertIn("/.claude/agents/workflow-audit.md", rendered)
-        self.assertIn("openai/gpt-5.6-sol", rendered)
         self.assertIn("enabled=true", rendered)
         self.assertIn("medium", rendered)
         self.assertIn("Light audit", rendered)
+
+    def test_every_agent_gets_invoke_and_model_commands(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        rendered = output.getvalue()
+        base = "/tmp/agent-framework-test-home/.claude/commands"
+        for key in apply.SPECIALIST_KEYS:
+            self.assertIn(f"{base}/{key}.md", rendered)
+            self.assertIn(f"{base}/{key}-model.md", rendered)
+        self.assertIn(f"{base}/agent-catalog.md", rendered)
+        # /agents is a Claude Code builtin; the catalog must not claim that name.
+        self.assertNotIn(f"{base}/agents.md", rendered)
+
+    def test_catalog_names_the_direct_call_only_profiles(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        rendered = output.getvalue()
+        self.assertIn("team-leader", rendered)
+        self.assertIn("audit", rendered)
+        self.assertNotIn("{{DIRECT_CALL_ONLY}}", rendered)
+
+    def test_generated_commands_reference_nothing_that_was_removed(self):
+        """A generated command must not instruct the user to run a deleted path."""
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        rendered = output.getvalue()
+        for gone in ("external_review.py", "roles.config.pi.json", "openrouter"):
+            self.assertNotIn(gone, rendered, f"generated output still references {gone}")
+
+    def test_no_unsubstituted_placeholders_remain(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        self.assertNotIn("{{", output.getvalue())
+
+    def test_short_purpose_trims_without_breaking_a_word(self):
+        long = "designs things; builds other things, and also reviews a third category of things"
+        short = apply.short_purpose(long, limit=40)
+        self.assertLessEqual(len(short), 41)
+        self.assertNotIn("  ", short)
+        self.assertEqual(apply.short_purpose("brief purpose"), "brief purpose")
+
+    def test_delegation_note_reflects_configuration(self):
+        may = apply.delegation_note({"can_delegate": True, "delegate_to": ["l1-programmer"]})
+        self.assertIn("l1-programmer", may)
+        self.assertIn("does not delegate", apply.delegation_note({"can_delegate": False}))
+
+    def test_rendered_claude_agents_never_emit_a_provider_qualified_model(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+        for line in output.getvalue().splitlines():
+            if line.startswith("model:"):
+                value = line.split(":", 1)[1].strip()
+                self.assertNotIn("/", value, f"unresolvable frontmatter model: {value}")
 
 
 if __name__ == "__main__":

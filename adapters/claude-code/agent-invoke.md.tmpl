@@ -1,0 +1,35 @@
+---
+description: Hand this task to {{AGENT_DISPLAY_NAME}} ({{AGENT_MODEL}}) — {{AGENT_PURPOSE_SHORT}}
+argument-hint: "<task>, or blank to describe the agent"
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;
+     change agents.{{AGENT_KEY}} and re-run: python3 apply.py claude -->
+
+Invoke the **{{AGENT_DISPLAY_NAME}}** specialist (`{{AGENT_KEY}}`) directly.
+This is the explicit-call path, so it is valid even for a direct-call-only
+profile — invocation policy for this agent is **{{AGENT_INVOCATION}}**.
+
+**Task:** $ARGUMENTS
+
+Do this:
+
+1. If `$ARGUMENTS` is empty, describe what this agent is for — its mission,
+   boundaries, and when to prefer it — from
+   `{{AGENT_KNOWLEDGE_DIR}}/PROFILE.md`, then stop. Invoke nothing.
+2. Otherwise call the `{{AGENT_KEY}}` subagent with the task via the Agent tool
+   (`subagent_type: "{{AGENT_KEY}}"`). Pass along the concrete context it needs:
+   the repository or paths involved, the acceptance criteria, and any
+   constraints the user already stated. Do not restate the task in a way that
+   changes its scope.
+3. Relay the agent's result. Report its validation evidence, assumptions, and
+   anything it escalated or left unfinished, without inflating what it verified.
+
+Boundaries that still apply:
+
+- Do not use this command to bypass a profile's scope. If the task is outside
+  what this agent does, say so and recommend the right one — `/route <task>`
+  explains the choice — rather than forcing it through.
+- This agent {{AGENT_DELEGATION_NOTE}}
+- If the task is substantive implementation work and no plan exists yet, prefer
+  `/pb`, which plans before building.

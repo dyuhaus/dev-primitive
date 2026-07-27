@@ -35,8 +35,8 @@ Everything is driven by [`roles.config.json`](./roles.config.json):
 This shared registry is harness-neutral. Claude Code, Codex/generic consumers,
 and other harnesses use its Planner/Builder defaults (`fable`/`opus` on
 Anthropic). Pi alone can load the complete runtime-only
-`adapters/pi/roles.config.pi.json` overlay, selecting Kimi K3/Terra through
-OpenRouter only if no project-level Pi config exists.
+the shared registry, the same as every other harness, unless a project-level Pi
+config exists. The former OpenRouter overlay was removed on 2026-07-26.
 
 Each model has a configurable `class`, optional pinned `id`, and `provider`.
 Pinned ids win over classes. Use aliases when automatic provider upgrades are
@@ -51,7 +51,7 @@ delegating. This is separate from the full direct-call Audit specialist.
 When `routing.automaticSelection.enabled` is true, a supporting harness may
 offer a handoff but must obtain confirmation before delegation; no agent is
 silently dispatched. Team Leader and Audit are always direct-call-only. Audit
-uses GPT-5.6 Sol through OpenRouter and directly investigates and repairs
+uses `fable` — deliberately not the builder's model — and directly investigates and repairs
 harness/runtime failures without invoking delegated agents.
 
 ## Usage

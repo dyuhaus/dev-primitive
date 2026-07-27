@@ -8,7 +8,6 @@ available only inside this repository.
 `/home/dyadmin/dev-primitive/` remains the portable source of truth:
 
 - `roles.config.json` — harness-neutral profiles and models
-- `adapters/pi/roles.config.pi.json` — Pi-only Planner/Builder OpenRouter overlay
 - `roles.schema.json` — structure
 - `apply.py` — validation, Claude rendering, and generated knowledge profiles
 - `router.py` — deterministic, explainable applicability routing with confirmation-required handoff
@@ -47,9 +46,8 @@ files should not be hand-edited; update the source registry and reinstall.
 Claude Code and generic/Codex consumers resolve Planner/Builder from the shared
 harness-neutral registry: `fable` and `opus` on Anthropic. Pi alone, when no
 project-level roles config is present, resolves its complete live overlay at
-`adapters/pi/roles.config.pi.json`: Planner is `moonshotai/kimi-k3` and Builder
-is `openai/gpt-5.6-terra` via OpenRouter. Pi project configs always win; an
-invalid/missing Pi overlay safely falls back to the shared config. Pi offers
+the shared registry, exactly like the other harnesses — its OpenRouter overlay was
+removed on 2026-07-26. Pi project configs still win where one exists. Pi offers
 explicit `/<agent>` slash commands for every profile and `/<agent>-model`
 commands to manage the Pi overlay only. `/agents` is the native catalog: it
 lists every available agent command and the effective active model assignment.
@@ -95,7 +93,6 @@ generated specialty profiles. It preserves `agent-knowledge/*/LESSONS.md`.
 cd /home/dyadmin/dev-primitive
 python3 apply.py validate
 python3 -m unittest discover -s tests -v
-python3 apply.py validate --config adapters/pi/roles.config.pi.json
 python3 router.py --explain 'Update the Vault index and fix broken wikilinks'
 python3 apply.py knowledge
 node ~/.pi/agent/extensions/pb-primitive/_selftest.mjs

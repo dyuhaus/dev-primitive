@@ -1,0 +1,40 @@
+---
+description: Switch {{AGENT_DISPLAY_NAME}}'s model (now {{AGENT_MODEL}}) and regenerate — wraps `apply.py set {{AGENT_KEY}}`.
+argument-hint: "<model class>, or --id <exact id>, or blank to show current"
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;
+     change agents.{{AGENT_KEY}} and re-run: python3 apply.py claude -->
+
+Change which model the **{{AGENT_DISPLAY_NAME}}** profile (`{{AGENT_KEY}}`)
+uses. Thin wrapper over the primitive's `set` command — `roles.config.json`
+stays the single source of truth and the adapters are regenerated for you.
+
+**Requested change:** $ARGUMENTS
+
+Do this:
+
+1. If `$ARGUMENTS` is empty, run `python3 /home/dyadmin/dev-primitive/apply.py show`,
+   report this agent's current row, then stop — change nothing.
+2. Otherwise run exactly:
+   `python3 /home/dyadmin/dev-primitive/apply.py set {{AGENT_KEY}} $ARGUMENTS`
+   A bare value sets the model **class** and clears any pin; `--id <id>` pins an
+   exact model; `--provider <name>` changes provider; `--no-apply` updates the
+   config without regenerating; `--dry-run` previews. The command validates
+   before writing, so an invalid value aborts without changing anything.
+3. Relay the resolved table it prints and confirm this agent now resolves to the
+   intended model. Relay any validation error verbatim instead.
+
+Scope of this command:
+
+- It edits the **shared** registry that every harness resolves — Claude Code,
+  Pi, Codex, and generic consumers alike. There is no Pi overlay any more, so
+  one edit applies everywhere.
+- **Only Anthropic model classes are valid.** This machine removed external-model
+  use on 2026-07-26, and `apply.py` deliberately **fails** rather than accept a
+  non-Anthropic provider: Claude Code silently discards such a value and runs the
+  session model instead, which would look like it worked. If the user asks for a
+  non-Anthropic model, relay that error and explain the constraint rather than
+  editing the config by hand to force it through.
+
+Never hand-edit the generated agent files — `set` is the only supported path.
