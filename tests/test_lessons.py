@@ -111,6 +111,52 @@ class ExclusiveCreate(LessonsTestBase):
         self.assertIn("os.O_EXCL", source)
 
 
+class EntryIsAlwaysReachable(LessonsTestBase):
+    """A written-but-invisible entry is a lost lesson with no error."""
+
+    def test_a_non_ascii_session_id_still_yields_a_readable_entry(self):
+        try:
+            path = self.add(session="héllowörld-session-id")
+        except lessons.LessonError as exc:
+            # Without the ASCII squash the unreadable-name guard fires instead,
+            # which is a refusal, not a lost lesson — but the lesson is still
+            # not recorded, so this is a failure of this test's claim.
+            self.fail(f"a non-ASCII session id must still produce a reachable entry: {exc}")
+        self.assertIsNotNone(
+            lessons.ENTRY_NAME_RE.match(path.name), f"unreadable entry name: {path.name}"
+        )
+        self.assertEqual(lessons.pending_entries(KEY), [path])
+        result = lessons.promote(KEY, apply_changes=False)
+        self.assertEqual(len(result["promoted"]), 1)
+
+    def test_every_written_entry_is_visible_to_show_and_promote(self):
+        sessions = ("6163b36c-1a5b", "héllowörld", "AB", "ЖЖЖЖЖЖЖЖ", "12345678")
+        written = set()
+        for index, session in enumerate(sessions):
+            try:
+                written.add(self.add(
+                    session=session, lesson=f"Distinct practice {index}.", allow_multiple=True
+                ))
+            except lessons.LessonError as exc:
+                self.fail(f"session {session!r} produced no recordable entry: {exc}")
+        self.assertEqual(len(written), len(sessions))
+        self.assertEqual(set(lessons.pending_entries(KEY)), written)
+        self.assertEqual(
+            len(lessons.promote(KEY, apply_changes=False)["promoted"]), len(sessions)
+        )
+
+    def test_an_unparseable_entry_name_is_refused_rather_than_written(self):
+        original = lessons.entry_filename
+        lessons.entry_filename = lambda now, session, rand: "not-an-entry-name.md"
+        try:
+            with self.assertRaises(lessons.LessonError) as ctx:
+                self.add()
+        finally:
+            lessons.entry_filename = original
+        self.assertIn("silently unreachable", str(ctx.exception))
+        self.assertEqual(list(lessons.inbox_dir(KEY).iterdir()), [])
+
+
 class BranchMutableGuard(LessonsTestBase):
     """The property: no lesson write inside a branch-mutable tree."""
 
@@ -193,6 +239,57 @@ class ContentGuards(LessonsTestBase):
         with self.assertRaises(lessons.LessonError):
             lessons.resolve_key("not-a-profile")
 
+    def test_realistic_evidence_strings_are_not_refused_as_secrets(self):
+        """A false positive refuses a real lesson. Each of these once did or could."""
+        for text in (
+            "test_promote_aborts_when_the_target_changed_underneath_it",
+            "/home/dyadmin/appdata/training-code401/PASSWORD.txt",
+            "~/githubStaging/InHouseTrader/scripts/ls_responder.py at commit 3dba990",
+            "python3 -m unittest discover -s tests; tests/control_mutants.py",
+            "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",  # a 40-char lowercase sha
+        ):
+            self.assertEqual(lessons.scan_for_secrets(text), [], text)
+            self.add(evidence=text)
+            for path in lessons.pending_entries(KEY):
+                path.unlink()
+
+    def test_each_credential_rule_catches_something_only_it_catches(self):
+        """Asserted per rule.
+
+        A sample that trips two rules cannot show that either one works: the
+        generic length rule was silently covering every vendor prefix here.
+        """
+        # Assembled at runtime, never written out as a literal: these are
+        # decoys, but the repository's own gitleaks pre-commit hook cannot tell
+        # the difference and blocked the commit that first spelled them out.
+        # Concatenation keeps the fixtures honest without weakening the scanner
+        # or reaching for --no-verify.
+        q = "q" * 24
+        samples = {
+            "anthropic key": "sk-" + "ant-api03-" + q,
+            "openai-style key": "sk-" + q,
+            "github token": "gh" + "p_" + q,
+            "aws access key id": "AK" + "IAIOSFODNN7EXAMPLE",
+            "google api key": "AI" + "za" + q,
+            "slack token": "xo" + "xb-" + q,
+            "private key block": "-----BEGIN " + "RSA PRIVATE KEY" + "-----",
+            # Low entropy on purpose, so the repo's scanner does not read this
+            # decoy as real; it still has the shape our rule looks for.
+            "token-shaped blob": ("aZ0" * 14)[:40],
+        }
+        for label, sample in samples.items():
+            hits = lessons.scan_for_secrets(sample)
+            self.assertIn(label, hits, f"{label} not matched by {sample!r} (got {hits})")
+            self.assertEqual(hits, [label], f"{sample!r} trips more than {label}: {hits}")
+        with self.assertRaises(lessons.LessonError):
+            self.add(evidence=f"token was {samples['github token']}")
+
+    def test_an_impossible_calendar_date_is_refused(self):
+        with self.assertRaises(lessons.LessonError) as ctx:
+            self.add(date="2026-02-30")
+        self.assertIn("not a real calendar date", str(ctx.exception))
+        self.assertEqual(lessons.pending_entries(KEY), [])
+
 
 class Promote(LessonsTestBase):
     def test_preview_does_not_write_or_consume(self):
@@ -274,6 +371,49 @@ class Promote(LessonsTestBase):
         # Nothing written, nothing consumed: the other branch's file is intact.
         self.assertEqual(self.lessons_md.read_text(encoding="utf-8"), switched)
         self.assertEqual(len(lessons.pending_entries(KEY)), 1)
+
+    def test_promote_aborts_when_the_file_was_replaced_with_identical_bytes(self):
+        """`git checkout` recreates the file: same bytes, new inode."""
+        self.add()
+        original_read = lessons.Path.read_bytes
+        state = {"calls": 0}
+        body = self.lessons_md.read_text(encoding="utf-8")
+
+        def read_bytes(self_path):
+            data = original_read(self_path)
+            if Path(self_path) == self.lessons_md:
+                state["calls"] += 1
+                if state["calls"] == 1:
+                    replacement = self.lessons_md.with_name("swap")
+                    replacement.write_text(body, encoding="utf-8")
+                    os.replace(str(replacement), str(self.lessons_md))
+            return data
+
+        lessons.Path.read_bytes = read_bytes
+        try:
+            with self.assertRaises(lessons.LessonError) as ctx:
+                lessons.promote(KEY, apply_changes=True)
+        finally:
+            lessons.Path.read_bytes = original_read
+        self.assertIn("changed while promote", str(ctx.exception))
+        self.assertEqual(self.lessons_md.read_text(encoding="utf-8"), body)
+        self.assertEqual(len(lessons.pending_entries(KEY)), 1)
+
+    def test_a_failed_write_leaves_no_temp_file_in_the_worktree(self):
+        self.add()
+        before = set(os.listdir(self.lessons_md.parent))
+        original = lessons.os.replace
+
+        def boom(src, dst):
+            raise OSError("simulated failure")
+
+        lessons.os.replace = boom
+        try:
+            with self.assertRaises(OSError):
+                lessons.promote(KEY, apply_changes=True)
+        finally:
+            lessons.os.replace = original
+        self.assertEqual(set(os.listdir(self.lessons_md.parent)), before)
 
     def test_a_failed_replace_leaves_the_target_untouched(self):
         self.add()

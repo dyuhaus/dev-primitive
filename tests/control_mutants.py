@@ -45,8 +45,9 @@ LOGIC_MUTANTS = [
      "    repo = branch_mutable_ancestor(path)\n    if False:"),
     ("M03-guard-misses-linked-worktrees", "lessons.py",
      'if (candidate / ".git").exists():', 'if (candidate / ".git").is_dir():'),
-    ("M04-promote-no-compare-and-swap", "lessons.py",
-     "        if hashlib.sha256(current).hexdigest() != digest:", "        if False:"),
+    ("M04-promote-no-content-compare-and-swap", "lessons.py",
+     "        if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "        if file_identity(target) != identity:"),
     ("M05-promote-does-not-consume-the-entry", "lessons.py",
      '        os.replace(str(path), str(destination))\n        result["moved"].append(str(destination))',
      '        result["moved"].append(str(destination))'),
@@ -69,6 +70,31 @@ LOGIC_MUTANTS = [
      '    appdata = Path.home() / "appdata"', "    appdata = SCRIPT_DIR"),
     ("M14-session-token-truncated", "lessons.py",
      '        return "".join(alnum[:8])', '        return "".join(alnum[:6])'),
+    # Regressions found while attacking this branch, each fixed here.
+    ("M15-session-squash-accepts-non-ascii", "lessons.py",
+     "    alnum = [c for c in raw.lower() if c.isascii() and c.isalnum()]",
+     "    alnum = [c for c in raw.lower() if c.isalnum()]"),
+    ("M16-unreadable-entry-name-written-anyway", "lessons.py",
+     "        if not ENTRY_NAME_RE.match(last_name):",
+     "        if False:"),
+    ("M17-secret-scanner-false-positives-return", "lessons.py",
+     '    ("token-shaped blob", re.compile(\n'
+     '        r"(?=[A-Za-z0-9+=_\\-]*[0-9])(?=[A-Za-z0-9+=_\\-]*[A-Z])(?=[A-Za-z0-9+=_\\-]*[a-z])"\n'
+     '        r"[A-Za-z0-9+=_\\-]{40,}"\n'
+     '    )),',
+     '    ("token-shaped blob", re.compile(r"[A-Za-z0-9+=_\\-]{56,}")),'),
+    ("M18-secret-scanner-disarmed", "lessons.py",
+     '    ("github token", re.compile(r"\\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})")),',
+     '    ("github token", re.compile(r"\\bZZZ_NEVER_MATCHES\\b")),'),
+    ("M19-promote-ignores-file-identity", "lessons.py",
+     "        if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "        if hashlib.sha256(current).hexdigest() != digest:"),
+    ("M20-temp-file-left-in-the-worktree", "lessons.py",
+     "        try:\n            tmp.unlink()\n        except OSError:\n            pass\n        raise",
+     "        raise"),
+    ("M21-impossible-date-accepted", "lessons.py",
+     '        datetime.strptime(day, "%Y-%m-%d")',
+     '        datetime.strptime("2026-01-01", "%Y-%m-%d")'),
 ]
 
 # --------------------------------------------------- generated instructions

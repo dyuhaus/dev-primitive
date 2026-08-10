@@ -96,10 +96,24 @@ SECRET_PATTERNS = (
     ("google api key", re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}")),
     ("slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}")),
     ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    # A long unbroken run of token characters, with no path or sentence
-    # punctuation to break it up. Deliberately conservative: file paths contain
-    # `/` and `.`, prose contains spaces, so neither trips this.
-    ("high-entropy blob", re.compile(r"[A-Za-z0-9+=_\-]{56,}")),
+    # A long token-shaped run: 40+ characters mixing digits, upper and lower
+    # case, unbroken by a space, `/` or `.`.
+    #
+    # Every clause here is load-bearing against a FALSE POSITIVE, and this repo
+    # is public, so a false positive means an agent's real lesson is refused.
+    # `/` and `.` are excluded so a long path cannot form the run
+    # (`/home/dyadmin/appdata/training-code401/PASSWORD` otherwise matches).
+    # Requiring all three character classes spares snake_case identifiers
+    # (`test_promote_aborts_when_the_target_changed_underneath_it` — 57
+    # characters, and the first thing this rule wrongly rejected) and lowercase
+    # hex git SHAs.
+    #
+    # This is a first line, not the last: the commit that `promote` produces is
+    # still scanned by the repository's gitleaks pre-commit hook.
+    ("token-shaped blob", re.compile(
+        r"(?=[A-Za-z0-9+=_\-]*[0-9])(?=[A-Za-z0-9+=_\-]*[A-Z])(?=[A-Za-z0-9+=_\-]*[a-z])"
+        r"[A-Za-z0-9+=_\-]{40,}"
+    )),
 )
 
 
@@ -175,7 +189,15 @@ def assert_not_branch_mutable(path: Path) -> None:
 # --------------------------------------------------------------------------
 
 def _squash_to_8(raw: str) -> str:
-    alnum = [c for c in raw.lower() if c.isalnum()]
+    """Reduce any session identifier to 8 characters of `[0-9a-z]`.
+
+    ASCII-only is not cosmetic. `str.isalnum()` is true for non-ASCII letters,
+    so a session id such as `héllowörld` produced the token `héllowör` and a
+    filename `ENTRY_NAME_RE` does not match — the entry was written and then
+    invisible to `show` and `promote`. A silently unreachable lesson is the
+    exact failure class this tool exists to remove.
+    """
+    alnum = [c for c in raw.lower() if c.isascii() and c.isalnum()]
     if len(alnum) >= 8:
         return "".join(alnum[:8])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
@@ -208,6 +230,20 @@ def session_id(explicit: "str | None" = None) -> "tuple[str, str]":
 
 def _rand4() -> str:
     return secrets.token_hex(2)
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make a newly created entry's *name* durable, not just its bytes."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:  # pragma: no cover - not every platform allows this
+        return
+    try:
+        os.fsync(fd)
+    except OSError:  # pragma: no cover - directory fsync is unsupported on some filesystems
+        pass
+    finally:
+        os.close(fd)
 
 
 def _utc_now() -> datetime:
@@ -310,6 +346,10 @@ def add_lesson(
     day = date or now.strftime("%Y-%m-%d")
     if not DATE_RE.match(day):
         raise LessonError(f"--date must be YYYY-MM-DD, got {day!r}")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise LessonError(f"--date is not a real calendar date: {day!r}")
 
     token, source = session_id(session)
     if not allow_multiple:
@@ -332,6 +372,13 @@ def add_lesson(
     last_name = ""
     for _ in range(NAME_COLLISION_RETRIES):
         last_name = entry_filename(now, token, _rand4())
+        # A name the readers cannot parse is a lesson that is written and then
+        # invisible. Refuse before creating the file rather than after.
+        if not ENTRY_NAME_RE.match(last_name):
+            raise LessonError(
+                f"refusing to write an entry named {last_name!r}: `show` and `promote` "
+                "would not recognize it, so the lesson would be silently unreachable"
+            )
         target = directory / last_name
         try:
             # O_EXCL: the kernel adjudicates. A losing writer never truncates the
@@ -345,6 +392,12 @@ def add_lesson(
             raise
         with os.fdopen(fd, "wb") as fh:
             fh.write(payload)
+            fh.flush()
+            # The inbox has no off-box copy (see agent-knowledge/README.md), so
+            # this is the only copy of the lesson until it is promoted. Pay for
+            # the fsync; a zero-length entry after a crash is a lost lesson.
+            os.fsync(fh.fileno())
+        _fsync_directory(directory)
         return target
     raise LessonError(
         f"could not claim a unique entry name after {NAME_COLLISION_RETRIES} attempts "
@@ -480,10 +533,33 @@ def insert_dated_lines(text: str, lines: "list[str]") -> str:
     return "\n".join(merged) + "\n"
 
 
+def file_identity(path: Path) -> "tuple[int, int] | None":
+    """(device, inode) of `path`, or None if it does not exist.
+
+    `git checkout` does not rewrite a tracked file in place; it unlinks and
+    recreates it, so the inode changes even when the bytes happen to be
+    identical. Content hashing alone cannot see that.
+    """
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
 def atomic_write(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + f".tmp-{os.getpid()}-{_rand4()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(str(tmp), str(path))
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except BaseException:
+        # Never leave a stray temp file in a repository worktree: it would show
+        # up as an untracked change in somebody else's `git status`.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def promote(key: str, apply_changes: bool) -> dict:
@@ -502,6 +578,7 @@ def promote(key: str, apply_changes: bool) -> dict:
     for path in entries:
         parsed.append((path, parse_entry(path)))
 
+    identity = file_identity(target)
     before = target.read_bytes()
     text = before.decode("utf-8")
     digest = hashlib.sha256(before).hexdigest()
@@ -531,12 +608,18 @@ def promote(key: str, apply_changes: bool) -> dict:
 
     if to_add:
         merged = insert_dated_lines(text, to_add)
-        # Compare-and-swap. If the file changed between the read and the write —
-        # the branch-switch case, or a concurrent promote — abort rather than
-        # write back a stale body. This is why promote is safe even though it is
-        # the one read-modify-write in the system.
+        # Compare-and-swap on BOTH the bytes and the file identity. If either
+        # changed between the read and the write — the branch-switch case, a
+        # concurrent promote, or a manual edit — abort rather than write back a
+        # stale body. The identity check catches a `git checkout` that replaced
+        # the file with byte-identical content but a new inode.
+        #
+        # This narrows the window; it does not eliminate it. `promote` remains
+        # the one read-modify-write in the system, which is precisely why it is
+        # a deliberate human-run command and not something an agent does
+        # mid-task. Nothing here is safe to call from a background job.
         current = target.read_bytes()
-        if hashlib.sha256(current).hexdigest() != digest:
+        if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:
             raise LessonError(
                 f"{target} changed while promote was preparing its edit "
                 "(branch switch, concurrent promote, or a manual edit). "
