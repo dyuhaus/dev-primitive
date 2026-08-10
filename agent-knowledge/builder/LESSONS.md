@@ -4,13 +4,25 @@ This is durable, harness-neutral working knowledge for the `builder` profile.
 Keep behavioral, reusable lessons here; do **not** store secrets, credentials,
 personal data, private task content, or chronological task logs.
 
+**Do not hand-edit this file to record a lesson.** It lives in a branch-mutable
+tree, so appending to it is a read-modify-write that a branch switch can silently
+undo. Record lessons with:
+
+```bash
+python3 lessons.py add --key builder --task "<task type>" \
+  --lesson "<reusable lesson>" --evidence "<path, command, or measurement>"
+```
+
+and fold them in later with `python3 lessons.py promote --key builder --apply`,
+which is a deliberate, reviewable act. Hand edits are for consolidation only.
+
 ## Durable practices
 
 - Read the profile and applicable project instructions before work.
 
 ## Dated lessons
 
-<!-- Append at most one evidence-backed, generalized entry after substantive work:
+<!-- Entries are written by `lessons.py promote`, in the documented format:
 - YYYY-MM-DD | task type | reusable lesson | evidence/path or validation command
 When this section reaches 50 entries, fold the oldest reusable items into Durable
 practices and remove the consolidated dated entries. -->
@@ -39,3 +51,4 @@ practices and remove the consolidated dated entries. -->
 - 2026-07-30 | credential redaction / sanitizer tests | `secret not in output` is far too weak an assertion for a redactor, and it fails in the direction that matters. A redactor whose value-match consumes only ONE character leaves nearly the whole credential in place and still passes containment, because the full string is no longer present verbatim. Assert instead that no N-character FRAGMENT of the secret survives (sliding window, N~8), and separately assert the match ran to the end of the value. The same audit needs a second habit: enumerate sinks by tracing what the public surface actually reads, not by grepping for the pattern the previous fix touched — a status field written through a different helper is the same credential on a second public endpoint. | InHouseTrading redaction port: a mutant narrowing `[^&\s'\"]+` to `[^&\s'\"]` was killed by exactly ONE test, and by accident (idempotency), while 31 of 32 key characters leaked; fragment assertions took that mutant to 28 kills. Tracing `known_indicator_status_dashboard.py:282` found `set_runner_status(..., str(exc))` writing the key into `state.json`'s publicly served `runner_message` — a path the upstream fix never covered. 14/14 mutants killed; controls 33/4 and 27/10 vs 37 passing.
 - 2026-07-31 | guards that branch on an external command's exit code | Before treating a non-zero exit as one specific meaning, check whether the tool reuses that code for a SECOND meaning and distinguishes them only by stderr — if it does, the collapsed reading is a blind write on top of a value you failed to read. The test for it must assert the LOG LINE, not the resulting state: when both the correct and the broken build end with nothing written (the read failed, so the write fails too), a state-only assertion passes against both. | repo-backup core.hooksPath self-heal: `git config --local --get` exits 1 for "key absent" AND for a chmod-000 config (`warning: unable to access ...`), so `returncode == 1` alone classifies an unreadable config as unset. A mutant replacing the guard with `elif res.returncode != 0:` was killed only by the two cases asserting `"could not read core.hooksPath" in log`; every hooksPath-value assertion passed against it. 12/0, control 4/8, 9/9 mutants killed.
 - 2026-07-31 | changing a gate/policy whose justification is a stated assumption | When a decision rule is justified by a claim about a person's behaviour, the acceptance test is that person's real decision history, not a fixture — and check first whether the claim contradicts the system's own reason for existing, because that inversion reads as sound in code review and is obvious in the data. Beyond "the target cases moved", the replay must show two more things: that NOTHING moved in an unintended direction (compare full verdict histograms, not just the target rows), and that any exemption you claim to have PRESERVED is exercised by real rows rather than being vacuously true. A surviving mutant needs a third check too — whether the reverted branch is still REACHABLE, since a change that makes a branch dead makes its mutant unfalsifiable by construction. | pr_relay `autonomy_decision`: the approved-at-head fast path was justified by "a human's eyes were on this exact commit" while the system existed because David approves PRs he has not read; replaying 60 already-merged PRs moved 31/17/12 (refuse/review/merge) to 31/29/0, all 12 movers approved-at-head, none becoming a refuse, and 3 of the 12 touching control-surface paths — which is what proved the sensitive-path exemption survived rather than merely going unexercised.
+- 2026-08-10 | mutation-control harnesses for Python | A mutation control that restores the source file in place must disable bytecode caching, or it silently re-runs the MUTANT from a stale .pyc: restoring the original within the same second at the same byte length (which any single-character mutant guarantees) reproduces the cached (mtime, size) key exactly, so later unrelated mutants inherit the previous one's failures and read as false kills. | dev-primitive tests/control_mutants.py: three instruction-only mutants each 'killed' all 14 lessons.py tests; with PYTHONDONTWRITEBYTECODE=1 plus a __pycache__ sweep each killed only its own 1-2 tests.

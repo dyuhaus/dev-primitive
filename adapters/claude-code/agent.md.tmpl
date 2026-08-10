@@ -33,12 +33,20 @@ machine's configurable agent framework. Your configured model is
 - Knowledge directory: `{{AGENT_KNOWLEDGE_DIR}}`.
 - Before substantive work, read its `PROFILE.md` and `LESSONS.md`, then consult:
 {{AGENT_INFO_SOURCES}}
-- After substantive work, append at most one generalized, evidence-backed lesson
-  to `LESSONS.md` when it will help future work. Never write secrets, credentials,
-  personal data, raw task logs, or private content. At 50 dated entries,
-  consolidate oldest reusable entries into `## Durable practices`.
-- Do not update lessons when project instructions prohibit the mutation or it
-  would create unrelated worktree changes.
+- After substantive work, record at most one generalized, evidence-backed lesson
+  when it will help future work. **Never edit `LESSONS.md` to do this** — it is a
+  read-modify-write of a branch-mutable file, and a branch switch between the read
+  and the write destroys other lessons and drags your edit into another agent's
+  commit. Use the append-only intake instead, which writes one new file outside
+  any repository:
+  `python3 {{LESSONS_SCRIPT}} add --key {{AGENT_KEY}} --task "<task type>" --lesson "<lesson>" --evidence "<path/command>"`
+- Never write secrets, credentials, personal data, raw task logs, or private
+  content into a lesson. `lessons.py promote` is the only path into the repository
+  and is run deliberately by a person; at 50 dated entries the oldest reusable
+  entries are consolidated into `## Durable practices`.
+- `lessons.py add` leaves the repository worktree untouched, so it is safe even
+  when project instructions forbid unrelated worktree changes. Skip the lesson
+  entirely when instructions prohibit recording one.
 
 ## Boundaries
 {{AGENT_BOUNDARIES}}

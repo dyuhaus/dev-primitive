@@ -96,8 +96,19 @@ use the host's `/goal` followed by `/pb` as documented by that harness.
 the registry; it documents each agent's specialty, information gathering, and
 boundaries. Each neighboring `LESSONS.md` is deliberately preserved and stores
 only generalized, evidence-backed practices—never secrets, personal data, or
-task logs. Agents read these files before substantive work and may add one
-lesson afterward when the project permits the mutation.
+task logs. Agents read these files before substantive work and may record one
+lesson afterward when the project permits it.
+
+Recording a lesson goes through `lessons.py`, never through an edit to
+`LESSONS.md`. The invariant is: **no lesson write may be a read-modify-write of
+a file inside a branch-mutable tree.** `lessons.py add` creates one new file per
+lesson with `O_CREAT | O_EXCL`, under a state root outside any repository, and
+refuses at runtime if its target resolves inside a git work tree. `lessons.py
+promote` is the only path from that inbox into the repository: preview by
+default, `--apply` to write, compare-and-swap on the bytes it read, atomic
+replace, no commit. See
+[`agent-knowledge/README.md`](./agent-knowledge/README.md), including its note on
+inbox durability—the inbox is a queue, not an archive.
 
 ## Portability rules
 

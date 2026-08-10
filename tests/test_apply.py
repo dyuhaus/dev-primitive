@@ -195,6 +195,76 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("l1-programmer", may)
         self.assertIn("does not delegate", apply.delegation_note({"can_delegate": False}))
 
+    def test_every_generated_profile_routes_lessons_through_lessons_py(self):
+        """A profile must never tell an agent to hand-edit LESSONS.md.
+
+        That instruction is what produced the lost update: a read-modify-write of
+        a file inside a branch-mutable tree.
+        """
+        for key in apply.ALL_AGENT_KEYS:
+            profile = apply.profile_markdown(self.config, key)
+            self.assertIn(f"lessons.py add --key {key}", profile, key)
+            self.assertIn("never by editing `lessons.md` yourself", profile.lower(), key)
+            self.assertNotIn("append at most one", profile.lower(), key)
+
+    def test_generated_lessons_file_forbids_hand_editing(self):
+        for key in apply.ALL_AGENT_KEYS:
+            body = apply.lessons_markdown(key)
+            self.assertIn("Do not hand-edit this file to record a lesson", body, key)
+            self.assertIn(f"lessons.py add --key {key}", body, key)
+            self.assertIn(f"lessons.py promote --key {key} --apply", body, key)
+
+    def test_committed_lessons_files_carry_the_current_intake_header(self):
+        """Existing LESSONS.md files are preserved, so their header can drift."""
+        for key in apply.ALL_AGENT_KEYS:
+            path = apply.SCRIPT_DIR / "agent-knowledge" / key / "LESSONS.md"
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("Do not hand-edit this file to record a lesson", text, key)
+            self.assertNotIn("<!-- Append at most one", text, key)
+
+    def test_knowledge_readme_states_the_property_and_the_durability_caveat(self):
+        readme = apply.KNOWLEDGE_README
+        self.assertIn("branch-mutable", readme)
+        self.assertIn("O_CREAT | O_EXCL", readme)
+        self.assertIn("not under git and has no automatic off-box copy", readme)
+        self.assertIn("queue, not an archive", readme)
+        self.assertIn("promote", readme)
+
+    @staticmethod
+    def _rendered_sections(config):
+        """Split the dry-run stream into {target path: rendered content}.
+
+        Asserting against the whole stream is too weak: one template carrying the
+        instruction makes the assertion pass for every other template too.
+        """
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(config, Path("/tmp/agent-framework-test-home"), True)
+        sections, current = {}, None
+        for line in output.getvalue().splitlines():
+            if line.startswith("--- would write ") and line.endswith(" ---"):
+                current = line[len("--- would write "):-len(" ---")]
+                sections[current] = []
+            elif current:
+                sections[current].append(line)
+        return {key: "\n".join(value) for key, value in sections.items()}
+
+    def test_every_generated_claude_agent_routes_lessons_through_lessons_py(self):
+        sections = self._rendered_sections(self.config)
+        base = "/tmp/agent-framework-test-home/.claude/agents"
+        for key in apply.ALL_AGENT_KEYS:
+            body = sections[f"{base}/{key}.md"]
+            self.assertIn("lessons.py add --key", body, key)
+            self.assertIn(key, body.split("lessons.py add --key", 1)[1][:40], key)
+            self.assertNotIn("append at most one", body.lower(), key)
+
+    def test_no_generated_claude_agent_tells_an_agent_to_append_to_lessons_md(self):
+        sections = self._rendered_sections(self.config)
+        for target, body in sections.items():
+            lowered = body.lower()
+            self.assertNotIn("append at most one", lowered, target)
+            self.assertNotIn("lesson\n  to `lessons.md`", lowered, target)
+
     def test_rendered_claude_agents_never_emit_a_provider_qualified_model(self):
         output = io.StringIO()
         with redirect_stdout(output):
