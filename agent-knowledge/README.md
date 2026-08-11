@@ -16,14 +16,20 @@ After substantive work an agent may record **at most one** reusable,
 evidence-backed lesson — with `../lessons.py`, not by editing `LESSONS.md`:
 
 ```bash
-python3 lessons.py add --key builder \
+python3 "$DEV_PRIMITIVE/lessons.py" add --key builder \
   --task "verifying a fix whose symptom is a position" \
   --lesson "Prove the quantity was somewhere else first." \
   --evidence "tools/verify-states.sh, reverted-build control"
-python3 lessons.py show                      # what is pending
-python3 lessons.py promote --key builder     # preview
-python3 lessons.py promote --key builder --apply
+python3 "$DEV_PRIMITIVE/lessons.py" show                      # what is pending
+python3 "$DEV_PRIMITIVE/lessons.py" promote --key builder     # preview
+python3 "$DEV_PRIMITIVE/lessons.py" promote --key builder --apply
 ```
+
+`$DEV_PRIMITIVE` is this repository's checkout — the directory holding
+`lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
+when your working directory happens to be that checkout, and agents run from
+other repositories, where it fails with `can't open file`. Generated harness
+instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.
 
 `add` creates ONE NEW FILE per lesson, with `O_CREAT | O_EXCL`, under a state
 root outside any repository (`~/appdata/agent-knowledge/<key>/inbox/` by

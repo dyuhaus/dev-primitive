@@ -46,8 +46,8 @@ LOGIC_MUTANTS = [
     ("M03-guard-misses-linked-worktrees", "lessons.py",
      'if (candidate / ".git").exists():', 'if (candidate / ".git").is_dir():'),
     ("M04-promote-no-content-compare-and-swap", "lessons.py",
-     "        if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
-     "        if file_identity(target) != identity:"),
+     "    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "    if file_identity(target) != identity:"),
     ("M05-promote-does-not-consume-the-entry", "lessons.py",
      '        os.replace(str(path), str(destination))\n        result["moved"].append(str(destination))',
      '        result["moved"].append(str(destination))'),
@@ -63,7 +63,7 @@ LOGIC_MUTANTS = [
     ("M10-promote-appends-at-eof", "lessons.py",
      "    merged = body[:end] + lines + body[end:]", "    merged = body + lines"),
     ("M11-no-duplicate-detection", "lessons.py",
-     "        if line in text or line in to_add:", "        if False:"),
+     "        if stripped in existing_lines or stripped in seen:", "        if False:"),
     ("M12-field-separator-guard-off", "lessons.py",
      "    if FIELD_SEP in text:", "    if False:"),
     ("M13-state-root-inside-the-repo", "lessons.py",
@@ -87,14 +87,62 @@ LOGIC_MUTANTS = [
      '    ("github token", re.compile(r"\\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})")),',
      '    ("github token", re.compile(r"\\bZZZ_NEVER_MATCHES\\b")),'),
     ("M19-promote-ignores-file-identity", "lessons.py",
-     "        if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
-     "        if hashlib.sha256(current).hexdigest() != digest:"),
+     "    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "    if hashlib.sha256(current).hexdigest() != digest:"),
     ("M20-temp-file-left-in-the-worktree", "lessons.py",
      "        try:\n            tmp.unlink()\n        except OSError:\n            pass\n        raise",
      "        raise"),
     ("M21-impossible-date-accepted", "lessons.py",
      '        datetime.strptime(day, "%Y-%m-%d")',
      '        datetime.strptime("2026-01-01", "%Y-%m-%d")'),
+    # Defects found reviewing this branch, each fixed here. Every one of these
+    # mutants restores behaviour the suite used to pass against.
+    ("M22-cas-skipped-for-an-all-duplicate-batch", "lessons.py",
+     "    current = target.read_bytes()\n"
+     "    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "    current = before if merged is None else target.read_bytes()\n"
+     "    if merged is not None and (hashlib.sha256(current).hexdigest() != digest "
+     "or file_identity(target) != identity):"),
+    ("M23-duplicate-detection-by-substring", "lessons.py",
+     "        if stripped in existing_lines or stripped in seen:",
+     "        if stripped in text or stripped in seen:"),
+    ("M24-one-malformed-entry-aborts-promote", "lessons.py",
+     "        try:\n"
+     "            parsed.append((path, parse_entry(path)))\n"
+     "        except (LessonError, OSError, UnicodeDecodeError) as exc:\n"
+     "            malformed.append((path, str(exc)))",
+     "        parsed.append((path, parse_entry(path)))"),
+    ("M25-malformed-entries-are-consumed-too", "lessons.py",
+     "    for path, _ in parsed:\n        destination = promoted_root / path.name",
+     "    for path, _ in parsed + [(item, None) for item, _ in malformed]:\n"
+     "        destination = promoted_root / path.name"),
+    ("M26-unreadable-entry-locks-the-session-out", "lessons.py",
+     "        pending = [\n"
+     "            name for name in existing_sessions(key).get(token, [])\n"
+     "            if _entry_is_readable(inbox_dir(key) / name)\n"
+     "        ]",
+     "        pending = list(existing_sessions(key).get(token, []))"),
+    ("M27-dated-heading-matched-as-a-substring", "lessons.py",
+     "        if item.strip() == DATED_HEADING:", "        if DATED_HEADING in item:"),
+    ("M28-branch-mutable-guard-is-lexical-again", "lessons.py",
+     "        resolved = Path(os.path.realpath(os.path.expanduser(str(path))))",
+     "        resolved = Path(os.path.abspath(os.path.expanduser(str(path))))"),
+    ("M29-count-dated-counts-the-format-note", "lessons.py",
+     '    section = HTML_COMMENT_RE.sub("", "\\n".join(body[start:end]))',
+     '    section = "\\n".join(body[start:end])'),
+    ("M30-count-dated-runs-to-end-of-file", "lessons.py",
+     '    section = HTML_COMMENT_RE.sub("", "\\n".join(body[start:end]))',
+     '    section = HTML_COMMENT_RE.sub("", "\\n".join(body[start:]))'),
+    ("M31-one-key-failure-skips-every-later-key", "lessons.py",
+     "        results, failures = [], []\n"
+     "        for key in keys:\n"
+     "            try:\n"
+     "                results.append(promote(key, args.apply))\n"
+     "            except LessonError as exc:\n"
+     "                failures.append((key, str(exc)))",
+     "        results, failures = [promote(key, args.apply) for key in keys], []"),
+    ("M32-control-harness-treats-an-error-as-a-kill", "tests/mutant_scoring.py",
+     "    return verdict == KILLED", "    return verdict in (KILLED, ERRORED_ONLY)"),
 ]
 
 # --------------------------------------------------- generated instructions
@@ -125,9 +173,27 @@ INSTRUCTION_MUTANTS = [
     ("D08-lessons-script-path-not-substituted", "apply.py",
      '            "LESSONS_SCRIPT": str(SCRIPT_DIR / "lessons.py"),',
      '            "LESSONS_SCRIPT": "",'),
+    ("D09-committed-docs-give-a-bare-lessons_py", "apply.py",
+     "LESSONS_SCRIPT_REF = '\"$DEV_PRIMITIVE/lessons.py\"'",
+     "LESSONS_SCRIPT_REF = 'lessons.py'"),
+    ("D10-lessons-template-tells-the-agent-to-promote", "apply.py",
+     "`lessons.py promote` is the only route from the inbox into this repository, and\n"
+     "it is **run by a person** who reviews the diff and commits it",
+     "Fold them in later with `promote --key {key} --apply`.\n"
+     "`lessons.py promote` is run by a person who reviews the diff and commits it"),
+    ("D11-install-path-guard-not-wired-in", "apply.py",
+     "def install_claude(cfg: dict, home: Path, dry: bool) -> None:\n"
+     "    assert_generated_paths_are_installable(dry)",
+     "def install_claude(cfg: dict, home: Path, dry: bool) -> None:"),
+    ("D12-worktree-refusal-disabled", "apply.py",
+     '    marker = SCRIPT_DIR / ".git"\n    if marker.is_file():',
+     '    marker = SCRIPT_DIR / ".git"\n    if False:'),
 ]
 
 FAIL_RE = re.compile(r"^(FAIL|ERROR): (\S+) \(([^)]+)\)")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mutant_scoring import classify, counts_as_verified  # noqa: E402
 
 
 def run_suite(root: Path):
@@ -172,18 +238,19 @@ def main() -> int:
                 if not ok:
                     survivors.append(name)
             else:
-                print(f"{name}: {'KILLED' if fails else ('ERRORED-ONLY' if errs else 'SURVIVED')}")
+                verdict = classify(fails, errs)
+                print(f"{name}: {verdict}")
                 for test in fails:
                     print(f"    killed: {test}")
                 for test in errs:
                     print(f"    errored: {test}")
-                if not fails and not errs:
-                    survivors.append(name)
+                if not counts_as_verified(verdict):
+                    survivors.append(f"{name} [{verdict}]")
             path.write_text(original, encoding="utf-8")
 
         print()
         if survivors:
-            print(f"SURVIVORS (claims asserted nowhere): {survivors}")
+            print(f"NOT VERIFIED (no test failed an assertion on this claim): {survivors}")
             return 1
         print("All mutants killed by at least one named test; the no-op killed nothing.")
     return 0

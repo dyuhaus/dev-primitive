@@ -9,12 +9,17 @@ tree, so appending to it is a read-modify-write that a branch switch can silentl
 undo. Record lessons with:
 
 ```bash
-python3 lessons.py add --key runner --task "<task type>" \
+python3 "$DEV_PRIMITIVE/lessons.py" add --key runner --task "<task type>" \
   --lesson "<reusable lesson>" --evidence "<path, command, or measurement>"
 ```
 
-and fold them in later with `python3 lessons.py promote --key runner --apply`,
-which is a deliberate, reviewable act. Hand edits are for consolidation only.
+See [PROFILE.md](./PROFILE.md) for the same command in context. A bare
+`python3 lessons.py` only works from the checkout that holds the script.
+
+`lessons.py promote` is the only route from the inbox into this repository, and
+it is **run by a person** who reviews the diff and commits it — not by an agent
+mid-task, and not from a background job. Hand edits to this file are for one
+thing: consolidating dated entries into `## Durable practices`.
 
 ## Durable practices
 

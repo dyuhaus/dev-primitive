@@ -35,6 +35,21 @@ to write, compares-and-swaps on the file it read (aborting if the file changed
 underneath it, which is exactly the branch-switch case), replaces atomically,
 and never commits anything.
 
+Three properties of `promote` are load-bearing and were each once absent:
+
+  * **The compare-and-swap is unconditional.** Consuming an inbox entry is a
+    write, including when the entry is filed as an already-present duplicate —
+    and "already present" is a conclusion drawn from bytes read earlier. Guard
+    the CAS on "is there anything to append" and a batch of duplicates skips
+    verification, so a branch switch that reverted `LESSONS.md` in between
+    deletes those lessons while reporting success.
+  * **One unreadable entry never blocks the others.** A zero-length file with a
+    well-formed name is `add`'s own crash artifact. It is reported, left in
+    place, and never consumed; the readable entries promote normally.
+  * **Each profile is its own transaction.** One profile's refusal must not
+    leave the profiles before it written and the profiles after it unvisited
+    under a single non-zero exit code.
+
 DURABILITY, STATED PLAINLY
 --------------------------
 `~/appdata` is not under git and has no automatic off-box copy on this machine
@@ -77,6 +92,7 @@ MAX_FIELD_CHARS = {"task": 120, "lesson": 1200, "evidence": 800}
 
 ENTRY_NAME_RE = re.compile(r"^(\d{8}T\d{6}Z)-([0-9a-z]{8})-([0-9a-f]{4})\.md$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 SESSION_ENV_VARS = (
     "AGENT_SESSION_ID",
@@ -161,9 +177,17 @@ def branch_mutable_ancestor(path: Path) -> "Path | None":
     A `.git` entry is checked for *existence*, not type: a linked worktree has a
     `.git` FILE, and a lesson written into a linked worktree is exactly as
     exposed to a branch switch as one written into a primary checkout.
+
+    Symlinks are RESOLVED, not merely normalized. `os.path.abspath` is lexical:
+    it collapses `..` without following links, so a state root that is a symlink
+    to `some-repo/sub/dir` walks the *link's* parents — which are outside any
+    repository — and the guard passes while the write lands inside a work tree.
+    `os.path.realpath` walks the link, so the parents examined are the real
+    ones. That is the difference between enforcing the property and documenting
+    it.
     """
     try:
-        resolved = Path(os.path.abspath(os.path.expanduser(str(path))))
+        resolved = Path(os.path.realpath(os.path.expanduser(str(path))))
     except OSError:  # pragma: no cover - defensive
         return None
     for candidate in (resolved, *resolved.parents):
@@ -312,6 +336,14 @@ def existing_sessions(key: str) -> "dict[str, list[str]]":
     return out
 
 
+def _entry_is_readable(path: Path) -> bool:
+    try:
+        parse_entry(path)
+    except (LessonError, OSError, UnicodeDecodeError):
+        return False
+    return True
+
+
 def entry_text(key: str, date: str, session: str, source: str, task: str, line: str, created: datetime) -> str:
     return (
         "---\n"
@@ -353,7 +385,16 @@ def add_lesson(
 
     token, source = session_id(session)
     if not allow_multiple:
-        pending = existing_sessions(key).get(token)
+        # Count only entries a reader can actually parse. A zero-length or
+        # truncated file is `add`'s own crash artifact, not a recorded lesson,
+        # and letting it satisfy "this session already recorded one" locks the
+        # session out of recording anything until a human deletes the file.
+        # Reading inbox files is safe: the inbox is not branch-mutable, and this
+        # never reads or rewrites the file `add` is about to create.
+        pending = [
+            name for name in existing_sessions(key).get(token, [])
+            if _entry_is_readable(inbox_dir(key) / name)
+        ]
         if pending:
             raise LessonError(
                 f"session {token} already has {len(pending)} pending lesson(s) for {key}: "
@@ -443,14 +484,55 @@ def pending_entries(key: str) -> "list[Path]":
     return [directory / name for name in sorted(os.listdir(directory)) if ENTRY_NAME_RE.match(name)]
 
 
+def dated_heading_index(body: "list[str]") -> "int | None":
+    """Index of the `## Dated lessons` heading LINE, or None.
+
+    Located by exact match on the stripped line, and every caller uses this one
+    function. A substring test (`DATED_HEADING in text`) and a line-equality
+    search disagree on `## Dated lessons (archive)`: the substring test says the
+    section is present, the equality search finds nothing, and `next()` without
+    a default then raises `StopIteration` — not a `LessonError`, so `main`'s
+    handler misses it and the operator gets a traceback. The trigger is a human
+    retitling the heading during the 50-entry consolidation the docs ask for.
+    """
+    for index, item in enumerate(body):
+        if item.strip() == DATED_HEADING:
+            return index
+    return None
+
+
+def dated_section_bounds(body: "list[str]") -> "tuple[int, int] | None":
+    """(first line after the heading, first line of the next `## ` section)."""
+    start = dated_heading_index(body)
+    if start is None:
+        return None
+    end = len(body)
+    for index in range(start + 1, len(body)):
+        if body[index].startswith("## "):
+            end = index
+            break
+    return start + 1, end
+
+
 def count_dated(key: str) -> int:
+    """Number of real dated entries in `<key>/LESSONS.md`.
+
+    Two things are deliberately excluded. HTML comments, because the generated
+    template's own format note *contains a line in the entry format*
+    (`- YYYY-MM-DD | task type | ...`), so a freshly generated, entirely empty
+    file otherwise reports 1 and every populated file is off by one. And
+    anything after the next `## ` heading, because the old count ran to EOF and
+    swept up the bullets of every following section.
+    """
     path = repo_lessons_path(key)
     if not path.is_file():
         return 0
-    text = path.read_text(encoding="utf-8")
-    if DATED_HEADING not in text:
+    body = path.read_text(encoding="utf-8").splitlines()
+    bounds = dated_section_bounds(body)
+    if bounds is None:
         return 0
-    section = text.split(DATED_HEADING, 1)[1]
+    start, end = bounds
+    section = HTML_COMMENT_RE.sub("", "\n".join(body[start:end]))
     return sum(1 for item in section.splitlines() if item.startswith("- "))
 
 
@@ -518,16 +600,18 @@ def _count_promoted(key: str) -> int:
 
 def insert_dated_lines(text: str, lines: "list[str]") -> str:
     """Insert dated lines at the end of the `## Dated lessons` section."""
-    if DATED_HEADING not in text:
-        raise LessonError(f"target file has no {DATED_HEADING!r} heading")
     body = text.splitlines()
-    start = next(i for i, item in enumerate(body) if item.strip() == DATED_HEADING)
-    end = len(body)
-    for index in range(start + 1, len(body)):
-        if body[index].startswith("## "):
-            end = index
-            break
-    while end > start + 1 and not body[end - 1].strip():
+    bounds = dated_section_bounds(body)
+    if bounds is None:
+        raise LessonError(
+            f"target file has no {DATED_HEADING!r} heading of its own.\n"
+            f"  The heading line must read exactly {DATED_HEADING!r} — a retitled heading such "
+            f"as '{DATED_HEADING} (archive)' is not recognized.\n"
+            "  Restore the heading, then re-run promote. Nothing was written and no inbox "
+            "entry was consumed."
+        )
+    start, end = bounds
+    while end > start and not body[end - 1].strip():
         end -= 1
     merged = body[:end] + lines + body[end:]
     return "\n".join(merged) + "\n"
@@ -573,23 +657,41 @@ def promote(key: str, apply_changes: bool) -> dict:
     if not target.is_file():
         raise LessonError(f"no LESSONS.md for {key} at {target}; run `python3 apply.py knowledge` first")
 
+    # One unreadable entry must not jam the queue. A kill, OOM or ENOSPC between
+    # `add`'s O_EXCL create and its write leaves a zero-length file whose NAME is
+    # perfectly well formed — `add`'s own crash artifact. Parsing every entry up
+    # front and letting the first failure propagate turned that artifact into a
+    # total outage: `promote` (with and without --apply) exited 2 for the whole
+    # run, and with no --key it did so partway through the key list. Malformed
+    # entries are now reported, never consumed, and never block the readable
+    # ones.
     entries = pending_entries(key)
-    parsed = []
+    parsed, malformed = [], []
     for path in entries:
-        parsed.append((path, parse_entry(path)))
+        try:
+            parsed.append((path, parse_entry(path)))
+        except (LessonError, OSError, UnicodeDecodeError) as exc:
+            malformed.append((path, str(exc)))
 
     identity = file_identity(target)
     before = target.read_bytes()
     text = before.decode("utf-8")
     digest = hashlib.sha256(before).hexdigest()
+    # Compare whole LINES, not substrings. `line in text` classifies a genuinely
+    # new, SHORTER lesson as a duplicate of a longer existing one that happens to
+    # contain it — and a "duplicate" is consumed into promoted/, so the lesson is
+    # deleted from the queue having never reached the repository.
+    existing_lines = {item.strip() for item in text.splitlines()}
 
-    to_add, duplicates = [], []
+    to_add, duplicates, seen = [], [], set()
     for path, meta in parsed:
         line = meta["line"]
         assert_no_secrets(line)
-        if line in text or line in to_add:
+        stripped = line.strip()
+        if stripped in existing_lines or stripped in seen:
             duplicates.append((path, line))
         else:
+            seen.add(stripped)
             to_add.append(line)
 
     result = {
@@ -598,33 +700,46 @@ def promote(key: str, apply_changes: bool) -> dict:
         "applied": False,
         "promoted": [line for line in to_add],
         "duplicates": [str(path) for path, _ in duplicates],
+        "malformed": [{"file": str(path), "error": message} for path, message in malformed],
         "moved": [],
         "dated_after": count_dated(key) + len(to_add),
     }
-    if not entries:
+    if not parsed:
         return result
     if not apply_changes:
         return result
 
-    if to_add:
-        merged = insert_dated_lines(text, to_add)
-        # Compare-and-swap on BOTH the bytes and the file identity. If either
-        # changed between the read and the write — the branch-switch case, a
-        # concurrent promote, or a manual edit — abort rather than write back a
-        # stale body. The identity check catches a `git checkout` that replaced
-        # the file with byte-identical content but a new inode.
-        #
-        # This narrows the window; it does not eliminate it. `promote` remains
-        # the one read-modify-write in the system, which is precisely why it is
-        # a deliberate human-run command and not something an agent does
-        # mid-task. Nothing here is safe to call from a background job.
-        current = target.read_bytes()
-        if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:
-            raise LessonError(
-                f"{target} changed while promote was preparing its edit "
-                "(branch switch, concurrent promote, or a manual edit). "
-                "Nothing was written and no inbox entry was consumed — re-run promote."
-            )
+    # Prepare the merge BEFORE the compare-and-swap so a refusal (a missing or
+    # retitled heading) aborts with nothing written and nothing consumed.
+    merged = insert_dated_lines(text, to_add) if to_add else None
+
+    # Compare-and-swap on BOTH the bytes and the file identity, and do it
+    # UNCONDITIONALLY — including when every entry was classified a duplicate and
+    # there is nothing to write.
+    #
+    # Guarding this on `if to_add:` reintroduced the exact failure this file
+    # exists to prevent. "Already present" is a conclusion drawn from `text`,
+    # which was read earlier; if a branch switch reverted LESSONS.md in between,
+    # the lines are NOT present on the file that now exists, and consuming the
+    # entries on the strength of the stale read deletes the lessons outright —
+    # applied: true, promoted: [], entries filed under promoted/, nothing in the
+    # repository. Consuming an entry is a write. Every write here is verified.
+    #
+    # The identity check catches a `git checkout` that replaced the file with
+    # byte-identical content but a new inode.
+    #
+    # This narrows the window; it does not eliminate it. `promote` remains the
+    # one read-modify-write in the system, which is precisely why it is a
+    # deliberate human-run command and not something an agent does mid-task.
+    # Nothing here is safe to call from a background job.
+    current = target.read_bytes()
+    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:
+        raise LessonError(
+            f"{target} changed while promote was preparing its edit "
+            "(branch switch, concurrent promote, or a manual edit). "
+            "Nothing was written and no inbox entry was consumed — re-run promote."
+        )
+    if merged is not None:
         atomic_write(target, merged)
 
     promoted_root = promoted_dir(key)
@@ -639,10 +754,13 @@ def promote(key: str, apply_changes: bool) -> dict:
     return result
 
 
-def print_promote(results: "list[dict]") -> int:
+def print_promote(results: "list[dict]", failures: "list[tuple[str, str]]" = ()) -> int:
     any_pending = False
+    malformed_total = 0
     for result in results:
-        pending = len(result["promoted"]) + len(result["duplicates"])
+        malformed = result.get("malformed", [])
+        malformed_total += len(malformed)
+        pending = len(result["promoted"]) + len(result["duplicates"]) + len(malformed)
         if not pending:
             continue
         any_pending = True
@@ -652,20 +770,43 @@ def print_promote(results: "list[dict]") -> int:
             print(f"  + {line}")
         for path in result["duplicates"]:
             print(f"  = already present, will be filed as promoted: {path}")
+        for item in malformed:
+            print(f"  ! UNREADABLE, left in the inbox: {item['file']}")
+            print(f"      {item['error']}")
         if result["dated_after"] > CONSOLIDATION_THRESHOLD:
             print(
                 f"  ! {result['key']} now has {result['dated_after']} dated lessons "
                 f"(> {CONSOLIDATION_THRESHOLD}); consolidate the oldest into "
                 "'## Durable practices'."
             )
-    if not any_pending:
+    for key, message in failures:
+        print(f"\n{key}: FAILED — nothing written, nothing consumed for this profile")
+        for line in str(message).splitlines():
+            print(f"  {line}")
+    if not any_pending and not failures:
         print("nothing pending.")
         return 0
     if any(result["applied"] for result in results):
-        print("\nWritten. Review the diff, then commit it yourself:")
+        # `promote` writes into the checkout this script lives in, so the diff is
+        # in THAT tree — name it, and say so plainly, because on this machine the
+        # canonical checkout doubles as a live deploy source and must not be
+        # branch-switched or committed to casually.
+        print(f"\nWritten into {SCRIPT_DIR}. Review the diff and commit it yourself:")
         print(f"  git -C {SCRIPT_DIR} diff -- agent-knowledge/")
-    else:
+        print("  If that checkout is a deploy source or is not the branch you intend to")
+        print("  commit on, move the diff to a worktree before committing. `promote` never")
+        print("  commits, and never switches a branch.")
+    elif any_pending:
         print("\nPreview only. Re-run with --apply to write.")
+    if malformed_total:
+        print(
+            f"\n{malformed_total} unreadable inbox entr"
+            f"{'y was' if malformed_total == 1 else 'ies were'} skipped and left in place. "
+            "A zero-length entry is a\ncrash artifact from an interrupted `add` — inspect it, "
+            "then delete it. Nothing else\nwas blocked by it."
+        )
+    if failures or malformed_total:
+        return 2
     return 0
 
 
@@ -724,11 +865,25 @@ def main(argv: "list[str] | None" = None) -> int:
         keys = [resolve_key(args.key)] if args.key else agent_keys()
         if args.command == "show":
             return show(keys, args.json)
-        results = [promote(key, args.apply) for key in keys]
+        # Promote each profile independently. Letting one key's refusal abort the
+        # loop left the keys before it already written and consumed while the
+        # keys after it never ran — and the caller saw a single non-zero exit,
+        # from which "nothing happened" is the natural and wrong reading. Each
+        # key is its own transaction; the run reports every outcome.
+        results, failures = [], []
+        for key in keys:
+            try:
+                results.append(promote(key, args.apply))
+            except LessonError as exc:
+                failures.append((key, str(exc)))
         if args.json:
-            print(json.dumps(results, indent=2))
-            return 0
-        return print_promote(results)
+            print(json.dumps(
+                {"results": results,
+                 "failed": [{"key": key, "error": message} for key, message in failures]},
+                indent=2,
+            ))
+            return 2 if failures or any(r.get("malformed") for r in results) else 0
+        return print_promote(results, failures)
     except LessonError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
