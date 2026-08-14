@@ -33,8 +33,27 @@ audit and repair AI harness, agent-routing, extension, and developer-tooling fai
 
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
-material above. After substantive work, append at most one generalized,
-evidence-backed lesson in the documented format if it will improve future work.
+material above. After substantive work, record at most one generalized,
+evidence-backed lesson — **never by editing `LESSONS.md` yourself**:
+
+```bash
+python3 "$DEV_PRIMITIVE/lessons.py" add --key audit \
+  --task "<task type>" --lesson "<reusable lesson>" --evidence "<path, command, or measurement>"
+```
+
+`$DEV_PRIMITIVE` is this repository's checkout — the directory holding
+`lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
+when your working directory happens to be that checkout, and agents run from
+other repositories, where it fails with `can't open file`. Generated harness
+instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.
+
+That writes one new file to the lesson inbox outside this repository. Editing
+`LESSONS.md` in place is a read-modify-write of a branch-mutable file: a branch
+switch can replace it between your read and your write, which silently destroys
+the other branch's lessons and drags your edit into someone else's commit.
+`lessons.py promote` is the only path from the inbox into this repository, and
+it is run deliberately by a person who reviews and commits the diff.
+
 Never include secrets, personal data, credentials, raw task logs, or private
 content. At 50 dated entries, consolidate the oldest reusable points into
 `## Durable practices` before adding more. Do not modify this profile; regenerate

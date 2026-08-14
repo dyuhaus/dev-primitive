@@ -161,10 +161,26 @@ Examples:
 boundaries, information sources, and output expectations. `apply.py knowledge`
 regenerates profiles from the registry but intentionally preserves each
 `LESSONS.md`. Before substantive work an agent reads its profile, lessons, and
-source material. It may append one generalized evidence-backed lesson afterward;
+source material. It may record one generalized evidence-backed lesson afterward;
 lessons never contain secrets, personal data, private task content, or task logs.
 At 50 dated entries the oldest reusable lessons are consolidated into `## Durable
 practices`. See [`agent-knowledge/README.md`](./agent-knowledge/README.md).
+
+Lessons are recorded with `lessons.py add`, never by editing `LESSONS.md`:
+
+```bash
+python3 lessons.py add --key <profile> --task "<task type>" \
+  --lesson "<reusable lesson>" --evidence "<path, command, or measurement>"
+python3 lessons.py promote --key <profile> --apply   # then review and commit
+```
+
+`add` writes one new file per lesson (`O_CREAT | O_EXCL`) under a state root
+outside any repository, so the lesson write is never a read-modify-write of a
+branch-mutable file — the failure mode that previously destroyed a branch's
+lessons and swept an orchestrator's edits into another agent's commit. A new
+profile inherits this automatically: `apply.py knowledge` generates the
+instruction into its `PROFILE.md` and `LESSONS.md`, and `lessons.py` accepts any
+key present in `roles.config.json`.
 
 ## Creating a future agent
 

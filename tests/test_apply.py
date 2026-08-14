@@ -195,6 +195,201 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("l1-programmer", may)
         self.assertIn("does not delegate", apply.delegation_note({"can_delegate": False}))
 
+    def test_every_generated_profile_routes_lessons_through_lessons_py(self):
+        """A profile must never tell an agent to hand-edit LESSONS.md.
+
+        That instruction is what produced the lost update: a read-modify-write of
+        a file inside a branch-mutable tree.
+        """
+        for key in apply.ALL_AGENT_KEYS:
+            profile = apply.profile_markdown(self.config, key)
+            self.assertIn(f"lessons.py\" add --key {key}", profile, key)
+            self.assertIn("never by editing `lessons.md` yourself", profile.lower(), key)
+            self.assertNotIn("append at most one", profile.lower(), key)
+
+    def test_generated_lessons_file_forbids_hand_editing(self):
+        for key in apply.ALL_AGENT_KEYS:
+            body = apply.lessons_markdown(key)
+            self.assertIn("Do not hand-edit this file to record a lesson", body, key)
+            self.assertIn(f"lessons.py\" add --key {key}", body, key)
+
+    def test_no_committed_documentation_hands_an_agent_a_bare_lessons_py(self):
+        """`python3 lessons.py …` only runs from the checkout holding the script.
+
+        Profiles and lessons files are read by agents working in OTHER
+        repositories; there the bare form is `can't open file`, and a lesson that
+        cannot be recorded is a lesson lost. Every generated command must name
+        the anchor it is relative to.
+        """
+        generated = {f"lessons_markdown({key})": apply.lessons_markdown(key)
+                     for key in apply.ALL_AGENT_KEYS}
+        generated.update({f"profile_markdown({key})": apply.profile_markdown(self.config, key)
+                          for key in apply.ALL_AGENT_KEYS})
+        generated["knowledge_readme()"] = apply.knowledge_readme()
+        # Scoped to what an agent reads *per task* from another repository. The
+        # top-level README/AGENT-FRAMEWORK quickstarts are human-facing, sit
+        # beside `python3 apply.py`, and are unambiguous about their cwd.
+        committed = {str(path): path.read_text(encoding="utf-8")
+                     for path in (apply.SCRIPT_DIR / "agent-knowledge").rglob("*.md")}
+        for label, body in {**generated, **committed}.items():
+            for line in body.splitlines():
+                # A COMMAND, not prose that mentions the bare form in order to
+                # warn against it.
+                self.assertFalse(
+                    line.strip().startswith("python3 lessons.py"),
+                    f"{label} gives a command that only runs from one directory: {line!r}",
+                )
+
+    def test_no_committed_documentation_embeds_this_machines_path(self):
+        """The repository is public and portable; only ~/.claude output is local."""
+        for path in (apply.SCRIPT_DIR / "agent-knowledge").rglob("*.md"):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                self.assertNotIn(
+                    str(apply.SCRIPT_DIR / "lessons.py"), line,
+                    f"{path} bakes a machine-specific script path into a tracked file",
+                )
+
+    def test_the_generated_lessons_file_does_not_tell_an_agent_to_run_promote(self):
+        """`promote` is the human review step, and the docs say so.
+
+        Telling the agent to "fold them in later with `promote --apply`" in the
+        file it is instructed to read before every task hands it the one
+        read-modify-write in the system — inside a branch-mutable tree, which is
+        the failure this deliverable exists to remove. Nothing enforces the
+        "run by a person" claim; `--apply` is a plain flag.
+        """
+        for key in apply.ALL_AGENT_KEYS:
+            body = apply.lessons_markdown(key)
+            self.assertNotIn("--apply", body, key)
+            self.assertIn("run by a person", body, key)
+        for path in (apply.SCRIPT_DIR / "agent-knowledge").rglob("LESSONS.md"):
+            self.assertNotIn("--apply", path.read_text(encoding="utf-8"), str(path))
+
+    def test_committed_lessons_headers_match_the_generator(self):
+        """LESSONS.md is preserved once created, so its header silently drifts."""
+        marker = "\n## Durable practices\n"
+        for key in apply.ALL_AGENT_KEYS:
+            path = apply.SCRIPT_DIR / "agent-knowledge" / key / "LESSONS.md"
+            committed = path.read_text(encoding="utf-8").split(marker, 1)[0]
+            expected = apply.lessons_markdown(key).split(marker, 1)[0]
+            self.assertEqual(committed, expected, f"{path} header has drifted")
+
+    def test_committed_lessons_files_carry_the_current_intake_header(self):
+        """Existing LESSONS.md files are preserved, so their header can drift."""
+        for key in apply.ALL_AGENT_KEYS:
+            path = apply.SCRIPT_DIR / "agent-knowledge" / key / "LESSONS.md"
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("Do not hand-edit this file to record a lesson", text, key)
+            self.assertNotIn("<!-- Append at most one", text, key)
+
+    def test_knowledge_readme_states_the_property_and_the_durability_caveat(self):
+        readme = apply.knowledge_readme()
+        self.assertIn("branch-mutable", readme)
+        self.assertIn("O_CREAT | O_EXCL", readme)
+        self.assertIn("not under git and has no automatic off-box copy", readme)
+        self.assertIn("queue, not an archive", readme)
+        self.assertIn("promote", readme)
+
+    @staticmethod
+    def _rendered_sections(config):
+        """Split the dry-run stream into {target path: rendered content}.
+
+        Asserting against the whole stream is too weak: one template carrying the
+        instruction makes the assertion pass for every other template too.
+        """
+        output = io.StringIO()
+        with redirect_stdout(output):
+            apply.install_claude(config, Path("/tmp/agent-framework-test-home"), True)
+        sections, current = {}, None
+        for line in output.getvalue().splitlines():
+            if line.startswith("--- would write ") and line.endswith(" ---"):
+                current = line[len("--- would write "):-len(" ---")]
+                sections[current] = []
+            elif current:
+                sections[current].append(line)
+        return {key: "\n".join(value) for key, value in sections.items()}
+
+    def test_every_generated_claude_agent_routes_lessons_through_lessons_py(self):
+        sections = self._rendered_sections(self.config)
+        base = "/tmp/agent-framework-test-home/.claude/agents"
+        for key in apply.ALL_AGENT_KEYS:
+            body = sections[f"{base}/{key}.md"]
+            self.assertIn("lessons.py add --key", body, key)
+            self.assertIn(key, body.split("lessons.py add --key", 1)[1][:40], key)
+            self.assertNotIn("append at most one", body.lower(), key)
+
+    def test_no_generated_claude_agent_tells_an_agent_to_append_to_lessons_md(self):
+        sections = self._rendered_sections(self.config)
+        for target, body in sections.items():
+            lowered = body.lower()
+            self.assertNotIn("append at most one", lowered, target)
+            self.assertNotIn("lesson\n  to `lessons.md`", lowered, target)
+
+    def test_installing_from_a_linked_worktree_is_refused(self):
+        """The deployment path, enforced rather than remembered.
+
+        Generated Claude agents embed an ABSOLUTE `lessons.py` path resolved from
+        wherever apply.py runs. Run it from a linked worktree — which this
+        machine's rules require for feature work — and every agent is installed
+        with a path `git worktree prune` deletes, while the "never hand-edit
+        LESSONS.md" instruction still stands. That is every lesson silently
+        unrecordable, with nothing to notice it.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            worktree = Path(directory) / "linked"
+            worktree.mkdir()
+            (worktree / "lessons.py").write_text("# stub\n", encoding="utf-8")
+            (worktree / ".git").write_text(
+                "gitdir: /elsewhere/.git/worktrees/linked\n", encoding="utf-8")
+            original = apply.SCRIPT_DIR
+            try:
+                apply.SCRIPT_DIR = worktree
+                with self.assertRaises(SystemExit) as ctx:
+                    apply.assert_generated_paths_are_installable(False)
+                self.assertIn("linked git worktree", str(ctx.exception))
+                # A dry run must still render, or the generator cannot be reviewed.
+                apply.assert_generated_paths_are_installable(True)
+            finally:
+                apply.SCRIPT_DIR = original
+
+    def test_installing_with_a_missing_lessons_script_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            primary = Path(directory) / "primary"
+            (primary / ".git").mkdir(parents=True)
+            original = apply.SCRIPT_DIR
+            try:
+                apply.SCRIPT_DIR = primary
+                with self.assertRaises(SystemExit) as ctx:
+                    apply.assert_generated_paths_are_installable(False)
+                self.assertIn("does not exist", str(ctx.exception))
+                # With the script present and a primary checkout, it proceeds.
+                (primary / "lessons.py").write_text("# stub\n", encoding="utf-8")
+                apply.assert_generated_paths_are_installable(False)
+            finally:
+                apply.SCRIPT_DIR = original
+
+    def test_install_claude_runs_the_path_guard(self):
+        """The guard must be wired into the command, not merely defined."""
+        with tempfile.TemporaryDirectory() as directory:
+            worktree = Path(directory) / "linked"
+            worktree.mkdir()
+            (worktree / "lessons.py").write_text("# stub\n", encoding="utf-8")
+            (worktree / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+            original = apply.SCRIPT_DIR
+            try:
+                apply.SCRIPT_DIR = worktree
+                with self.assertRaises(SystemExit) as ctx:
+                    apply.install_claude(self.config, Path(directory) / "home", False)
+                # Assert on the MESSAGE. A bare `assertRaises(SystemExit)` passes
+                # against a guard that never ran, because this fixture has no
+                # adapters/ directory and install_claude exits on the missing
+                # template a moment later — the test would confirm nothing.
+                self.assertIn("linked git worktree", str(ctx.exception))
+                self.assertFalse((Path(directory) / "home").exists(),
+                                 "agents were written before the guard ran")
+            finally:
+                apply.SCRIPT_DIR = original
+
     def test_rendered_claude_agents_never_emit_a_provider_qualified_model(self):
         output = io.StringIO()
         with redirect_stdout(output):

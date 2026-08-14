@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""Control harness for the lesson-intake tests.
+
+Run:  python3 tests/control_mutants.py
+
+WHY THIS IS NOT OPTIONAL. A green suite is not evidence that the suite tests
+anything. The usual control — revert the change and watch the tests fail — does
+not work for `lessons.py`, because reverting it deletes the module and the suite
+dies at import, which proves nothing (a documented trap: a whole-file revert
+that errors in setUp has been misread as "the control worked").
+
+So each mutant here changes exactly ONE piece of logic or ONE instruction, and
+the harness records which NAMED tests die. `M00-noop` must kill nothing; every
+other mutant must be killed by an assertion failure, not an error. A survivor
+means the claim it encodes is asserted nowhere.
+
+Zero third-party dependencies.
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+
+# Bytecode caching silently corrupts a mutation control. `importlib` writes a
+# `.pyc` for the mutated module; restoring the original in the same second with
+# the SAME BYTE LENGTH — which a one-character mutant like `alnum[:6]` ->
+# `alnum[:8]` guarantees — reproduces the cached (mtime, size) key exactly, so
+# the next run executes the MUTANT from cache. Observed here: three unrelated
+# instruction mutants "killed" all fourteen lessons.py tests. Disable caching.
+CHILD_ENV = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+
+# ---------------------------------------------------------------- lessons.py
+LOGIC_MUTANTS = [
+    ("M00-noop", "lessons.py",
+     "Stdlib only. Python 3.8+.", "Stdlib only. Python 3.8 or newer."),
+    ("M01-no-O_EXCL", "lessons.py",
+     "os.O_WRONLY | os.O_CREAT | os.O_EXCL", "os.O_WRONLY | os.O_CREAT | os.O_TRUNC"),
+    ("M02-branch-mutable-guard-off", "lessons.py",
+     "    repo = branch_mutable_ancestor(path)\n    if repo is not None:",
+     "    repo = branch_mutable_ancestor(path)\n    if False:"),
+    ("M03-guard-misses-linked-worktrees", "lessons.py",
+     'if (candidate / ".git").exists():', 'if (candidate / ".git").is_dir():'),
+    ("M04-promote-no-content-compare-and-swap", "lessons.py",
+     "    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "    if file_identity(target) != identity:"),
+    ("M05-promote-does-not-consume-the-entry", "lessons.py",
+     '        os.replace(str(path), str(destination))\n        result["moved"].append(str(destination))',
+     '        result["moved"].append(str(destination))'),
+    ("M06-secret-guard-off", "lessons.py",
+     "    hits = scan_for_secrets(text)\n    if hits:",
+     "    hits = scan_for_secrets(text)\n    if False:"),
+    ("M07-one-lesson-per-session-off", "lessons.py",
+     "    if not allow_multiple:", "    if False:"),
+    ("M08-promote-writes-non-atomically", "lessons.py",
+     "    os.replace(str(tmp), str(path))", '    path.write_text(text, encoding="utf-8")'),
+    ("M09-preview-writes-anyway", "lessons.py",
+     "    if not apply_changes:\n        return result", "    if False:\n        return result"),
+    ("M10-promote-appends-at-eof", "lessons.py",
+     "    merged = body[:end] + lines + body[end:]", "    merged = body + lines"),
+    ("M11-no-duplicate-detection", "lessons.py",
+     "        if stripped in existing_lines or stripped in seen:", "        if False:"),
+    ("M12-field-separator-guard-off", "lessons.py",
+     "    if FIELD_SEP in text:", "    if False:"),
+    ("M13-state-root-inside-the-repo", "lessons.py",
+     '    appdata = Path.home() / "appdata"', "    appdata = SCRIPT_DIR"),
+    ("M14-session-token-truncated", "lessons.py",
+     '        return "".join(alnum[:8])', '        return "".join(alnum[:6])'),
+    # Regressions found while attacking this branch, each fixed here.
+    ("M15-session-squash-accepts-non-ascii", "lessons.py",
+     "    alnum = [c for c in raw.lower() if c.isascii() and c.isalnum()]",
+     "    alnum = [c for c in raw.lower() if c.isalnum()]"),
+    ("M16-unreadable-entry-name-written-anyway", "lessons.py",
+     "        if not ENTRY_NAME_RE.match(last_name):",
+     "        if False:"),
+    ("M17-secret-scanner-false-positives-return", "lessons.py",
+     '    ("token-shaped blob", re.compile(\n'
+     '        r"(?=[A-Za-z0-9+=_\\-]*[0-9])(?=[A-Za-z0-9+=_\\-]*[A-Z])(?=[A-Za-z0-9+=_\\-]*[a-z])"\n'
+     '        r"[A-Za-z0-9+=_\\-]{40,}"\n'
+     '    )),',
+     '    ("token-shaped blob", re.compile(r"[A-Za-z0-9+=_\\-]{56,}")),'),
+    ("M18-secret-scanner-disarmed", "lessons.py",
+     '    ("github token", re.compile(r"\\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})")),',
+     '    ("github token", re.compile(r"\\bZZZ_NEVER_MATCHES\\b")),'),
+    ("M19-promote-ignores-file-identity", "lessons.py",
+     "    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "    if hashlib.sha256(current).hexdigest() != digest:"),
+    ("M20-temp-file-left-in-the-worktree", "lessons.py",
+     "        try:\n            tmp.unlink()\n        except OSError:\n            pass\n        raise",
+     "        raise"),
+    ("M21-impossible-date-accepted", "lessons.py",
+     '        datetime.strptime(day, "%Y-%m-%d")',
+     '        datetime.strptime("2026-01-01", "%Y-%m-%d")'),
+    # Defects found reviewing this branch, each fixed here. Every one of these
+    # mutants restores behaviour the suite used to pass against.
+    ("M22-cas-skipped-for-an-all-duplicate-batch", "lessons.py",
+     "    current = target.read_bytes()\n"
+     "    if hashlib.sha256(current).hexdigest() != digest or file_identity(target) != identity:",
+     "    current = before if merged is None else target.read_bytes()\n"
+     "    if merged is not None and (hashlib.sha256(current).hexdigest() != digest "
+     "or file_identity(target) != identity):"),
+    ("M23-duplicate-detection-by-substring", "lessons.py",
+     "        if stripped in existing_lines or stripped in seen:",
+     "        if stripped in text or stripped in seen:"),
+    ("M24-one-malformed-entry-aborts-promote", "lessons.py",
+     "        try:\n"
+     "            parsed.append((path, parse_entry(path)))\n"
+     "        except (LessonError, OSError, UnicodeDecodeError) as exc:\n"
+     "            malformed.append((path, str(exc)))",
+     "        parsed.append((path, parse_entry(path)))"),
+    ("M25-malformed-entries-are-consumed-too", "lessons.py",
+     "    for path, _ in parsed:\n        destination = promoted_root / path.name",
+     "    for path, _ in parsed + [(item, None) for item, _ in malformed]:\n"
+     "        destination = promoted_root / path.name"),
+    ("M26-unreadable-entry-locks-the-session-out", "lessons.py",
+     "        pending = [\n"
+     "            name for name in existing_sessions(key).get(token, [])\n"
+     "            if _entry_is_readable(inbox_dir(key) / name)\n"
+     "        ]",
+     "        pending = list(existing_sessions(key).get(token, []))"),
+    ("M27-dated-heading-matched-as-a-substring", "lessons.py",
+     "        if item.strip() == DATED_HEADING:", "        if DATED_HEADING in item:"),
+    ("M28-branch-mutable-guard-is-lexical-again", "lessons.py",
+     "        resolved = Path(os.path.realpath(os.path.expanduser(str(path))))",
+     "        resolved = Path(os.path.abspath(os.path.expanduser(str(path))))"),
+    ("M29-count-dated-counts-the-format-note", "lessons.py",
+     '    section = HTML_COMMENT_RE.sub("", "\\n".join(body[start:end]))',
+     '    section = "\\n".join(body[start:end])'),
+    ("M30-count-dated-runs-to-end-of-file", "lessons.py",
+     '    section = HTML_COMMENT_RE.sub("", "\\n".join(body[start:end]))',
+     '    section = HTML_COMMENT_RE.sub("", "\\n".join(body[start:]))'),
+    ("M31-one-key-failure-skips-every-later-key", "lessons.py",
+     "        results, failures = [], []\n"
+     "        for key in keys:\n"
+     "            try:\n"
+     "                results.append(promote(key, args.apply))\n"
+     "            except LessonError as exc:\n"
+     "                failures.append((key, str(exc)))",
+     "        results, failures = [promote(key, args.apply) for key in keys], []"),
+    ("M32-control-harness-treats-an-error-as-a-kill", "tests/mutant_scoring.py",
+     "    return verdict == KILLED", "    return verdict in (KILLED, ERRORED_ONLY)"),
+]
+
+# --------------------------------------------------- generated instructions
+INSTRUCTION_MUTANTS = [
+    ("D01-profile-reverts-to-hand-append", "apply.py",
+     "material above. After substantive work, record at most one generalized,\n"
+     "evidence-backed lesson — **never by editing `LESSONS.md` yourself**:",
+     "material above. After substantive work, append at most one generalized,\n"
+     "evidence-backed lesson in the documented format if it will improve future work."),
+    ("D02-lessons-template-drops-the-warning", "apply.py",
+     "**Do not hand-edit this file to record a lesson.** It lives in a branch-mutable",
+     "This file lives in a branch-mutable"),
+    ("D03-a-committed-lessons-file-drifts", "agent-knowledge/runner/LESSONS.md",
+     "**Do not hand-edit this file to record a lesson.**", "Lessons may be appended here."),
+    ("D04-readme-drops-the-durability-note", "apply.py",
+     "`~/appdata` is **not under git and has no automatic off-box copy**.",
+     "`~/appdata` holds the inbox."),
+    ("D05-readme-drops-the-queue-framing", "apply.py",
+     "inbox is a **queue, not an archive**", "inbox is where lessons live"),
+    ("D06-claude-template-reverts", "adapters/claude-code/agent.md.tmpl",
+     "- After substantive work, record at most one generalized, evidence-backed lesson\n"
+     "  when it will help future work. **Never edit `LESSONS.md` to do this**",
+     "- After substantive work, append at most one generalized, evidence-backed lesson\n"
+     "  to `LESSONS.md` when it will help future work. **Never edit `LESSONS.md` to do this**"),
+    ("D07-claude-template-drops-lessons_py", "adapters/claude-code/agent.md.tmpl",
+     "`python3 {{LESSONS_SCRIPT}} add --key {{AGENT_KEY}}",
+     "`python3 nothing.py add --key {{AGENT_KEY}}"),
+    ("D08-lessons-script-path-not-substituted", "apply.py",
+     '            "LESSONS_SCRIPT": str(SCRIPT_DIR / "lessons.py"),',
+     '            "LESSONS_SCRIPT": "",'),
+    ("D09-committed-docs-give-a-bare-lessons_py", "apply.py",
+     "LESSONS_SCRIPT_REF = '\"$DEV_PRIMITIVE/lessons.py\"'",
+     "LESSONS_SCRIPT_REF = 'lessons.py'"),
+    ("D10-lessons-template-tells-the-agent-to-promote", "apply.py",
+     "`lessons.py promote` is the only route from the inbox into this repository, and\n"
+     "it is **run by a person** who reviews the diff and commits it",
+     "Fold them in later with `promote --key {key} --apply`.\n"
+     "`lessons.py promote` is run by a person who reviews the diff and commits it"),
+    ("D11-install-path-guard-not-wired-in", "apply.py",
+     "def install_claude(cfg: dict, home: Path, dry: bool) -> None:\n"
+     "    assert_generated_paths_are_installable(dry)",
+     "def install_claude(cfg: dict, home: Path, dry: bool) -> None:"),
+    ("D12-worktree-refusal-disabled", "apply.py",
+     '    marker = SCRIPT_DIR / ".git"\n    if marker.is_file():',
+     '    marker = SCRIPT_DIR / ".git"\n    if False:'),
+]
+
+FAIL_RE = re.compile(r"^(FAIL|ERROR): (\S+) \(([^)]+)\)")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mutant_scoring import classify, counts_as_verified  # noqa: E402
+
+
+def run_suite(root: Path):
+    for cache in root.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
+    proc = subprocess.run(
+        [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests"],
+        cwd=root, capture_output=True, text=True, timeout=600, env=CHILD_ENV,
+    )
+    out = proc.stdout + proc.stderr
+    fails, errs = [], []
+    for line in out.splitlines():
+        match = FAIL_RE.match(line.strip())
+        if match:
+            (fails if match.group(1) == "FAIL" else errs).append(match.group(2))
+    return proc.returncode, fails, errs, out
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        sandbox = Path(tmp) / "repo"
+        shutil.copytree(REPO, sandbox, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        code, fails, errs, out = run_suite(sandbox)
+        print(f"BASELINE: rc={code} failures={fails} errors={errs}\n")
+        if code != 0:
+            print(out[-3000:])
+            return 1
+
+        survivors = []
+        for name, rel, old, new in LOGIC_MUTANTS + INSTRUCTION_MUTANTS:
+            path = sandbox / rel
+            original = path.read_text(encoding="utf-8")
+            if original.count(old) != 1:
+                print(f"{name}: PATTERN NOT UNIQUE ({original.count(old)} matches) -- FIX THE MUTANT")
+                survivors.append(name)
+                continue
+            path.write_text(original.replace(old, new, 1), encoding="utf-8")
+            code, fails, errs, _ = run_suite(sandbox)
+            if name.startswith("M00"):
+                ok = code == 0 and not fails and not errs
+                print(f"{name}: {'NO-OP OK (nothing died)' if ok else f'NO-OP BROKEN: {fails} {errs}'}")
+                if not ok:
+                    survivors.append(name)
+            else:
+                verdict = classify(fails, errs)
+                print(f"{name}: {verdict}")
+                for test in fails:
+                    print(f"    killed: {test}")
+                for test in errs:
+                    print(f"    errored: {test}")
+                if not counts_as_verified(verdict):
+                    survivors.append(f"{name} [{verdict}]")
+            path.write_text(original, encoding="utf-8")
+
+        print()
+        if survivors:
+            print(f"NOT VERIFIED (no test failed an assertion on this claim): {survivors}")
+            return 1
+        print("All mutants killed by at least one named test; the no-op killed nothing.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

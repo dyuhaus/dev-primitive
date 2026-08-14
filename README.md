@@ -30,6 +30,12 @@ python3 apply.py all         # Claude adapter, knowledge profiles, portable bloc
 python3 apply.py knowledge    # regenerate agent-knowledge/*/PROFILE.md; preserve LESSONS.md
 python3 router.py --explain "Update the Vault index"  # recommend a specialist
 python3 apply.py set builder sonnet   # change a role's model + regenerate (easy path)
+
+# Durable lessons: append-only intake, one file per lesson, outside any repo
+python3 lessons.py add --key builder --task "<task type>" \
+  --lesson "<reusable lesson>" --evidence "<path, command, or measurement>"
+python3 lessons.py show                            # what is pending
+python3 lessons.py promote --key builder --apply   # fold into LESSONS.md, then review + commit
 ```
 
 No third-party dependencies (Python 3.8+ stdlib only).
@@ -105,6 +111,7 @@ roles.config.json        single source of truth (edit this)
 roles.schema.json        JSON-Schema validator
 apply.py                 stdlib-only generator / validator
 router.py                deterministic explainable recommendation router
+lessons.py               append-only lesson intake (add / show / promote)
 agent-knowledge/         generated specialty profiles and preserved durable lessons
 PRIMITIVE.md             full harness-neutral spec
 adapters/claude-code/    planner / builder / PB / specialist / route templates
