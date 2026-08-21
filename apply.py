@@ -478,6 +478,27 @@ def render_claude(cfg: dict, home: Path) -> list:
             "run the harness whose adapter can dispatch them."
         )
     mapping = template_mapping(cfg)
+    # Frontmatter values, pre-quoted. Same rule the skill adapters follow: a
+    # template may only put a `yaml_scalar()` value, a hand-written quoted
+    # literal, or an identifier-shaped bare token into frontmatter. These four
+    # descriptions carry a resolved model class, which is registry text — and
+    # registry text is one `--id` pin away from containing whatever it likes.
+    planner_model, builder_model = mapping["PLANNER_MODEL"], mapping["BUILDER_MODEL"]
+    mapping["PB_DESCRIPTION"] = yaml_scalar(
+        f"Plan then build — run the two-model dev loop ({planner_model} plans, {builder_model} builds)."
+    )
+    mapping["PBG_DESCRIPTION"] = yaml_scalar(
+        "Plan → build → verify, looping until a done-condition holds — single-command "
+        f"goal loop ({planner_model} plans, {builder_model} builds)."
+    )
+    mapping["PBG_BUILDER_DESCRIPTION"] = yaml_scalar(
+        f"Switch the builder's model (now {builder_model}) and regenerate — wraps "
+        "`apply.py set builder`."
+    )
+    mapping["PBG_PLANNER_DESCRIPTION"] = yaml_scalar(
+        f"Switch the planner's model (now {planner_model}) and regenerate — wraps "
+        "`apply.py set planner`."
+    )
     tdir = SCRIPT_DIR / "adapters" / "claude-code"
     jobs = [
         (tdir / "planner.md.tmpl", home / ".claude" / "agents" / "planner.md"),
@@ -521,6 +542,17 @@ def render_claude(cfg: dict, home: Path) -> list:
             "AGENT_PURPOSE_SHORT": short_purpose(view["purpose"]),
             "AGENT_DELEGATION_NOTE": delegation_note(view),
             "ANTHROPIC_CLASSES": mapping["ANTHROPIC_CLASSES"],
+            # The two slash-command descriptions, pre-quoted. Built here rather
+            # than assembled in the template because both interpolate a registry
+            # `purpose`, and four of the eleven purposes contain a colon.
+            "AGENT_INVOKE_DESCRIPTION": yaml_scalar(
+                f"Hand this task to {view['display_name']} ({view['model']}) — "
+                f"{short_purpose(view['purpose'])}"
+            ),
+            "AGENT_MODEL_DESCRIPTION": yaml_scalar(
+                f"Switch {view['display_name']}'s model (now {view['model']}) and "
+                f"regenerate — wraps `apply.py set {key}`."
+            ),
         }
         jobs.append((agent_template, home / ".claude" / "agents" / f"{key}.md", values))
         # Per-agent slash commands, matching Pi's /<agent> and /<agent>-model.
@@ -540,6 +572,14 @@ def render_claude(cfg: dict, home: Path) -> list:
         if not template.exists():
             fail(f"missing template: {template}")
         rendered.append((target, render(template.read_text(encoding="utf-8"), values)))
+    # Assert on the artifact, for the adapter that is actually installed here.
+    # Nothing is written yet, so a template or registry edit that would produce
+    # frontmatter Claude Code cannot parse stops the build instead of landing an
+    # unloadable command in ~/.claude with exit 0.
+    for target, content in rendered:
+        # Slash commands have no `name:` — the filename is the command name.
+        required = ("name", "description") if target.parent.name == "agents" else ("description",)
+        check_frontmatter(target, content, required=required)
     return rendered
 
 
@@ -718,9 +758,26 @@ def yaml_scalar(value) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
-# A bare (unquoted) YAML scalar this generator is willing to emit. Anything with
-# a space, a colon or an indicator character has to be quoted by `yaml_scalar`.
-BARE_YAML_SCALAR = re.compile(r"^[A-Za-z0-9_./-]+$")
+# One identifier-shaped token: no space, no colon, no indicator character. Any
+# value that is not built out of these has to be quoted by `yaml_scalar`.
+BARE_YAML_SCALAR = r"[A-Za-z0-9_./-]+"
+
+# The bare scalars the generator actually emits: a single identifier-shaped
+# token (`name: runner`, `model: sonnet`), or the comma-separated token list a
+# Claude Code `tools:` line carries (`Read, Grep, Glob`) — the form Anthropic's
+# own shipped agents use. Every token is itself bare-safe, so neither form can
+# contain a colon, a `#` or a leading indicator. Free prose still does not
+# match, because a token may not contain a space: `everyday tasks, and
+# maintenance` is rejected exactly as before.
+BARE_YAML_VALUE = re.compile(rf"^{BARE_YAML_SCALAR}(?:, {BARE_YAML_SCALAR})*$")
+
+# A YAML block scalar header — `|` or `>` with optional indentation and chomping
+# indicators, e.g. the `description: >-` the Claude agent templates use. The
+# body is literal text, so nothing interpolated into it can close the scalar,
+# *provided* every body line stays indented past the key. A registry value
+# containing a newline would break that indentation, so `check_frontmatter`
+# verifies it rather than assuming it.
+BLOCK_SCALAR_HEADER = re.compile(r"^[|>](?:[0-9]*[+-]?|[+-][0-9]*)$")
 
 
 def frontmatter_of(content: str) -> str:
@@ -733,32 +790,83 @@ def frontmatter_of(content: str) -> str:
     return content[4 : end + 1]
 
 
-def check_frontmatter(target, content: str) -> None:
-    """Refuse to emit a skill file whose frontmatter a harness cannot parse.
+def check_frontmatter(target, content: str, required=("name", "description")) -> None:
+    """Refuse to emit a file whose frontmatter a harness cannot parse.
 
     Assert on the artifact, not on the template: the templates are the thing
     that was wrong, so the check runs on the rendered bytes. Structural by
     default (stdlib only, so the primitive stays dependency-free); when PyYAML
     is importable it additionally does a real parse, which is what actually
     proves a harness will accept the file.
+
+    **Every adapter's output goes through this, Claude Code's included.** The
+    three skill adapters were covered from the first version of this function
+    and the Claude adapter was not — and Claude Code is the adapter actually
+    installed on this machine. `agent-invoke.md.tmpl` and `agent-model.md.tmpl`
+    interpolated a registry purpose into an unquoted plain scalar, so a single
+    purpose containing ": " rendered a slash command no YAML parser accepts,
+    with exit 0 and nothing on stderr. A guard that covers every adapter but the
+    live one is not a guard.
+
+    `required` names the fields that must survive the parse as non-empty
+    strings. Claude Code slash commands carry no `name:` — the filename is the
+    command name — so their callers pass `("description",)`.
     """
     block = frontmatter_of(content)
     if not block:
-        fail(f"{target}: rendered skill has no parseable `---` frontmatter block")
-    for line in block.splitlines():
+        fail(f"{target}: rendered file has no parseable `---` frontmatter block")
+    lines = block.splitlines()
+    index = 0
+    top_level_keys = set()
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         if not line.strip() or line.lstrip().startswith("#"):
             continue
+        indent = len(line) - len(line.lstrip(" "))
         key, sep, value = line.partition(":")
         if not sep:
             fail(f"{target}: frontmatter line is not a `key: value` pair: {line!r}")
+        if indent == 0:
+            # A repeated top-level key is how an interpolated value that escaped
+            # its block scalar comes back as document structure — a purpose
+            # containing a newline and "model: opus" renders a second `model:`
+            # line, which parses cleanly and quietly wins. PyYAML cannot help:
+            # duplicate keys are legal YAML and it keeps the last one.
+            if key.strip() in top_level_keys:
+                fail(
+                    f"{target}: frontmatter declares `{key.strip()}` twice. An interpolated "
+                    "value has escaped its block scalar and is being read as document "
+                    "structure — the later value silently overrides the intended one."
+                )
+            top_level_keys.add(key.strip())
         value = value.strip()
+        if BLOCK_SCALAR_HEADER.match(value):
+            # Consume the block scalar's body: literal text, and none of it is a
+            # `key: value` pair to be validated. A body line at or below the
+            # key's indentation has escaped the scalar and is read as document
+            # structure again — so stop there and let the normal rules judge it.
+            body = 0
+            while index < len(lines):
+                nxt = lines[index]
+                if nxt.strip() and len(nxt) - len(nxt.lstrip(" ")) <= indent:
+                    break
+                body += 1 if nxt.strip() else 0
+                index += 1
+            if not body:
+                fail(
+                    f"{target}: frontmatter `{key.strip()}` opens a block scalar with no "
+                    "indented body — an interpolated value with a newline in it breaks "
+                    "out of the block and restructures the document."
+                )
+            continue
         if not value or value[0] in "\"'":
             continue  # a nested-mapping key, or an already-quoted scalar
-        if not BARE_YAML_SCALAR.match(value):
+        if not BARE_YAML_VALUE.match(value):
             fail(
                 f"{target}: frontmatter value for `{key.strip()}` is unquoted free "
                 f"text ({value[:60]!r}). Emit it through yaml_scalar() — an "
-                "unquoted colon makes the harness drop the whole skill silently."
+                "unquoted colon makes the harness drop the whole file silently."
             )
     try:
         import yaml  # noqa: PLC0415 — optional; the structural check stands alone
@@ -770,7 +878,7 @@ def check_frontmatter(target, content: str) -> None:
         fail(f"{target}: frontmatter is not valid YAML: {exc}")
     if not isinstance(data, dict):
         fail(f"{target}: frontmatter parsed as {type(data).__name__}, not a mapping")
-    for field in ("name", "description"):
+    for field in required:
         if not isinstance(data.get(field), str) or not data[field].strip():
             fail(f"{target}: frontmatter `{field}` must be a non-empty string, got {data.get(field)!r}")
 

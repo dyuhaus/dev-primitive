@@ -560,6 +560,108 @@ class ApplyTests(unittest.TestCase):
                 yaml = self._require_yaml()
                 self.assertEqual(yaml.safe_load(f"v: {quoted}")["v"], raw)
 
+    # ----------------------------------------------------------------- #
+    # The SAME guarantee, for the adapter that is actually installed here
+    # ----------------------------------------------------------------- #
+    # The three skill adapters were covered above from the first version of this
+    # fix. The Claude Code adapter was not, and it is the only one installed on
+    # this machine: `render_claude()` never called `check_frontmatter()`, and
+    # `agent-invoke.md.tmpl` / `agent-model.md.tmpl` interpolated a registry
+    # purpose into an unquoted plain scalar — the exact shape that cost dsh four
+    # skills. `apply.py claude` exited 0 and wrote a slash command whose
+    # frontmatter raises "mapping values are not allowed here".
+
+    CLAUDE_COLON_PURPOSE = "triage: route work to the right place"
+
+    def _claude_frontmatter(self, cfg):
+        """{"<dir>/<file>": raw frontmatter block} for the whole Claude surface."""
+        rendered = apply.render_claude(cfg, Path("/tmp/agent-framework-test-home"))
+        return {f"{path.parent.name}/{path.name}": apply.frontmatter_of(content) for path, content in rendered}
+
+    def test_the_claude_adapter_puts_a_registry_purpose_in_frontmatter(self):
+        """A vacuous pass would be the real failure mode of the tests below."""
+        blocks = self._claude_frontmatter(self.config)
+        self.assertIn("commands/runner.md", blocks)
+        purpose = apply.short_purpose(apply.role_view(self.config, "runner")["purpose"])
+        self.assertIn(purpose, blocks["commands/runner.md"])
+
+    def test_generated_claude_frontmatter_parses_as_yaml(self):
+        yaml = self._require_yaml()
+        blocks = self._claude_frontmatter(self.config)
+        self.assertGreaterEqual(len(blocks), 3 * len(apply.ALL_AGENT_KEYS))
+        for name, block in blocks.items():
+            with self.subTest(file=name):
+                data = yaml.safe_load(block)
+                self.assertIsInstance(data, dict, f"{name} frontmatter is not a mapping")
+                self.assertIsInstance(data.get("description"), str)
+                self.assertTrue(data["description"].strip())
+                if name.startswith("agents/"):
+                    self.assertTrue(data.get("name"))
+                    self.assertTrue(data.get("model"))
+
+    def test_a_purpose_with_a_colon_round_trips_through_the_claude_adapter(self):
+        """The reviewer's reproduction, as a test.
+
+        `triage: route work to the right place` is under the 90-character
+        `short_purpose` limit and passes `apply.py validate`, so nothing before
+        the render objects to it. Rendered raw it made `.claude/commands/
+        runner.md` unloadable.
+        """
+        yaml = self._require_yaml()
+        cfg = copy.deepcopy(self.config)
+        cfg["agents"]["runner"]["purpose"] = self.CLAUDE_COLON_PURPOSE
+        cfg["agents"]["code-reviewer"]["purpose"] = self.HOSTILE_PURPOSE
+        self.assertEqual(apply.validate(cfg), [])
+        blocks = self._claude_frontmatter(cfg)
+        runner = yaml.safe_load(blocks["commands/runner.md"])
+        self.assertIn(self.CLAUDE_COLON_PURPOSE, runner["description"])
+        self.assertEqual(runner["argument-hint"], "<task>, or blank to describe the agent")
+        model_cmd = yaml.safe_load(blocks["commands/runner-model.md"])
+        self.assertIn("apply.py set runner", model_cmd["description"])
+        reviewer = yaml.safe_load(blocks["commands/code-reviewer.md"])
+        self.assertIn('review a diff: correctness, "quoted" claims', reviewer["description"])
+
+    def test_the_claude_adapter_refuses_to_write_unparseable_frontmatter(self):
+        """`check_frontmatter` really does run on the Claude renders.
+
+        A purpose carrying a newline escapes the `description: >-` block scalar
+        in `agent.md.tmpl` and comes back as document structure, so the injected
+        `model:` silently overrides the configured one. Duplicate keys are legal
+        YAML — PyYAML keeps the last — so only the structural check catches it.
+        `render_claude` writes nothing, so the build stops before the live
+        `~/.claude` surface is touched.
+        """
+        for injected in ("triage work\nmodel: opus", "triage work\ntools: Bash"):
+            cfg = copy.deepcopy(self.config)
+            cfg["agents"]["runner"]["purpose"] = injected
+            self.assertEqual(apply.validate(cfg), [], "validate cannot see this; the render must")
+            with self.subTest(injected=injected), self.assertRaises(SystemExit):
+                apply.render_claude(cfg, Path("/tmp/agent-framework-test-home"))
+
+    def test_check_frontmatter_accepts_the_shapes_the_claude_adapter_emits(self):
+        """Block scalars and a bare `tools:` list are idiomatic and must pass."""
+        agent = (
+            "---\nname: runner\ndescription: >-\n  Runner specialist — sonnet.\n"
+            "  everyday tasks: and maintenance\nmodel: sonnet\n"
+            "tools: Read, Grep, Glob, Bash, Edit, Write, TodoWrite\n---\nbody\n"
+        )
+        apply.check_frontmatter(Path("runner.md"), agent)
+        # A command has no `name:`, and saying it must have one would fail every
+        # slash command the adapter emits.
+        apply.check_frontmatter(
+            Path("runner.md"), '---\ndescription: "x"\n---\nbody\n', required=("description",)
+        )
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(Path("runner.md"), '---\ndescription: "x"\n---\nbody\n')
+        # Free prose with commas is still not a bare token list.
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(
+                Path("runner.md"), "---\nname: r\ndescription: everyday tasks, and maintenance: really\n---\nb\n"
+            )
+        # A block scalar with no indented body has already lost its content.
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(Path("runner.md"), "---\nname: r\ndescription: >-\nmodel: sonnet\n---\nb\n")
+
     def test_every_skill_adapter_renders_the_same_fourteen_skills(self):
         """The count is 14 TOTAL per adapter: 11 profiles + 3 shared skills.
 
