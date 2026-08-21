@@ -27,32 +27,41 @@ FE-Designer when its harness exposes those tools.
 Everything is driven by [`roles.config.json`](./roles.config.json):
 
 - `roles.planner` and `roles.builder` preserve the PB compatibility surface.
-- `agents` contains specialist profiles: Runner, Tech Writer, Prose Writer,
-  FE-Designer, Audit, Team Leader, L1 Programmer, and Librarian.
+- `agents` contains the specialist profiles.
 - `providers` names wire protocols and environment-variable names. Secrets do
-  not belong in this file.
+  not belong in this file. Use a recognised provider key — `anthropic`,
+  `openai`, `deepseek`, `openrouter` — because consumers map a role to a harness
+  by that key, not by the provider's declared type.
 
-This shared registry is harness-neutral. Claude Code, Codex/generic consumers,
-and other harnesses use its Planner/Builder defaults (`fable`/`opus` on
-Anthropic). Pi alone can load the complete runtime-only
-the shared registry, the same as every other harness, unless a project-level Pi
-config exists. The former OpenRouter overlay was removed on 2026-07-26.
+<!-- BEGIN GENERATED: roster (apply.py docs) -->
+Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
+<!-- END GENERATED: roster -->
+
+This shared registry is harness-neutral. Claude Code, Codex, dsh, Pi and generic
+consumers all resolve its Planner/Builder defaults (`fable`/`opus` on Anthropic)
+unless a project-level config exists. Pi resolves the shared registry exactly
+like every other harness; its former OpenRouter overlay was removed on
+2026-07-26.
 
 Each model has a configurable `class`, optional pinned `id`, and `provider`.
 Pinned ids win over classes. Use aliases when automatic provider upgrades are
 wanted. Run `apply.py set <role-or-agent> <class>` to change a model.
 
 The config is checked by [`roles.schema.json`](./roles.schema.json) and
-`apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only
-GPT-5.6 Sol review at medium thinking after completed Planner → executor work;
-it checks the plan, result evidence, omissions, and follow-up without editing or
-delegating. This is separate from the full direct-call Audit specialist.
+`apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only review
+at medium thinking after completed Planner → executor work; it checks the plan,
+result evidence, omissions, and follow-up without editing or delegating. This is
+separate from the full direct-call Audit specialist, which directly investigates
+and repairs harness/runtime failures without invoking delegated agents.
+
+<!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
+The two review roles run on `sonnet` for the light post-workflow audit and `fable` for the direct-call Audit profile. Both are Anthropic models chosen to differ from the builder's, which is model-level independence, not cross-family independence — say so when an artifact ranks or compares AI models.
+<!-- END GENERATED: auditor-models -->
+
 `router.py` supplies deterministic, explainable applicability recognition.
 When `routing.automaticSelection.enabled` is true, a supporting harness may
 offer a handoff but must obtain confirmation before delegation; no agent is
-silently dispatched. Team Leader and Audit are always direct-call-only. Audit
-uses `fable` — deliberately not the builder's model — and directly investigates and repairs
-harness/runtime failures without invoking delegated agents.
+silently dispatched. Team Leader and Audit are always direct-call-only.
 
 ## Usage
 
@@ -72,23 +81,34 @@ hand-edited.
 
 ## Looping until a condition holds
 
-The plain loop (`/pb`) runs one plan→build pass. `/pbg` is a bounded,
-model-driven plan→build→verify loop. For the stronger harness-enforced loop,
-use the host's `/goal` followed by `/pb` as documented by that harness.
+The plain loop (`/pb`) runs one plan→build pass. **`/pbg <task> until:
+<condition>` is the portable bounded loop** — plan → build → verify, repeated
+until the condition holds — and it is the form to name in any harness-neutral
+instruction, because it needs nothing from the harness. Some harnesses also have
+a native, harness-enforced goal loop (Claude Code's `/goal` + Stop-hook, dsh's
+`/goal`); those are stronger where they exist and absent everywhere else, so they
+belong in that harness's adapter, not in the shared contract.
 
 ## Adapters
 
 - **Claude Code:** `apply.py claude` generates PB commands/subagents and
-  specialist profiles from the registry.
-- **Other harnesses:** `apply.py generic` prints a portable description of the
-  PB core and specialist registry. A harness can map profiles to its native
-  agent mechanism.
-- **Pi:** the global PB addon reads the Pi-only overlay after project-local
-  configs but before the shared config. Successfully completed Planner →
-  executor work—including each completed `/pbg` round—runs the configured light
-  workflow audit before reporting. `/route <task>` runs the same local
+  specialist profiles from the registry, with a real `model:` field. It is the
+  only adapter that emits one, and it refuses to render a profile whose model
+  Claude Code cannot dispatch.
+- **Codex and dsh:** `install_harness.py codex|dsh` renders every profile as a
+  native skill (`<root>/agent-<key>/SKILL.md`). Neither harness can dispatch the
+  registry's model classes, so neither emits a model field; each profile states
+  which model actually runs.
+- **Hermes:** the same skill surface, including `planner` and `builder`.
+  Hermes's active model comes from its own harness configuration.
+- **Pi:** the global PB addon resolves this shared registry — there is no Pi
+  overlay any more, though one is still honored if reintroduced. Completed
+  Planner → executor work, including each `/pbg` round, runs the configured
+  light workflow audit before reporting. `/route <task>` runs the same local
   recommendation router and asks for confirmation; see `adapters/pi/README.md`
   for precedence.
+- **Anything else:** `apply.py generic` prints a portable description of the PB
+  core and specialist registry to paste into a system prompt.
 
 ## Durable agent knowledge
 

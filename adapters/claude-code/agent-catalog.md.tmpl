@@ -22,14 +22,18 @@ its invocation policy. Add these facts, which the table alone does not convey:
 
 - **Direct-call-only** profiles ({{DIRECT_CALL_ONLY}}) are never automatic
   routing destinations. They run only when the user explicitly asks for them.
-- **Every profile runs on an Anthropic model.** This machine removed all
-  external-model use on 2026-07-26, and `apply.py` now fails the build rather
-  than emitting a non-Anthropic `model:` value that Claude Code would silently
-  discard. If a profile ever appears to resolve to another provider, that is a
-  bug — report it, do not work around it.
+- **Every profile installed here resolves to a model Claude Code can dispatch**
+  — an Anthropic class ({{ANTHROPIC_CLASSES}}) or a `claude-*` id. That is a
+  limit of Claude Code, not a machine policy: this machine has been
+  multi-provider since 2026-08-16 (Codex on OpenAI, Pi on OpenRouter, dsh on
+  DeepSeek). `apply.py` refuses to render a Claude profile it cannot dispatch,
+  because Claude Code discards an unresolvable `model:` silently and runs the
+  session model instead. If a profile here ever appears to resolve to another
+  provider, that is a bug — report it, do not work around it.
 - `/<agent>-model` edits the **shared** `roles.config.json`, which every harness
-  resolves — Claude Code, Pi, Codex, and generic consumers alike. There is no Pi
-  overlay any more, so one edit applies everywhere.
+  resolves — Claude Code, Pi, Codex, dsh, and generic consumers alike. There is
+  no Pi overlay any more, so one edit applies everywhere, and `set` regenerates
+  every installed surface.
 - To pick a profile for a task instead of listing them, use `/route <task>`.
 
 Report what the registry actually says. Do not infer a model assignment that

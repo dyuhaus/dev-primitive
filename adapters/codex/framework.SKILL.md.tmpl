@@ -1,0 +1,66 @@
+---
+name: agent-framework
+description: The machine's configurable agent framework on Codex — which specialist profiles exist, what each is for, how to pick one, and exactly which parts of the framework Codex can and cannot do. Read before adopting a profile, delegating, or claiming a profile ran on its configured model.
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py codex.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py codex -->
+
+# Machine agent framework (Codex)
+
+The registry at `{{REPO_DIR}}/roles.config.json` is the single source of truth
+for every agent profile on this machine. Each profile is installed here as an
+`agent-<key>` skill.
+
+{{ROSTER_SENTENCE}}
+
+{{ROSTER_TABLE}}
+
+## What Codex can and cannot do with this framework
+
+**Can:** adopt any profile (load its `agent-<key>` skill and work inside it),
+run the deterministic router, delegate with `spawn_agent`, and run a real code
+review with the native `codex review` subcommand.
+
+**Cannot: route a profile to its configured model.** Codex dispatches OpenAI
+models; every profile in this registry is configured on a provider Codex cannot
+reach. A profile you adopt runs on **your session's model**. Say that plainly if
+asked — never report that a profile ran on its configured model.
+
+`spawn_agent` gives a child a fresh context, not a profile. Its `model` field
+takes OpenAI models only. If you delegate, paste the profile's mission and
+boundaries into the child's task; nothing carries them automatically.
+
+The `tools:` list in each profile is Claude Code's tool vocabulary. Codex does
+not enforce it, so a read-only profile's boundary is a discipline here, not a
+sandbox. Keep it anyway.
+
+## Picking a profile
+
+- **`runner`** is the everyday front door for routine work, maintenance, and triage.
+- **`planner` → `builder`** is the development core for substantive work.
+- **`code-reviewer`** runs before every PR. The Git Workflow Standard makes this
+  mandatory on every harness. On Codex the native path is `codex review`
+  (or `codex exec review`); adopt the `agent-code-reviewer` profile for its
+  boundaries and output contract, and never write "reviewed" into a PR body
+  unless a review actually ran.
+- Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
+  for them by name.
+
+Available profile skills:
+{{SKILL_LIST}}
+
+Plus `agent-pb` (the plan → build loop) and `agent-route` (explainable routing).
+
+## Reviewing and auditing
+
+{{AUDITOR_MODELS}}
+
+## Rules that do not change per harness
+
+- The registry is the only place a model assignment changes:
+  `python3 {{REPO_DIR}}/apply.py set <role-or-agent> <class>`. Never hand-edit a
+  generated skill file — the next install overwrites it.
+- Every handoff is confirmation-required. The router recommends; the user decides.
+- Direct-call-only profiles are never automatic routing destinations.

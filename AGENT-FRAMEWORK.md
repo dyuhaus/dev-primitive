@@ -2,9 +2,29 @@
 
 This repository defines a portable registry of purpose-specific agents. The
 shared `roles.config.json` is provider- and harness-neutral; `roles.schema.json`
-describes the data shape, and `apply.py` validates and renders adapters. Pi alone
+describes the data shape, and `apply.py` validates and renders adapters. Pi
 resolves the same shared registry as every other harness; its OpenRouter overlay
 was removed on 2026-07-26.
+
+<!-- BEGIN GENERATED: roster (apply.py docs) -->
+Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
+<!-- END GENERATED: roster -->
+
+<!-- BEGIN GENERATED: roster-table (apply.py docs) -->
+| Key | Display name | Model | Provider | Invocation | Auto-select |
+|---|---|---|---|---|---|
+| `planner` | Planner | `fable` | `anthropic` | `default` | `false` |
+| `builder` | Builder | `opus` | `anthropic` | `default` | `false` |
+| `runner` | Runner | `sonnet` | `anthropic` | `default` | `true` |
+| `tech-writer` | Tech Writer | `sonnet` | `anthropic` | `default` | `true` |
+| `prose-writer` | Prose Writer | `sonnet` | `anthropic` | `default` | `true` |
+| `team-leader` | Team Leader | `opus` | `anthropic` | `direct-call-only` | `false` |
+| `l1-programmer` | L1 Programmer | `haiku` | `anthropic` | `default` | `true` |
+| `librarian` | Librarian | `sonnet` | `anthropic` | `default` | `true` |
+| `fe-designer` | FE-Designer | `sonnet` | `anthropic` | `default` | `true` |
+| `audit` | Audit | `fable` | `anthropic` | `direct-call-only` | `false` |
+| `code-reviewer` | Code Reviewer | `fable` | `anthropic` | `default` | `false` |
+<!-- END GENERATED: roster-table -->
 
 ## Architecture
 
@@ -27,16 +47,24 @@ was removed on 2026-07-26.
   components, layouts, interactions, and design-system refinements. Builder
   owns complex system integration; FE-Designer escalates backend, architecture,
   product, and brand decisions rather than guessing them.
+- **Code Reviewer** adversarially reviews a branch, diff, or codebase for real
+  defects before it reaches main. The Git Workflow Standard makes a pre-PR review
+  mandatory on **every** harness, and this is the profile that performs it —
+  under Claude Code as `/code-reviewer`, under Codex additionally through the
+  native `codex review` subcommand, elsewhere by adopting the profile. It is
+  read-only and never fixes what it finds.
 - **Light workflow audit** is an automatic, read-only post-step after completed
-  Planner → Builder or Planner → specialist work. It uses GPT-5.6 Sol with
-  medium thinking to check plan adherence, evidence, omissions, and follow-up;
-  it is intentionally smaller than the direct-call Audit specialist and never
-  edits or delegates.
+  Planner → Builder or Planner → specialist work. It checks plan adherence,
+  evidence, omissions, and follow-up at medium thinking; it is intentionally
+  smaller than the direct-call Audit specialist and never edits or delegates.
 - **Audit** reproduces and repairs failures in AI harnesses, routing,
   extensions, runtime processes, and developer-tool integrations. It works
   directly without delegated agents, updates both durable source and installed
-  surfaces, and verifies reinstall/PR preservation. It uses GPT-5.6 Sol through
-  `fable` and is **direct-call-only**.
+  surfaces, and verifies reinstall/PR preservation. It is **direct-call-only**.
+
+<!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
+The two review roles run on `sonnet` for the light post-workflow audit and `fable` for the direct-call Audit profile. Both are Anthropic models chosen to differ from the builder's, which is model-level independence, not cross-family independence — say so when an artifact ranks or compares AI models.
+<!-- END GENERATED: auditor-models -->
 - **Team Leader** coordinates genuinely large tasks that require multiple
   workstreams. It is **direct-call-only** and must never be automatically
   selected or self-invoked.
@@ -77,25 +105,52 @@ Each specialist profile has:
 | `outputContract` | Required report/result behaviors |
 | `infoSources` | Required evidence sources and native inspection/validation guidance |
 
-**This machine uses Anthropic models only.** The Pi-only OpenRouter overlay
-(`adapters/pi/roles.config.pi.json`) was removed on 2026-07-26; Pi now resolves
-the same shared registry as every other harness. Pi's `config.ts` already falls
-back to it when no overlay exists, and `install_harness.py` treats an absent
-overlay as normal. A project-local `roles.config.json` still overrides.
+**Provider posture.** This machine ran Anthropic-only from 2026-07-26; that was
+superseded on 2026-08-16 and it is multi-provider now — Codex on OpenAI, Pi on
+OpenRouter, dsh on DeepSeek. See the provider-posture paragraph in
+`/home/dyadmin/AGENTS.md` for the current position; do not treat the older
+Anthropic-only wording anywhere as a live rule.
 
+What *is* a live constraint is **dispatchability, which is per harness**:
+
+| Adapter | Can dispatch | Emits a `model:` field |
+|---|---|---|
+| Claude Code | Anthropic classes (`opus`, `sonnet`, `haiku`, `fable`, …) and `claude-*` ids | yes |
+| Codex | OpenAI models | no |
+| dsh | DeepSeek models | no |
+| Pi | OpenRouter and Anthropic | no (routes through its own tools) |
+| Hermes | nothing — model comes from its harness config | no |
+
+Claude Code **silently discards** a `model:` value it cannot resolve and runs the
+subagent on the session model, so a wrong value looks exactly like success.
+`apply.py` therefore refuses to render such a profile and refuses to write a
+registry change that would create one — `set` renders every installed adapter
+against the in-memory config *before* the file is written, so a rejected change
+leaves the registry and every surface still agreeing. The adapters that cannot
+route a model do not pretend to: each rendered profile states which model the
+registry intends and that the session model is what actually runs.
+
+The Pi-only OpenRouter overlay (`adapters/pi/roles.config.pi.json`) was removed
+on 2026-07-26; Pi's `config.ts` falls back to the shared registry when no overlay
+exists, and `install_harness.py` treats an absent overlay as normal. A
+project-local `roles.config.json` still overrides.
 
 Useful commands:
 
 ```bash
 python3 apply.py validate
 python3 apply.py show
+python3 apply.py roster                    # the canonical roster line
 python3 apply.py generic
+python3 apply.py docs                      # refresh the generated doc blocks
 python3 apply.py set l1-programmer sonnet --no-apply
 python3 apply.py claude --dry-run
+python3 install_harness.py all --dry-run   # every harness surface + shared skills
 ```
 
 `apply.py claude` renders the PB adapters and one generic Claude Code adapter
-for every configured specialist. The generated files are not hand-edited.
+for every configured specialist; `install_harness.py codex|dsh|hermes` renders
+the same registry as native skills. The generated files are not hand-edited.
 
 ## Explainable routing
 
@@ -112,7 +167,7 @@ python3 router.py --json "Refactor the broker service architecture"
 
 After each successfully completed Planner → executor workflow—including every
 completed `/pbg` round—supporting adapters run one small post-workflow audit
-using `routing.postWorkflowAudit` (GPT-5.6 Sol, medium thinking by default).
+using `routing.postWorkflowAudit` (medium thinking by default).
 The reviewer receives the task, plan, executor identity, and executor evidence;
 it is read-only, does not delegate, and appends an advisory verdict. It does not
 replace the full explicit `/audit` specialist.
@@ -197,9 +252,15 @@ practices`. See [`agent-knowledge/README.md`](./agent-knowledge/README.md).
     truly differs.
 13. Add deterministic tests for presence, validation invariants, router signals,
     rendered prompt policy, and model configuration. Run the native test suite.
-14. Update this document with the agent's purpose, boundaries, invocation rule,
-    and examples. Review for least privilege, escalation loops, and secret
-    leakage before merging.
+14. Run `python3 apply.py docs` so the roster line and roster table in this
+    document, `README.md`, `PRIMITIVE.md` and `HARNESS-INSTALLATION.md` pick the
+    new profile up. A test fails the build when they are stale, because a
+    hand-written roster has already drifted: the docs said eight specialists
+    while the registry held nine, omitting `code-reviewer` — the one profile the
+    Git Workflow Standard makes mandatory.
+15. Update this document's Architecture section with the agent's purpose,
+    boundaries, invocation rule, and examples. Review for least privilege,
+    escalation loops, and secret leakage before merging.
 
 The source config, schema, generator, adapter template, tests, and documentation
 must be changed together so a future harness can consume the same registry.

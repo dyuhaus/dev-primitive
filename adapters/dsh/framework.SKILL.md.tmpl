@@ -1,0 +1,74 @@
+---
+name: agent-framework
+description: The machine's configurable agent framework on the DeepSeek Harness — which specialist profiles exist, what each is for, how to pick one, and exactly which parts of the framework dsh can and cannot do. Read before adopting a profile, delegating, or claiming a profile ran on its configured model.
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py dsh.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py dsh -->
+
+# Machine agent framework (dsh)
+
+The registry at `{{REPO_DIR}}/roles.config.json` is the single source of truth
+for every agent profile on this machine. Each profile is installed here as an
+`agent-<key>` skill, discovered through dsh's filesystem skill provider at the
+`user-dsh` root (`$DSH_HOME/skills`).
+
+{{ROSTER_SENTENCE}}
+
+{{ROSTER_TABLE}}
+
+## What dsh can and cannot do with this framework
+
+**Can:** adopt any profile (load its `agent-<key>` skill and work inside it),
+run the deterministic router, delegate with the `subagent` / `subagent_fork`
+tools, and run a bounded goal loop.
+
+**Cannot: route a profile to its configured model.** dsh dispatches DeepSeek
+models; every profile in this registry is configured on a provider dsh cannot
+reach. A profile you adopt runs on **your session's model**. Say that plainly if
+asked — never report that a profile ran on its configured model.
+
+A `subagent` child inherits this session's model. Per-profile model routing
+would need a separate `@deepseek-ai/dsh-tool-subagent` instance per profile in
+`$DSH_HOME/profiles/<profile>/cordis.patch.yml` with an `agentOptions.model`,
+and the values it accepts are DeepSeek models — not the classes in this
+registry. Delegation here buys context isolation, not model routing.
+
+The `tools:` list in each profile is Claude Code's tool vocabulary. dsh enforces
+its own sandbox and approval presets instead, so a read-only profile's boundary
+is a discipline here. Keep it anyway.
+
+**`AGENTS.md` still reaches you.** dsh's `agent-instructions` plugin loads
+`$DSH_HOME/AGENTS.md` — a symlink to `/home/dyadmin/AGENTS.md`, the machine
+contract — before any project file. If that contract tells you to delegate to a
+subagent profile, the profile it means is the corresponding `agent-<key>` skill
+here, adopted in-session.
+
+## Picking a profile
+
+- **`runner`** is the everyday front door for routine work, maintenance, and triage.
+- **`planner` → `builder`** is the development core for substantive work.
+- **`code-reviewer`** runs before every PR. The Git Workflow Standard makes this
+  mandatory on every harness. On dsh, adopt `agent-code-reviewer` — ideally in a
+  `subagent` child so the review reads the diff with fresh context — and never
+  write "reviewed" into a PR body unless a review actually ran.
+- Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
+  for them by name.
+
+Available profile skills:
+{{SKILL_LIST}}
+
+Plus `agent-pb` (the plan → build loop) and `agent-route` (explainable routing).
+
+## Reviewing and auditing
+
+{{AUDITOR_MODELS}}
+
+## Rules that do not change per harness
+
+- The registry is the only place a model assignment changes:
+  `python3 {{REPO_DIR}}/apply.py set <role-or-agent> <class>`. Never hand-edit a
+  generated skill file — the next install overwrites it.
+- Every handoff is confirmation-required. The router recommends; the user decides.
+- Direct-call-only profiles are never automatic routing destinations.

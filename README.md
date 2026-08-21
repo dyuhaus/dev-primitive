@@ -3,7 +3,12 @@
 A small, portable, provider-neutral primitive for configurable task agents.
 The original two-model loop remains the **PB core**: one model *plans and
 reasons*, another *scripts and builds*. It now also registers purpose-specific
-specialists such as Runner, writers, Librarian, FE-Designer, Audit, Team Leader, and L1 Programmer.
+specialists.
+
+<!-- BEGIN GENERATED: roster (apply.py docs) -->
+Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
+<!-- END GENERATED: roster -->
+
 See [`AGENT-FRAMEWORK.md`](./AGENT-FRAMEWORK.md) for the architecture and
 future agent-creation process.
 
@@ -42,12 +47,15 @@ capabilities, boundaries, invocation policy, and escalation/delegation rules.
 `router.py` deterministically recognizes applicable agents and supplies an
 explainable handoff. Pi can offer that handoff automatically, but it always
 requires the user's confirmation before delegation. Completed Planner →
-Builder/specialist workflows receive a small read-only GPT-5.6 Sol audit at
-medium thinking before the final report. This is separate from the full Audit
-agent. Team Leader and Audit are
-direct-call-only and cannot be selected by the router. Audit is explicitly
-invoked for AI-harness/runtime bug audits and runs on GPT-5.6 Sol without
-calling delegated agents.
+Builder/specialist workflows receive a small read-only audit at medium thinking
+before the final report; it is separate from the full Audit agent, which is
+explicitly invoked for AI-harness/runtime bug audits and does not call delegated
+agents. Team Leader and Audit are direct-call-only and cannot be selected by the
+router.
+
+<!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
+The two review roles run on `sonnet` for the light post-workflow audit and `fable` for the direct-call Audit profile. Both are Anthropic models chosen to differ from the builder's, which is model-level independence, not cross-family independence — say so when an artifact ranks or compares AI models.
+<!-- END GENERATED: auditor-models -->
 
 Everything is driven by [`roles.config.json`](./roles.config.json) — the single
 source of truth. Each role has a **customizable model class**:
@@ -62,20 +70,31 @@ source of truth. Each role has a **customizable model class**:
   newest model in that family, so it auto-upgrades as new models ship.
 - **`id`** — optional exact model to pin (e.g. `claude-opus-4-8`). When set it
   overrides `class`.
-- **`provider`** — a key into the `providers` map (Anthropic, any
-  OpenAI-compatible endpoint incl. OpenRouter, Google, or a local model), which
-  names the wire protocol and the **env vars** for the API key / base URL.
+- **`provider`** — a key into the `providers` map, naming the wire protocol and
+  the **env vars** for the API key / base URL. Consumers map a role to a harness
+  by the provider's *key*, so use one of the recognised keys — `anthropic`,
+  `openai`, `deepseek`, `openrouter` — and not a private synonym: a DeepSeek
+  endpoint keyed `dsh` validates cleanly and is then silently unroutable.
 
-This shared file is harness-neutral: every harness — Claude Code, Pi,
-Codex/generic consumers — resolves its Planner/Builder values (`fable`/`opus` on
+This shared file is harness-neutral: every harness — Claude Code, Codex, dsh,
+Pi, generic consumers — resolves its Planner/Builder values (`fable`/`opus` on
 Anthropic by default), unless a project-level config overrides them.
 `routing.postWorkflowAudit` defaults to `sonnet` at medium thinking; an
 effective project-level configuration may change or disable that reviewer.
 
-Pi previously carried its own OpenRouter overlay; it was removed on 2026-07-26
-when the reference machine stopped using external models. Reintroducing one is
-a supported path — drop a `roles.config.pi.json` back into `adapters/pi/` and
-`install_harness.py` will validate and honor it — but nothing requires it.
+**A model class is only useful on a harness that can dispatch it.** Claude Code
+resolves a subagent's `model:` against Anthropic classes and `claude-*` ids and
+**silently discards** anything else, running the session model instead — so
+`apply.py` refuses to render a Claude profile it cannot dispatch, and refuses to
+write a registry change that would produce one. Codex dispatches OpenAI models
+and dsh dispatches DeepSeek models, so their adapters emit no model field at all
+and say plainly which model actually runs. This is a property of each harness,
+not a machine policy: this machine has been multi-provider since 2026-08-16.
+
+Pi previously carried its own OpenRouter overlay; it was removed on 2026-07-26.
+Reintroducing one is a supported path — drop a `roles.config.pi.json` back into
+`adapters/pi/` and `install_harness.py` will validate and honor it — but nothing
+requires it.
 
 Change a model by editing this file and re-running `apply.py`; with no overlay
 in play that single edit applies to every harness at once. The config is
@@ -87,16 +106,31 @@ secrets live here — only the names of env vars.**
 
 An *adapter* turns the config into whatever a harness understands:
 
-| Harness | How |
-|---|---|
-| **Claude Code** | `apply.py claude` renders two subagents (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model from chat. |
-| **Codex / Hermes / Gemini / raw system prompt** | `apply.py generic` prints a portable Markdown block (roles + resolved classes + provider env) to paste into `AGENTS.md` / `GEMINI.md` / a system prompt. |
-| **Programmatic / OpenAI-compatible client** | Read the shared `roles.config.json` directly; pick `roles.<role>.model` + the `providers[...]` entry, one client per role. |
+<!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
+| Harness | Surface | Result |
+|---|---|---|
+| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | PB subagents, `/pb`, `/pbg`, `/route`, `/agent-catalog`, and a `/<agent>` + `/<agent>-model` pair per profile. The only adapter that writes a `model:` field, and the only one that can dispatch the registry's Anthropic classes. |
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. No model routing: Codex dispatches OpenAI models, so every profile runs on the session model. `codex review` is the native review path. |
+| dsh | `~/.dsh/skills/agent-*/SKILL.md` | The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model. |
+| Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus a generated `<key>_agent` tool per profile, resolved from this same registry. |
+| Hermes | `~/.hermes/skills/agent-*/SKILL.md` | One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today. |
+<!-- END GENERATED: harness-surfaces -->
 
-To support a **new** harness: add `adapters/<harness>/` templates (placeholders
-`{{PLANNER_MODEL}}` / `{{BUILDER_MODEL}}` / `{{PLANNER_PURPOSE}}` /
-`{{BUILDER_PURPOSE}}`) and a small render function in `apply.py`. The config never
-changes.
+Install them with `python3 install_harness.py <pi|claude|codex|dsh|hermes|skills|all>`.
+`install_harness.py skills` additionally mirrors the shared `~/skills` roots into
+every harness's skill directory, so a Codex or dsh session is not silently
+missing `git-workflow`, `subsite-scaffold`, `decommission-checklist` and
+`harden-service` while its instructions assume it has them.
+
+For a harness with no adapter, `apply.py generic` prints a portable Markdown
+block (roles + resolved classes) to paste into `AGENTS.md` or a system prompt,
+and any programmatic client can read `roles.config.json` directly.
+
+To support a **new** harness: add `adapters/<harness>/` templates and a small
+render function in `apply.py`. A skill-based harness needs only the four
+`*.SKILL.md.tmpl` files that `adapters/codex/` shows. **If the harness cannot
+dispatch the registry's model classes, do not emit a model field** — render an
+honest sentence saying which model actually runs. The config never changes.
 
 ## Layout
 

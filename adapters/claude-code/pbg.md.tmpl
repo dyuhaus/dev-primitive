@@ -15,11 +15,17 @@ yourself.
 
 This is the persistence variant of `/pb`: plan → build → verify → (if not done)
 loop. It emulates a goal loop **inside the orchestrator**, so it is *model-driven,
-not harness-enforced*. For a stronger, harness-guaranteed loop, run the built-in
-`/goal <done-condition>` first and then `/pb <task>` as separate messages — that
-uses Claude Code's own Stop-hook goal loop. `/goal` and `/pb` cannot share one
-message (`/goal` is a built-in and `/pb` spawns subagents), so that path is two
-messages; use `/pbg` when you want it in a single line.
+not harness-enforced* — and that is exactly why it is the **portable** path: it
+needs nothing from the harness, so it reads the same on every harness this
+registry installs into.
+
+<!-- Claude Code only — not part of the shared PB contract. -->
+For a stronger, harness-guaranteed loop *on Claude Code specifically*, run the
+built-in `/goal <done-condition>` first and then `/pb <task>` as separate
+messages — that uses Claude Code's own Stop-hook goal loop. `/goal` and `/pb`
+cannot share one message (`/goal` is a built-in and `/pb` spawns subagents), so
+that path is two messages; use `/pbg` when you want it in a single line, or when
+you are anywhere other than Claude Code.
 
 Steps:
 
