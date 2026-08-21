@@ -104,10 +104,28 @@ Pi offers explicit `/<agent>` slash commands for every profile and
 available agent command and the effective active model assignment.
 
 Changing a model is one command — `apply.py set <role-or-agent> <class>` — and
-it now refreshes **every installed surface**, not Claude Code's alone. It also
-renders every adapter against the in-memory config before writing, so a rejected
-change leaves the registry and the installed surfaces still agreeing rather than
-disagreeing three ways.
+it refreshes **every surface that is already installed**, not Claude Code's
+alone. It also renders every present adapter against the in-memory config before
+writing, so a rejected change leaves the registry and the installed surfaces
+still agreeing rather than disagreeing three ways.
+
+Two limits on that refresh, both deliberate:
+
+- **It updates; it never installs.** `set` rewrites generated files that already
+  exist and creates none. `~/.dsh` existing means dsh is installed on the
+  machine, not that this primitive has ever written a profile into it — a
+  routine model switch must not stand up a harness surface nobody asked for.
+  When a surface is missing, `set` says so and names the install command.
+  Installing is `install_harness.py <harness>`, run on purpose.
+- **Only Claude Code can veto a model.** It is the one adapter that resolves a
+  `model:` field, so it is the one that can reject a model class. The skill
+  adapters render the configured model as prose and will render anything, so
+  `set` reports them as *rendered*, never as having *validated* the model. On a
+  machine with no Claude Code, `set` says plainly that nothing checked the class.
+
+Note the division of labour between the two entry points: `install_harness.py`
+mirrors the shared `~/skills` roots into each harness, and `apply.py` never does
+that at any action.
 
 Completed Planner → executor workflows also run the configured lightweight audit
 at medium thinking; it is read-only and distinct from `/audit`.

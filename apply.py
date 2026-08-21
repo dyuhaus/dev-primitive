@@ -8,6 +8,7 @@ applicable profiles; every harness handoff remains confirmation-required.
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -696,6 +697,84 @@ def frontmatter_description(text: str, limit: int = 400) -> str:
     return flat[: limit - 1].rsplit(" ", 1)[0] + "…"
 
 
+def yaml_scalar(value) -> str:
+    """One registry value, rendered as a YAML scalar every harness can parse.
+
+    The bug this exists to prevent, measured live: the skill templates
+    interpolated a profile's `purpose` into `description:` raw, and four of the
+    eleven purposes contain a colon-and-space ("planning and reasoning about the
+    project: architecture, ..."). YAML reads that as a nested mapping, the
+    frontmatter fails to parse, and dsh's filesystem skill provider **drops the
+    whole skill** with nothing but a line in its log — so `agent-planner`,
+    `agent-builder`, `agent-fe-designer` and `agent-code-reviewer` were absent
+    from a harness whose own catalog never said anything was missing. Silent
+    loss is the worst failure shape available here.
+
+    Always double-quoted, never bare: a value that happens to be safe today is
+    one registry edit away from being unsafe, and nothing downstream would say
+    so. JSON string syntax is a strict subset of YAML 1.2's double-quoted flow
+    scalar, so `json.dumps` is a correct YAML quoter for any text.
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+# A bare (unquoted) YAML scalar this generator is willing to emit. Anything with
+# a space, a colon or an indicator character has to be quoted by `yaml_scalar`.
+BARE_YAML_SCALAR = re.compile(r"^[A-Za-z0-9_./-]+$")
+
+
+def frontmatter_of(content: str) -> str:
+    """The raw YAML frontmatter block of a rendered skill file, or ''."""
+    if not content.startswith("---\n"):
+        return ""
+    end = content.find("\n---\n", 3)
+    if end == -1:
+        return ""
+    return content[4 : end + 1]
+
+
+def check_frontmatter(target, content: str) -> None:
+    """Refuse to emit a skill file whose frontmatter a harness cannot parse.
+
+    Assert on the artifact, not on the template: the templates are the thing
+    that was wrong, so the check runs on the rendered bytes. Structural by
+    default (stdlib only, so the primitive stays dependency-free); when PyYAML
+    is importable it additionally does a real parse, which is what actually
+    proves a harness will accept the file.
+    """
+    block = frontmatter_of(content)
+    if not block:
+        fail(f"{target}: rendered skill has no parseable `---` frontmatter block")
+    for line in block.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            fail(f"{target}: frontmatter line is not a `key: value` pair: {line!r}")
+        value = value.strip()
+        if not value or value[0] in "\"'":
+            continue  # a nested-mapping key, or an already-quoted scalar
+        if not BARE_YAML_SCALAR.match(value):
+            fail(
+                f"{target}: frontmatter value for `{key.strip()}` is unquoted free "
+                f"text ({value[:60]!r}). Emit it through yaml_scalar() — an "
+                "unquoted colon makes the harness drop the whole skill silently."
+            )
+    try:
+        import yaml  # noqa: PLC0415 — optional; the structural check stands alone
+    except ImportError:
+        return
+    try:
+        data = yaml.safe_load(block)
+    except Exception as exc:  # noqa: BLE001 — any parser complaint is fatal here
+        fail(f"{target}: frontmatter is not valid YAML: {exc}")
+    if not isinstance(data, dict):
+        fail(f"{target}: frontmatter parsed as {type(data).__name__}, not a mapping")
+    for field in ("name", "description"):
+        if not isinstance(data.get(field), str) or not data[field].strip():
+            fail(f"{target}: frontmatter `{field}` must be a non-empty string, got {data.get(field)!r}")
+
+
 def model_routing_note(view: dict, adapter: str) -> str:
     """One honest sentence about whether this harness can run the model configured."""
     label = HARNESS_LABELS.get(adapter, adapter)
@@ -705,12 +784,17 @@ def model_routing_note(view: dict, adapter: str) -> str:
             f"The registry configures this profile as `{view['model']}` on the "
             f"`{view['provider']}` provider, and {label} can dispatch that model."
         )
+    # Worded so no indefinite article precedes the provider type. The previous
+    # phrasing hardcoded "a", and every provider in this registry is `anthropic`,
+    # so every non-dispatchable profile of every skill adapter read "a anthropic
+    # endpoint" — in the one sentence whose whole job is to be believed.
+    protocol = view["provider_type"] or "undeclared"
     return (
         f"The registry configures this profile as `{view['model']}` on the "
-        f"`{view['provider']}` provider (a {view['provider_type'] or 'declared'} "
-        f"endpoint). {label} cannot dispatch that model, so this profile runs on "
-        "whatever model the current session is using. Treat the configured model "
-        "as routing intent, not a fact about this session, and never report that "
+        f"`{view['provider']}` provider, whose wire protocol is `{protocol}`. "
+        f"{label} cannot dispatch that model, so this profile runs on whatever "
+        "model the current session is using. Treat the configured model as "
+        "routing intent, not a fact about this session, and never report that "
         "the profile ran on it."
     )
 
@@ -810,9 +894,18 @@ def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
         values.update(
             {
                 "AGENT_KEY": key,
-                "AGENT_SKILL_NAME": f"agent-{key}",
+                # `*_YAML` values are the ONLY ones a template may put in
+                # frontmatter. They are pre-quoted, so no registry text can
+                # close the scalar and restructure the document.
+                "AGENT_SKILL_NAME": yaml_scalar(f"agent-{key}"),
+                "AGENT_DESCRIPTION": yaml_scalar(frontmatter_description(view["purpose"])),
+                "AGENT_KEY_YAML": yaml_scalar(key),
+                "AGENT_MODEL_CLASS_YAML": yaml_scalar(view["class"]),
+                "AGENT_MODEL_ID_YAML": yaml_scalar(view["id"]),
+                "AGENT_PROVIDER_YAML": yaml_scalar(view["provider"]),
+                "AGENT_PROVIDER_TYPE_YAML": yaml_scalar(view["provider_type"]),
+                "AGENT_INVOCATION_YAML": yaml_scalar(view["invocation"]),
                 "AGENT_DISPLAY_NAME": view["display_name"],
-                "AGENT_DESCRIPTION": frontmatter_description(view["purpose"]),
                 "AGENT_PURPOSE": view["purpose"],
                 "AGENT_PURPOSE_SHORT": short_purpose(view["purpose"]),
                 "AGENT_MODEL": view["model"],
@@ -838,6 +931,10 @@ def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
             }
         )
         rendered.append((root / f"agent-{key}" / "SKILL.md", render(body, values)))
+    # Assert on the artifact: every rendered file, including the three shared
+    # skills whose frontmatter is hand-written in the templates.
+    for target, content in rendered:
+        check_frontmatter(target, content)
     return rendered
 
 
@@ -886,8 +983,24 @@ def write_config(cfg_path: Path, cfg: dict) -> None:
     os.replace(temp, cfg_path)
 
 
+ALL_ADAPTERS = ("claude", "codex", "dsh", "hermes")
+
+# The only adapter whose renderer can REFUSE a model class. Claude Code is the
+# one harness here that resolves a `model:` frontmatter field, so it is the one
+# adapter that can object to what `set` was asked to configure; the skill
+# adapters state the configured model as prose and will render anything. `set`
+# used to print "Checked against installed adapters: claude, codex, dsh" —
+# naming three adapters when only one had checked anything.
+MODEL_OBJECTING_ADAPTERS = ("claude",)
+
+
 def installed_adapters(home: Path) -> list:
-    """Which harness surfaces exist on this machine, so `set` can refresh them."""
+    """Which harnesses are PRESENT on this machine (a `.<harness>` config root).
+
+    Presence is the right test for the pre-write veto: a machine that runs
+    Claude Code has a real problem with a model Claude Code cannot dispatch,
+    whether or not a generated surface has been installed there yet.
+    """
     present = []
     if (home / ".claude").is_dir():
         present.append("claude")
@@ -897,23 +1010,77 @@ def installed_adapters(home: Path) -> list:
     return present
 
 
-def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
-    """Regenerate every installed harness surface. Returns adapters that failed.
+def surface_installed(home: Path, adapter: str) -> bool:
+    """Whether this harness already has a GENERATED surface on disk.
 
-    `set` used to refresh Claude alone, so after a model change the registry said
-    one thing and every other installed surface still said the old one.
+    Presence of `~/.dsh` means dsh is installed. It does not mean this primitive
+    has ever written a profile into it — and `apply.py set` must not turn a
+    routine model switch into the act of installing a harness surface that was
+    deliberately never installed. Installing a surface is `install_harness.py`'s
+    job, run on purpose.
+    """
+    if adapter == "claude":
+        agents = home / ".claude" / "agents"
+        return any((agents / f"{key}.md").is_file() for key in ("planner", "builder"))
+    root = home / HARNESS_SKILL_ROOTS[adapter]
+    if not root.is_dir():
+        return False
+    return any((root / f"agent-{key}" / "SKILL.md").is_file() for key in ALL_AGENT_KEYS) or (
+        root / "agent-framework" / "SKILL.md"
+    ).is_file()
+
+
+def render_surface(cfg: dict, home: Path, adapter: str) -> list:
+    """[(target, content)] for one adapter, without writing anything."""
+    if adapter == "claude":
+        return render_claude(cfg, home)
+    return render_harness_skills(cfg, home, adapter)
+
+
+def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
+    """Update every harness surface that ALREADY exists. Returns failed adapters.
+
+    Two rules, both learned the hard way:
+
+    * `set` used to refresh Claude alone, so after a model change the registry
+      said one thing and every other installed surface still said the old one.
+    * `set` then refreshed every *present* harness, which installed the Codex,
+      dsh and Hermes surfaces as a side effect of changing a model — creating
+      harness surfaces nobody asked for, during a machine freeze. So this now
+      rewrites only files that are already on disk, and never creates one.
     """
     skipped = []
     install_knowledge(cfg, dry)
-    for adapter in installed_adapters(home):
+    absent = [a for a in ALL_ADAPTERS if not surface_installed(home, a)]
+    for adapter in ALL_ADAPTERS:
+        if adapter in absent:
+            continue
         try:
-            if adapter == "claude":
-                install_claude(cfg, home, dry)
-            else:
-                install_harness_skills(cfg, home, adapter, dry)
+            rendered = render_surface(cfg, home, adapter)
         except AdapterUnsupported as exc:
             skipped.append(adapter)
             print(f"WARNING: skipping the {adapter} adapter — {exc}", file=sys.stderr)
+            continue
+        updated, missing = 0, []
+        for target, content in rendered:
+            if not target.exists():
+                missing.append(target)
+                continue
+            write_out(target, content, dry)
+            updated += 1
+        print(f"  [{adapter}] updated {updated} existing file(s)")
+        if missing:
+            print(
+                f"  [{adapter}] {len(missing)} generated file(s) do not exist yet and were NOT "
+                f"created; run `python3 {SCRIPT_DIR / 'install_harness.py'} {adapter}` to install them"
+            )
+    if absent:
+        print(
+            "  no generated surface installed for: "
+            + ", ".join(absent)
+            + " — nothing written there. Install one deliberately with "
+            f"`python3 {SCRIPT_DIR / 'install_harness.py'} <harness>`."
+        )
     return skipped
 
 
@@ -1070,17 +1237,24 @@ def main() -> None:
         # Render every installed adapter against the IN-MEMORY config before the
         # write. `set` used to persist first and guard afterwards, so a rejected
         # change left the source of truth changed and every surface unchanged.
-        checked = installed_adapters(home)
-        # Printed rather than assumed: only an INSTALLED adapter can object, so
-        # on a machine with no harness surfaces nothing here validates the model,
-        # and the operator should be able to see that rather than infer it.
-        print(f"Checked against installed adapters: {', '.join(checked) or 'none installed — no adapter could object'}")
-        for adapter in checked:
+        present = installed_adapters(home)
+        # Say only what was actually established. Rendering every present adapter
+        # proves the templates still render; only Claude Code resolves a `model:`
+        # field, so only its adapter can reject the model class being set. The
+        # old line named all three skill adapters as having "checked" it, which
+        # asserted a validation none of them is capable of performing.
+        objecting = [a for a in present if a in MODEL_OBJECTING_ADAPTERS]
+        print(f"Rendered against present harnesses: {', '.join(present) or 'none'} (a render failure blocks the change).")
+        if objecting:
+            print(f"Model class validated by: {', '.join(objecting)} — the only adapter here that resolves a model field.")
+        else:
+            print(
+                "Model class validated by: nothing. No harness present on this machine resolves a "
+                "model field, so no adapter could object to this model class."
+            )
+        for adapter in present:
             try:
-                if adapter == "claude":
-                    render_claude(cfg, home)
-                else:
-                    render_harness_skills(cfg, home, adapter)
+                render_surface(cfg, home, adapter)
             except AdapterUnsupported as exc:
                 fail(
                     f"refusing to change the registry: the {adapter} adapter cannot "

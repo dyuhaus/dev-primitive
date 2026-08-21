@@ -132,6 +132,15 @@ render function in `apply.py`. A skill-based harness needs only the four
 dispatch the registry's model classes, do not emit a model field** — render an
 honest sentence saying which model actually runs. The config never changes.
 
+**Every value a template puts in YAML frontmatter must come from
+`yaml_scalar()`**, which double-quotes it. Registry text is free prose: four of
+the eleven `purpose` strings contain a colon-and-space, and interpolated raw
+that reads as a nested mapping. dsh's skill loader then *drops the whole skill*
+and writes one line to its log — measured, four of fourteen gone, including both
+PB roles and the mandatory reviewer, with nothing in the catalog to say so.
+`check_frontmatter()` runs on every rendered file and fails the build rather
+than let that recur.
+
 ## Layout
 
 ```
