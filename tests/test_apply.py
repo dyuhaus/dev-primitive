@@ -122,6 +122,21 @@ class ApplyTests(unittest.TestCase):
                 with self.assertRaises(apply.AdapterUnsupported):
                     apply.render_claude(bad, Path("/tmp/agent-framework-test-home"))
 
+    def test_an_audit_with_no_model_configured_still_renders(self):
+        """`postWorkflowAudit: {"enabled": false}` is valid and must stay renderable.
+
+        Regression: routing the audit model through the dispatch guard rejected
+        the absent-model case, so turning the auditor off broke the whole Claude
+        render — a valid config the validator explicitly accepts.
+        """
+        for audit in ({"enabled": False}, {"enabled": False, "thinking": "low"}):
+            with self.subTest(audit=audit):
+                cfg = copy.deepcopy(self.config)
+                cfg["routing"]["postWorkflowAudit"] = audit
+                self.assertEqual(apply.validate(cfg), [])
+                rendered = apply.render_claude(cfg, Path("/tmp/agent-framework-test-home"))
+                self.assertTrue(rendered)
+
     def test_apply_py_claude_exits_non_zero_for_a_non_anthropic_planner(self):
         """The regression test the audit asked for, asserted on the exit code."""
         with tempfile.TemporaryDirectory() as directory:

@@ -392,6 +392,12 @@ def template_mapping(cfg: dict, adapter: str = "claude-code") -> dict:
     audit_provider = (post_audit.get("model") or {}).get("provider", "")
     audit_provider_type = provider_type_of(cfg, audit_provider)
     field = claude_model_field if adapter == "claude-code" else (lambda model, _ptype: model)
+    # `postWorkflowAudit` may legitimately carry no model at all — a config with
+    # `{"enabled": false}` and nothing else is valid, and validate() has a test
+    # saying so. Guarding an absent model would reject that config, so the audit
+    # field is only checked when one is actually configured. This matches
+    # claude_dispatch_report(), which already skips the same case.
+    audit_field = field(audit_model, audit_provider_type) if post_audit.get("model") is not None else audit_model
     return {
         "PLANNER_MODEL": p["model"],
         "BUILDER_MODEL": b["model"],
@@ -403,7 +409,7 @@ def template_mapping(cfg: dict, adapter: str = "claude-code") -> dict:
         "BUILDER_PROVIDER": b["provider"],
         "WORKFLOW_AUDIT_ENABLED": str(post_audit.get("enabled", False)).lower(),
         "WORKFLOW_AUDIT_MODEL": audit_model,
-        "WORKFLOW_AUDIT_MODEL_FIELD": field(audit_model, audit_provider_type),
+        "WORKFLOW_AUDIT_MODEL_FIELD": audit_field,
         "WORKFLOW_AUDIT_THINKING": post_audit.get("thinking", "medium"),
         "ANTHROPIC_CLASSES": ", ".join(f"`{name}`" for name in ANTHROPIC_MODEL_CLASSES),
     }
@@ -1064,7 +1070,12 @@ def main() -> None:
         # Render every installed adapter against the IN-MEMORY config before the
         # write. `set` used to persist first and guard afterwards, so a rejected
         # change left the source of truth changed and every surface unchanged.
-        for adapter in installed_adapters(home):
+        checked = installed_adapters(home)
+        # Printed rather than assumed: only an INSTALLED adapter can object, so
+        # on a machine with no harness surfaces nothing here validates the model,
+        # and the operator should be able to see that rather than infer it.
+        print(f"Checked against installed adapters: {', '.join(checked) or 'none installed — no adapter could object'}")
+        for adapter in checked:
             try:
                 if adapter == "claude":
                     render_claude(cfg, home)
