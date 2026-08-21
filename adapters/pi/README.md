@@ -32,7 +32,7 @@ The live adapter provides:
   `team_leader_agent`, `l1_programmer_agent`, `librarian_agent`,
   `fe_designer_agent`, and `audit_agent` tools; `team_leader_agent` and
   `audit_agent` reject model-initiated calls because both are direct-call-only;
-- `/pb` for one Planner → Builder pass followed by a lightweight GPT-5.6 Sol
+- `/pb` for one Planner → Builder pass followed by a lightweight configured
   audit at medium thinking;
 - `/pbg` for a bounded plan/build/light-audit/verify loop;
 - `/agents` to list every agent command, matching model command, and active
@@ -42,7 +42,7 @@ The live adapter provides:
 - `/pb-show` for config and model resolution diagnostics.
 - Explicit agent commands: `/planner`, `/builder`, `/runner`, `/tech-writer`,
   `/prose-writer`, `/team-leader`, `/l1-programmer`, `/librarian`,
-  `/fe-designer`, and `/audit`. Audit runs directly on GPT-5.6 Sol without
+  `/fe-designer`, and `/audit`. Audit runs directly on its configured model without
   delegated agents and is intended for harness/runtime bug audits.
 - A `/<agent>-model` command for every agent. With no overlay present these
   report the shared registry value; writing one recreates a Pi-only overlay, so

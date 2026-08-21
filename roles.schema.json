@@ -25,20 +25,23 @@
     },
     "routing": { "$ref": "#/$defs/routing" },
     "providers": {
+      "description": "Provider entries keyed by NAME. Consumers map a role to a harness by the provider's key, not by its declared type — Maestro's backend/lib/roles.js and dev-primitive's own adapters both do. The four recognised key names are 'anthropic' (-> Claude Code), 'openai' (-> Codex), 'deepseek' (-> dsh) and 'openrouter' (-> Pi). Any other key validates but is unroutable: a DeepSeek endpoint keyed 'dsh' passes every check here and is then silently marked unavailable by every consumer.",
       "type": "object",
       "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
       "additionalProperties": { "$ref": "#/$defs/provider" }
     }
   },
   "$defs": {
     "model": {
+      "description": "A model selection. Schema-valid is not the same as dispatchable: whether a harness can actually run this model is an adapter property, checked at render time. Claude Code resolves Anthropic classes (opus, sonnet, haiku, fable) and claude-* ids and silently discards anything else, so apply.py refuses to render a Claude profile it cannot dispatch.",
       "type": "object",
       "required": ["class", "provider"],
       "additionalProperties": true,
       "properties": {
-        "class": { "type": "string", "minLength": 1 },
-        "id": { "type": "string" },
-        "provider": { "type": "string", "minLength": 1 }
+        "class": { "description": "Model class or alias; auto-upgrades where the harness supports aliases.", "type": "string", "minLength": 1 },
+        "id": { "description": "Optional exact model id. When non-empty it wins over class.", "type": "string" },
+        "provider": { "description": "A key into the providers map. Use a recognised key name; see providers.", "type": "string", "minLength": 1 }
       }
     },
     "stringList": { "type": "array", "items": { "type": "string" } },
@@ -117,9 +120,13 @@
       "required": ["type", "apiKeyEnv"],
       "additionalProperties": true,
       "properties": {
-        "type": { "type": "string", "enum": ["anthropic", "openai", "google", "local"] },
-        "apiKeyEnv": { "type": "string" },
-        "baseUrlEnv": { "type": "string" }
+        "type": {
+          "description": "The wire protocol. Distinct from the provider's key name: the key decides which harness a role routes to, the type decides how a client talks to it.",
+          "type": "string",
+          "enum": ["anthropic", "openai", "google", "deepseek", "openrouter", "local"]
+        },
+        "apiKeyEnv": { "description": "NAME of the environment variable holding the key. Never a key value.", "type": "string" },
+        "baseUrlEnv": { "description": "NAME of the environment variable holding the base URL, or an empty string.", "type": "string" }
       }
     }
   }

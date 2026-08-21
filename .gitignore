@@ -20,3 +20,6 @@ roles.local.json
 
 # Local router decision audit. It deliberately contains no raw task text.
 runtime/
+
+# Atomic-write scratch files from apply.py set (never committed)
+*.json.tmp

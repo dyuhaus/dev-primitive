@@ -28,13 +28,19 @@ Do this:
 Scope of this command:
 
 - It edits the **shared** registry that every harness resolves — Claude Code,
-  Pi, Codex, and generic consumers alike. There is no Pi overlay any more, so
-  one edit applies everywhere.
-- **Only Anthropic model classes are valid.** This machine removed external-model
-  use on 2026-07-26, and `apply.py` deliberately **fails** rather than accept a
-  non-Anthropic provider: Claude Code silently discards such a value and runs the
-  session model instead, which would look like it worked. If the user asks for a
-  non-Anthropic model, relay that error and explain the constraint rather than
-  editing the config by hand to force it through.
+  Pi, Codex, dsh, and generic consumers alike. There is no Pi overlay any more,
+  so one edit applies everywhere, and `set` regenerates every installed surface
+  rather than Claude Code's alone.
+- **A profile Claude Code runs must resolve to a model Claude Code can dispatch.**
+  Claude Code resolves a subagent's `model:` against Anthropic classes
+  ({{ANTHROPIC_CLASSES}}) and `claude-*` ids only, and **silently discards**
+  anything else — the subagent then runs on the session model while its file
+  still claims otherwise. `apply.py` therefore refuses to render such a profile
+  and refuses to write the registry change at all, so a rejected switch leaves
+  the source of truth and every installed surface agreeing. This is a limit of
+  Claude Code's dispatch, not a machine policy: this machine has been
+  multi-provider since 2026-08-16. If the user asks for a model Claude Code
+  cannot dispatch, relay the error and explain that constraint rather than
+  hand-editing the config to force it through.
 
 Never hand-edit the generated agent files — `set` is the only supported path.

@@ -1,0 +1,31 @@
+---
+name: agent-route
+category: agent-framework
+description: Explainably recommend which configured agent profile fits a task, using the machine's deterministic local router, then confirm with the user before adopting or delegating to it. Use when it is unclear which specialist a task belongs to.
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py hermes.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py hermes -->
+
+# Route a task (Hermes)
+
+Run the deterministic local router. It makes no model call and dispatches
+nothing:
+
+```bash
+python3 {{REPO_DIR}}/router.py --explain "<the task>"
+```
+
+Present the selected profile, its confidence, the reasons, the alternatives, and
+any clarifying questions the router returned. Then **ask the user before acting
+on it** — recognition is always confirmation-required here.
+
+Once confirmed, load that profile's `agent-<key>` skill and adopt it in this
+session — Hermes has no delegation mechanism, so there is nothing to hand off to. Never
+auto-select a direct-call-only profile ({{DIRECT_CALL_ONLY}}); those run only on
+an explicit request from the user.
+
+Report what the router actually said. Do not infer a recommendation it did not
+print, and do not substitute your own judgement for its output without saying
+that is what you are doing.

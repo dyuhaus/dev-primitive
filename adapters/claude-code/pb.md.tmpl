@@ -43,8 +43,14 @@ Honor the local project `AGENTS.md`/`CLAUDE.md` conventions throughout.
 
 ---
 
-*To keep going until a done-condition holds:* run the built-in `/goal <condition>`
-first, then `/pb <task>` — Claude Code's Stop-hook loop keeps working until it holds
-or you run `/goal clear`. Or use `/pbg <task> until: <condition>` for the
-single-command, model-driven variant. `/goal` and `/pb` can't share one message, so
-send them as two.
+*To keep going until a done-condition holds:* use
+`/pbg <task> until: <condition>`. That is the **portable** path — every harness
+this registry installs into renders the same bounded plan → build → verify loop,
+so the instruction is the same wherever you are working.
+
+<!-- Claude Code only — not part of the shared PB contract. -->
+*Claude Code additionally has a harness-enforced loop:* run the built-in
+`/goal <condition>` first, then `/pb <task>` — its Stop-hook keeps working until
+the condition holds or you run `/goal clear`. It is stronger than `/pbg` because
+the harness enforces it rather than the model, but it exists nowhere else.
+`/goal` and `/pb` can't share one message, so send them as two.

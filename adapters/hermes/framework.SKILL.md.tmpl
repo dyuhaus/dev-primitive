@@ -1,0 +1,58 @@
+---
+name: agent-framework
+description: The machine's configurable agent framework on Hermes — which specialist profiles exist, what each is for, how to pick one, and what Hermes can and cannot do with them. Read before adopting a profile or claiming one ran on its configured model.
+category: agent-framework
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py hermes.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py hermes -->
+
+# Machine agent framework (Hermes)
+
+The registry at `{{REPO_DIR}}/roles.config.json` is the single source of truth
+for every agent profile on this machine. Each profile is installed here as an
+`agent-<key>` skill — **including `planner` and `builder`**, which earlier
+installs structurally could not contain because the installer iterated only the
+specialists map.
+
+{{ROSTER_SENTENCE}}
+
+{{ROSTER_TABLE}}
+
+## What Hermes can and cannot do with this framework
+
+**Cannot: route a profile to its configured model.** Hermes's active model comes
+from its own harness configuration; the model metadata in each profile records
+routing intent only. A profile you adopt runs on the session's model. Say that
+plainly if asked.
+
+The `tools:` list in each profile is Claude Code's tool vocabulary and is not
+enforced here, so a read-only profile's boundary is a discipline. Keep it anyway.
+
+## Picking a profile
+
+- **`runner`** is the everyday front door for routine work, maintenance, and triage.
+- **`planner` → `builder`** is the development core; see `agent-pb`.
+- **`code-reviewer`** runs before every PR — the Git Workflow Standard makes this
+  mandatory on every harness. Never write "reviewed" into a PR body unless a
+  review actually ran.
+- Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
+  for them by name.
+
+Available profile skills:
+{{SKILL_LIST}}
+
+Plus `agent-pb` (the plan → build loop) and `agent-route` (explainable routing).
+
+## Reviewing and auditing
+
+{{AUDITOR_MODELS}}
+
+## Rules that do not change per harness
+
+- The registry is the only place a model assignment changes:
+  `python3 {{REPO_DIR}}/apply.py set <role-or-agent> <class>`. Never hand-edit a
+  generated skill file — the next install overwrites it.
+- Every handoff is confirmation-required. The router recommends; the user decides.
+- Direct-call-only profiles are never automatic routing destinations.

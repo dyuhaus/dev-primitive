@@ -19,20 +19,20 @@ configuration is present. The portable, harness-neutral registry remains
 - `/pb-show` — show the selected config and resolved provider/model table.
 - `/pb <task>` — one read-only planner pass followed by a builder pass and a
   compact read-only post-workflow audit. The builder receives the original task
-  and planner output verbatim; the audit uses GPT-5.6 Sol at medium thinking.
+  and planner output verbatim; the audit uses the configured post-workflow model at medium thinking.
 - `/pbg <task> [until: <done-condition>]` — bounded planner/build/light-audit/
   verification loop, at most three rounds. If `until:` is omitted, the first
   planner derives explicit acceptance criteria.
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
 - `workflow_audit` — internal post-workflow tool the parent invokes exactly once
-  after Planner → Builder/specialist work; it is read-only Sol/medium review,
+  after Planner → Builder/specialist work; it is a read-only review at the configured model and medium thinking,
   not the full direct-call Audit agent.
 - `/planner`, `/builder`, `/runner`, `/tech-writer`, `/prose-writer`,
   `/team-leader`, `/l1-programmer`, `/librarian`, `/fe-designer`, and `/audit` —
   explicitly run the corresponding configured agent. Team Leader and Audit are
   direct-call-only: they run only through their explicit slash commands, and
-  their tool surfaces reject model-initiated calls. Audit uses GPT-5.6 Sol and
+  their tool surfaces reject model-initiated calls. Audit uses its configured model (deliberately not the builder's) and
   performs harness/runtime audits directly without delegated agents.
 - `/<agent>-model` for every agent above — show or change that agent's **Pi-only**
   model in the Pi overlay.

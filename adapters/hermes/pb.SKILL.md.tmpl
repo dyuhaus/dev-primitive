@@ -1,0 +1,57 @@
+---
+name: agent-pb
+category: agent-framework
+description: Run this machine's plan-then-build development loop on Hermes — reason first as the planner profile, then implement as the builder profile, then verify against an explicit done-condition. Use for any substantive implementation work, and read it before assuming the two roles run on different models here.
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py hermes.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py hermes -->
+
+# Plan → build (Hermes)
+
+This machine's stated method is: reason with the **planner**, hand the plan to
+the **builder**, build, verify. On Claude Code that is two subagents on two
+different models. **On Hermes it is not.**
+
+## What Hermes actually gives you
+
+{{PLANNER_ROUTING_NOTE}}
+
+{{BUILDER_ROUTING_NOTE}}
+
+So on Hermes the loop is a **discipline in one session**, not model routing. Run
+it as two clearly separated passes and do not blur them:
+
+1. **Plan pass.** Adopt `agent-planner`. Investigate read-only — read files,
+   grep, inspect git state, run non-mutating checks. Produce: understanding →
+   approach (with rejected alternatives) → ordered concrete steps → risks and
+   the checks that will prove success. Write **no** production code in this pass.
+2. **Review the plan.** If it has a real gap, or a decision only the user can
+   make, raise it before building.
+3. **Build pass.** Adopt `agent-builder`. Execute the plan's steps in order. If
+   a step is wrong or blocked, say so and adapt — do not silently skip it.
+4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
+   report the concrete result. A command that exited 0 has told you it finished,
+   not that the work happened — assert on the artifact.
+5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). Re-read the plan against
+   what was built: acceptance criteria met, evidence consistent with the claims,
+   nothing unrelated dragged in, no secrets, no destructive action, no follow-up
+   silently dropped. Report a verdict, not a reassurance.
+6. **Report.** What changed, how it was verified, the audit verdict, what is left.
+
+Hermes exposes no subagent or delegation mechanism, so both passes run in this
+one session. Do not instruct yourself to "hand the plan to the builder" as if a
+second agent existed — separate the passes and say which one you are in.
+
+## Looping until a condition holds
+
+The portable form is **`/pbg <task> until: <condition>`** — plan → build →
+verify, repeated until the condition actually holds. Here, run that loop
+yourself, and keep it bounded: stop and hand back after about three full rounds
+without meeting the condition, after two consecutive rounds with no measurable
+progress, when the condition turns out to be unverifiable or ambiguous, or when
+a material decision needs the user. Report where it stands and the remaining gap
+rather than churning.
+
+Honor the nearest project `AGENTS.md` throughout.
