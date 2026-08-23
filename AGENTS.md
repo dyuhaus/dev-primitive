@@ -18,7 +18,10 @@ it into each harness's native surface.
 - `router.py` — deterministic, explainable applicability routing. Always
   confirmation-required; it never dispatches.
 - `install_harness.py` — installs those surfaces and mirrors the shared
-  `~/skills` roots into every harness's skill directory.
+  `~/skills` roots into every harness's skill directory. It is the **only**
+  entry point that mirrors shared skills, and the only one that creates a
+  harness surface; `apply.py set` refreshes surfaces that already exist and
+  never adds one.
 - `adapters/<harness>/` — templates. `agent-knowledge/` — generated `PROFILE.md`
   plus **preserved** `LESSONS.md`; never regenerate a lessons file away.
 

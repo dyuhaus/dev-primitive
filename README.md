@@ -132,6 +132,35 @@ render function in `apply.py`. A skill-based harness needs only the four
 dispatch the registry's model classes, do not emit a model field** — render an
 honest sentence saying which model actually runs. The config never changes.
 
+**Every free-text value a template puts in YAML frontmatter must come from
+`yaml_scalar()`**, which double-quotes it. Registry text is free prose: four of
+the eleven `purpose` strings contain a colon-and-space, and interpolated raw
+that reads as a nested mapping. dsh's skill loader then *drops the whole skill*
+and writes one line to its log — measured, four of fourteen gone, including both
+PB roles and the mandatory reviewer, with nothing in the catalog to say so.
+
+A rendered frontmatter value may only be one of five shapes — verified against
+all 78 files the four adapters currently render, with nothing else present:
+
+- a **`yaml_scalar()`** value — the only form allowed for interpolated registry
+  text on a single line;
+- a **hand-written quoted literal** in the template, for prose no registry edit
+  can reach (`route.md.tmpl`'s `description:`);
+- a **bare identifier or comma-separated list of them** — `name: runner`,
+  `model: sonnet`, `tools: Read, Grep, Glob`, the form Claude Code's own shipped
+  agents use;
+- a **block scalar** (`description: >-`) whose body stays indented past the key;
+- an **empty value opening a nested mapping** (Hermes's `metadata:`), whose
+  children obey the same rules.
+
+`check_frontmatter()` runs on every rendered file of **every** adapter, Claude
+Code included, and fails the build rather than let any other shape through. It
+is stdlib-only, so it holds without PyYAML, and adds a real parse when PyYAML is
+importable. Do not add an adapter that skips it. That claim was false when it
+was first written: the three skill adapters were checked and the Claude adapter
+— the one actually installed on this machine — was not, so a purpose containing
+a colon rendered an unloadable slash command and `apply.py claude` exited 0.
+
 ## Layout
 
 ```

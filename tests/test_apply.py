@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -319,6 +320,14 @@ class ApplyTests(unittest.TestCase):
     # `set` must not write before every adapter has rendered
     # ----------------------------------------------------------------- #
 
+    def _require_yaml(self):
+        """PyYAML, or skip. A real parser is the only honest check here."""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("PyYAML is not installed; the structural check still runs")
+        return yaml
+
     def _scratch_registry(self, directory):
         path = Path(directory) / "roles.config.json"
         path.write_text(json.dumps(self.config, indent=2) + "\n", encoding="utf-8")
@@ -338,21 +347,106 @@ class ApplyTests(unittest.TestCase):
             self.assertIn("nothing was written", result.stderr)
 
     def test_set_refreshes_every_installed_surface_not_only_claude(self):
+        """A model change must reach every surface that is already installed."""
         with tempfile.TemporaryDirectory() as directory:
             path = self._scratch_registry(directory)
             home = Path(directory)
-            for name in (".claude", ".codex", ".dsh"):
-                (home / name).mkdir()
+            # Install the surfaces deliberately first, the way an operator would.
+            for target in ("claude", "codex", "dsh"):
+                install = subprocess.run(
+                    [sys.executable, str(ROOT / "install_harness.py"), target, "--home", directory],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(install.returncode, 0, install.stderr)
             result = run_apply("set", "l1-programmer", "sonnet", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "sonnet"
             )
-            self.assertTrue((home / ".claude" / "agents" / "l1-programmer.md").is_file())
+            self.assertIn("sonnet", (home / ".claude" / "agents" / "l1-programmer.md").read_text(encoding="utf-8"))
             for adapter in ("codex", "dsh"):
                 skill = home / f".{adapter}" / "skills" / "agent-l1-programmer" / "SKILL.md"
                 self.assertTrue(skill.is_file(), f"{adapter} surface was not refreshed")
                 self.assertIn("`sonnet`", skill.read_text(encoding="utf-8"))
+
+    def test_set_never_installs_a_harness_surface_that_was_not_there(self):
+        """A routine model switch is not an install.
+
+        `~/.dsh` existing means dsh is installed on the machine; it does not mean
+        this primitive has ever written a profile into it. `set` used to render
+        into every *present* harness, so changing one model class silently
+        installed the Codex, dsh and Hermes surfaces — during a machine freeze
+        whose whole point was that nothing new gets stood up.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._scratch_registry(directory)
+            home = Path(directory)
+            for name in (".claude", ".codex", ".dsh", ".hermes"):
+                (home / name).mkdir()
+            result = run_apply("set", "l1-programmer", "sonnet", "--config", str(path), "--home", directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # The registry still changed: refusing to create surfaces is not
+            # refusing to do the job it was asked to do.
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "sonnet"
+            )
+            for adapter in ("codex", "dsh", "hermes"):
+                root = home / f".{adapter}" / "skills"
+                self.assertFalse(root.exists(), f"set created a {adapter} surface that did not exist")
+            self.assertFalse(
+                (home / ".claude" / "agents").exists(),
+                "set created a Claude Code surface that did not exist",
+            )
+            self.assertIn("no generated surface installed for", result.stdout)
+
+    def test_set_updates_an_installed_surface_without_adding_new_files(self):
+        """Refreshing updates what is there; it does not grow the surface."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._scratch_registry(directory)
+            home = Path(directory)
+            install = subprocess.run(
+                [sys.executable, str(ROOT / "install_harness.py"), "dsh", "--home", directory],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+            root = home / ".dsh" / "skills"
+            removed = root / "agent-audit"
+            shutil.rmtree(removed)
+            before = sorted(p.name for p in root.iterdir())
+            result = run_apply("set", "librarian", "haiku", "--config", str(path), "--home", directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("`haiku`", (root / "agent-librarian" / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(p.name for p in root.iterdir()), before)
+            self.assertFalse(removed.exists(), "refresh re-created a file the operator had removed")
+
+    def test_set_claims_validation_only_where_validation_happened(self):
+        """The printed assurance has to match what actually ran.
+
+        Only Claude Code resolves a `model:` field, so only its adapter can
+        reject a model class. `set` used to print "Checked against installed
+        adapters: claude, codex, dsh" — naming two adapters that are structurally
+        incapable of objecting to a model.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._scratch_registry(directory)
+            home = Path(directory)
+            for name in (".codex", ".dsh"):
+                (home / name).mkdir()
+            result = run_apply("set", "librarian", "haiku", "--config", str(path), "--home", directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            validated = [line for line in result.stdout.splitlines() if line.startswith("Model class validated by:")]
+            self.assertEqual(len(validated), 1, result.stdout)
+            self.assertIn("nothing", validated[0])
+            for adapter in ("codex", "dsh"):
+                self.assertNotIn(adapter, validated[0], "an adapter that cannot object was named as a validator")
+
+            (home / ".claude").mkdir()
+            result = run_apply("set", "librarian", "sonnet", "--config", str(path), "--home", directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            validated = [line for line in result.stdout.splitlines() if line.startswith("Model class validated by:")]
+            self.assertIn("claude", validated[0])
+            for adapter in ("codex", "dsh"):
+                self.assertNotIn(adapter, validated[0], "an adapter that cannot object was named as a validator")
 
     # ----------------------------------------------------------------- #
     # Codex / dsh / Hermes surfaces
@@ -388,6 +482,242 @@ class ApplyTests(unittest.TestCase):
                 for path, content in rendered.items():
                     frontmatter = content.split("---", 2)[1]
                     self.assertNotIn("\nmodel:", frontmatter, f"{path} emits an undispatchable model field")
+
+    # ----------------------------------------------------------------- #
+    # Generated frontmatter must survive a real YAML parse
+    # ----------------------------------------------------------------- #
+    # Measured, not assumed: with the description interpolated raw, dsh's own
+    # filesystem skill provider loaded 10 of the 14 rendered skills and dropped
+    # agent-planner, agent-builder, agent-fe-designer and agent-code-reviewer —
+    # both PB roles and the mandatory reviewer — logging a warning and nothing
+    # more. Four of the eleven registry purposes contain a colon-and-space.
+
+    # A purpose built to break every naive quoting scheme at once.
+    HOSTILE_PURPOSE = (
+        'review a diff: correctness, "quoted" claims, back\\slashes, '
+        "a trailing colon: and a #hash — all in one line"
+    )
+
+    def _skill_frontmatter(self, cfg, adapter):
+        """{skill name: raw frontmatter block} for one rendered adapter surface."""
+        rendered = apply.render_harness_skills(cfg, Path("/tmp/agent-framework-test-home"), adapter)
+        return {path.parent.name: apply.frontmatter_of(content) for path, content in rendered}
+
+    def test_purposes_in_the_live_registry_contain_the_shape_that_broke_this(self):
+        """A vacuous pass would be the real failure mode of the tests below."""
+        offenders = [k for k in apply.ALL_AGENT_KEYS if ": " in apply.role_view(self.config, k)["purpose"]]
+        self.assertTrue(offenders, "no live purpose contains ': ' — the YAML tests below prove nothing")
+
+    def test_generated_skill_frontmatter_parses_as_yaml(self):
+        yaml = self._require_yaml()
+        for adapter in ("codex", "dsh", "hermes"):
+            for name, block in self._skill_frontmatter(self.config, adapter).items():
+                with self.subTest(adapter=adapter, skill=name):
+                    data = yaml.safe_load(block)
+                    self.assertIsInstance(data, dict, f"{adapter}/{name} frontmatter is not a mapping")
+                    self.assertEqual(data["name"], name)
+                    self.assertIsInstance(data["description"], str)
+                    self.assertTrue(data["description"].strip())
+
+    def test_a_purpose_with_a_colon_round_trips_through_a_real_yaml_parse(self):
+        """The exact registry shape that made four skills disappear."""
+        yaml = self._require_yaml()
+        cfg = copy.deepcopy(self.config)
+        cfg["agents"]["code-reviewer"]["purpose"] = self.HOSTILE_PURPOSE
+        cfg["roles"]["planner"]["purpose"] = "plan: think first, then hand over"
+        self.assertEqual(apply.validate(cfg), [])
+        for adapter in ("codex", "dsh", "hermes"):
+            blocks = self._skill_frontmatter(cfg, adapter)
+            with self.subTest(adapter=adapter):
+                reviewer = yaml.safe_load(blocks["agent-code-reviewer"])
+                self.assertEqual(reviewer["description"], self.HOSTILE_PURPOSE)
+                planner = yaml.safe_load(blocks["agent-planner"])
+                self.assertEqual(planner["description"], "plan: think first, then hand over")
+
+    def test_the_generator_refuses_to_write_unparseable_frontmatter(self):
+        """The stdlib backstop, so a template edit cannot reintroduce this.
+
+        Runs with or without PyYAML: `check_frontmatter` has to catch an
+        unquoted free-text scalar structurally, because a harness that drops the
+        skill says nothing and the operator has no way to notice.
+        """
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(
+                Path("SKILL.md"),
+                "---\nname: agent-x\ndescription: plan: architecture and design\n---\nbody\n",
+            )
+        # And the shape it must keep accepting.
+        apply.check_frontmatter(
+            Path("SKILL.md"),
+            '---\nname: agent-x\ndescription: "plan: architecture and design"\n---\nbody\n',
+        )
+
+    def test_yaml_scalar_quotes_every_value_it_is_given(self):
+        for raw in ("plain", "has: colon", 'has "quotes"', "back\\slash", "", "- leading dash", "#hash"):
+            with self.subTest(raw=raw):
+                quoted = apply.yaml_scalar(raw)
+                self.assertTrue(quoted.startswith('"') and quoted.endswith('"'), quoted)
+                yaml = self._require_yaml()
+                self.assertEqual(yaml.safe_load(f"v: {quoted}")["v"], raw)
+
+    # ----------------------------------------------------------------- #
+    # The SAME guarantee, for the adapter that is actually installed here
+    # ----------------------------------------------------------------- #
+    # The three skill adapters were covered above from the first version of this
+    # fix. The Claude Code adapter was not, and it is the only one installed on
+    # this machine: `render_claude()` never called `check_frontmatter()`, and
+    # `agent-invoke.md.tmpl` / `agent-model.md.tmpl` interpolated a registry
+    # purpose into an unquoted plain scalar — the exact shape that cost dsh four
+    # skills. `apply.py claude` exited 0 and wrote a slash command whose
+    # frontmatter raises "mapping values are not allowed here".
+
+    CLAUDE_COLON_PURPOSE = "triage: route work to the right place"
+
+    def _claude_frontmatter(self, cfg):
+        """{"<dir>/<file>": raw frontmatter block} for the whole Claude surface."""
+        rendered = apply.render_claude(cfg, Path("/tmp/agent-framework-test-home"))
+        return {f"{path.parent.name}/{path.name}": apply.frontmatter_of(content) for path, content in rendered}
+
+    def test_the_claude_adapter_puts_a_registry_purpose_in_frontmatter(self):
+        """A vacuous pass would be the real failure mode of the tests below."""
+        blocks = self._claude_frontmatter(self.config)
+        self.assertIn("commands/runner.md", blocks)
+        purpose = apply.short_purpose(apply.role_view(self.config, "runner")["purpose"])
+        self.assertIn(purpose, blocks["commands/runner.md"])
+
+    def test_generated_claude_frontmatter_parses_as_yaml(self):
+        yaml = self._require_yaml()
+        blocks = self._claude_frontmatter(self.config)
+        self.assertGreaterEqual(len(blocks), 3 * len(apply.ALL_AGENT_KEYS))
+        for name, block in blocks.items():
+            with self.subTest(file=name):
+                data = yaml.safe_load(block)
+                self.assertIsInstance(data, dict, f"{name} frontmatter is not a mapping")
+                self.assertIsInstance(data.get("description"), str)
+                self.assertTrue(data["description"].strip())
+                if name.startswith("agents/"):
+                    self.assertTrue(data.get("name"))
+                    self.assertTrue(data.get("model"))
+
+    def test_a_purpose_with_a_colon_round_trips_through_the_claude_adapter(self):
+        """The reviewer's reproduction, as a test.
+
+        `triage: route work to the right place` is under the 90-character
+        `short_purpose` limit and passes `apply.py validate`, so nothing before
+        the render objects to it. Rendered raw it made `.claude/commands/
+        runner.md` unloadable.
+        """
+        yaml = self._require_yaml()
+        cfg = copy.deepcopy(self.config)
+        cfg["agents"]["runner"]["purpose"] = self.CLAUDE_COLON_PURPOSE
+        cfg["agents"]["code-reviewer"]["purpose"] = self.HOSTILE_PURPOSE
+        self.assertEqual(apply.validate(cfg), [])
+        blocks = self._claude_frontmatter(cfg)
+        runner = yaml.safe_load(blocks["commands/runner.md"])
+        self.assertIn(self.CLAUDE_COLON_PURPOSE, runner["description"])
+        self.assertEqual(runner["argument-hint"], "<task>, or blank to describe the agent")
+        model_cmd = yaml.safe_load(blocks["commands/runner-model.md"])
+        self.assertIn("apply.py set runner", model_cmd["description"])
+        reviewer = yaml.safe_load(blocks["commands/code-reviewer.md"])
+        self.assertIn('review a diff: correctness, "quoted" claims', reviewer["description"])
+
+    def test_the_claude_adapter_refuses_to_write_unparseable_frontmatter(self):
+        """`check_frontmatter` really does run on the Claude renders.
+
+        A purpose carrying a newline escapes the `description: >-` block scalar
+        in `agent.md.tmpl` and comes back as document structure, so the injected
+        `model:` silently overrides the configured one. Duplicate keys are legal
+        YAML — PyYAML keeps the last — so only the structural check catches it.
+        `render_claude` writes nothing, so the build stops before the live
+        `~/.claude` surface is touched.
+        """
+        for injected in ("triage work\nmodel: opus", "triage work\ntools: Bash"):
+            cfg = copy.deepcopy(self.config)
+            cfg["agents"]["runner"]["purpose"] = injected
+            self.assertEqual(apply.validate(cfg), [], "validate cannot see this; the render must")
+            with self.subTest(injected=injected), self.assertRaises(SystemExit):
+                apply.render_claude(cfg, Path("/tmp/agent-framework-test-home"))
+
+    def test_check_frontmatter_accepts_the_shapes_the_claude_adapter_emits(self):
+        """Block scalars and a bare `tools:` list are idiomatic and must pass."""
+        agent = (
+            "---\nname: runner\ndescription: >-\n  Runner specialist — sonnet.\n"
+            "  everyday tasks: and maintenance\nmodel: sonnet\n"
+            "tools: Read, Grep, Glob, Bash, Edit, Write, TodoWrite\n---\nbody\n"
+        )
+        apply.check_frontmatter(Path("runner.md"), agent)
+        # A command has no `name:`, and saying it must have one would fail every
+        # slash command the adapter emits.
+        apply.check_frontmatter(
+            Path("runner.md"), '---\ndescription: "x"\n---\nbody\n', required=("description",)
+        )
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(Path("runner.md"), '---\ndescription: "x"\n---\nbody\n')
+        # Free prose with commas is still not a bare token list.
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(
+                Path("runner.md"), "---\nname: r\ndescription: everyday tasks, and maintenance: really\n---\nb\n"
+            )
+        # A block scalar with no indented body has already lost its content.
+        with self.assertRaises(SystemExit):
+            apply.check_frontmatter(Path("runner.md"), "---\nname: r\ndescription: >-\nmodel: sonnet\n---\nb\n")
+
+    def test_every_skill_adapter_renders_the_same_fourteen_skills(self):
+        """The count is 14 TOTAL per adapter: 11 profiles + 3 shared skills.
+
+        Not "14 agent-* skills plus framework/pb/route" — that reading inflates
+        the surface by three and hides a real loss behind a number that already
+        looked too big.
+        """
+        expected = len(apply.ALL_AGENT_KEYS) + 3
+        self.assertEqual(len(apply.ALL_AGENT_KEYS), 11)
+        for adapter in ("codex", "dsh", "hermes"):
+            rendered = apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), adapter)
+            self.assertEqual(len(rendered), expected, adapter)
+            self.assertEqual(len({path for path, _ in rendered}), expected, f"{adapter} renders a duplicate target")
+
+    def test_the_model_routing_note_reads_as_english(self):
+        """It rendered "(a anthropic endpoint)" in every non-dispatchable profile.
+
+        Every provider in this registry is `anthropic` and no skill adapter can
+        dispatch an Anthropic model, so this was not an edge case — it was the
+        only sentence those skills ever showed about model routing.
+        """
+        for adapter in ("codex", "dsh", "hermes"):
+            for key in apply.ALL_AGENT_KEYS:
+                note = apply.model_routing_note(apply.role_view(self.config, key), adapter)
+                with self.subTest(adapter=adapter, agent=key):
+                    self.assertNotRegex(note, r"\ba (anthropic|openai|openrouter|undeclared)\b")
+        for provider_type in apply.PROVIDER_TYPES:
+            view = dict(apply.role_view(self.config, "planner"), provider_type=provider_type)
+            note = apply.model_routing_note(view, "codex")
+            with self.subTest(provider_type=provider_type):
+                self.assertNotRegex(note, r"\ba [aeiou]")
+
+    def test_apply_py_does_not_mirror_the_shared_skill_roots(self):
+        """The two entry points differ, and the difference is deliberate.
+
+        `install_harness.py` mirrors ~/skills into each harness; `apply.py` never
+        does, at any action. Asserted because the claim that both do it was made
+        and believed once already.
+        """
+        source = ROOT / "apply.py"
+        text = source.read_text(encoding="utf-8")
+        body = text.split("def main()", 1)[1]
+        self.assertNotIn("link_shared_skills", body, "apply.py main() now links shared skills; update the docs")
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "skills" / "git-workflow").mkdir(parents=True)
+            (home / "skills" / "git-workflow" / "SKILL.md").write_text("---\nname: git-workflow\ndescription: x\n---\n", encoding="utf-8")
+            result = run_apply("all", "--home", directory, "--dry-run")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("would link", result.stdout)
+            installer = subprocess.run(
+                [sys.executable, str(ROOT / "install_harness.py"), "all", "--home", directory, "--dry-run"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(installer.returncode, 0, installer.stderr)
+            self.assertIn("would link", installer.stdout)
 
     def test_framework_skill_list_is_generated_from_the_registry(self):
         rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "hermes"))
