@@ -55,8 +55,12 @@ function requireMatch(content, pattern, message) {
   if (!pattern.test(content)) throw new Error(message);
 }
 
+function stripHtmlComments(html) {
+  return html.replace(/<!--[\s\S]*?-->/g, "");
+}
+
 function startTags(html) {
-  return [...html.matchAll(/<\s*([a-z][\w-]*)\b[^>]*>/gi)].map((match) => ({
+  return [...stripHtmlComments(html).matchAll(/<\s*([a-z][\w-]*)\b[^>]*>/gi)].map((match) => ({
     name: match[1].toLowerCase(),
     text: match[0],
   }));
@@ -101,8 +105,9 @@ function hasMobileBacklinkRule(css) {
 
 try {
   const hub = await readRequired("starter/index.html");
-  requireMatch(hub, /<title>Template Library · dyuhaus\.com<\/title>/, "starter/index.html is not the template-library hub");
-  requireMatch(hub, /href=["']ihtc\/["']/, "the template-library hub does not link to starter/ihtc/");
+  const hubMarkup = stripHtmlComments(hub);
+  requireMatch(hubMarkup, /<title>Template Library · dyuhaus\.com<\/title>/, "starter/index.html is not the template-library hub");
+  requireMatch(hubMarkup, /href=["']ihtc\/["']/, "the template-library hub does not link to starter/ihtc/");
 
   const ihtcIndex = await readRequired("starter/ihtc/index.html");
   const ihtcStyles = await readRequired("starter/ihtc/styles.css");
