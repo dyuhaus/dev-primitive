@@ -67,7 +67,7 @@ function startTags(html) {
 }
 
 function attribute(tag, name) {
-  return tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i"))?.[1] || "";
+  return tag.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*["']([^"']*)["']`, "i"))?.[1] || "";
 }
 
 function hasClass(tag, className) {
@@ -85,19 +85,20 @@ function hasElement(tags, tagName, { className, id, href, src } = {}) {
 }
 
 function hasMobileBacklinkRule(css) {
+  const uncommentedCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const mediaPattern = /@media\s*\(\s*max-width\s*:\s*(\d+)px\s*\)\s*\{/gi;
-  for (const match of css.matchAll(mediaPattern)) {
+  for (const match of uncommentedCss.matchAll(mediaPattern)) {
     if (Number(match[1]) > 520) continue;
     const openBrace = match.index + match[0].lastIndexOf("{");
     let depth = 1;
     let cursor = openBrace + 1;
-    while (cursor < css.length && depth > 0) {
-      if (css[cursor] === "{") depth += 1;
-      if (css[cursor] === "}") depth -= 1;
+    while (cursor < uncommentedCss.length && depth > 0) {
+      if (uncommentedCss[cursor] === "{") depth += 1;
+      if (uncommentedCss[cursor] === "}") depth -= 1;
       cursor += 1;
     }
     if (depth !== 0) continue;
-    const mediaBody = css.slice(openBrace + 1, cursor - 1);
+    const mediaBody = uncommentedCss.slice(openBrace + 1, cursor - 1);
     if (/\.mobile-safe-backlink(?![\w-])[^{}]*\{[^{}]*\bposition\s*:\s*static\b/i.test(mediaBody)) return true;
   }
   return false;
@@ -116,6 +117,13 @@ try {
   await readRequired("starter/ihtc/robots.txt");
 
   const tags = startTags(ihtcIndex);
+  const uncommentedCss = ihtcStyles.replace(/\/\*[\s\S]*?\*\//g, "");
+  const uncommentedScript = ihtcScript.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  try {
+    Function(uncommentedScript);
+  } catch {
+    throw new Error("starter/ihtc/script.js has invalid JavaScript syntax");
+  }
   const backlink = tags.find((tag) => (
     tag.name === "a" &&
     hasClass(tag.text, "template-backlink") &&
@@ -133,10 +141,10 @@ try {
     [Boolean(backlink), "the template-library backlink"],
     [hasElement(tags, "link", { href: /^styles\.css(?:\?[^#]*)?$/ }), "the local stylesheet link"],
     [hasElement(tags, "script", { src: /^script\.js(?:\?[^#]*)?$/ }), "the local script link"],
-    [/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(ihtcStyles), "reduced-motion styles"],
+    [/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(uncommentedCss), "reduced-motion styles"],
     [hasMobileBacklinkRule(ihtcStyles), "the mobile-safe backlink rule"],
-    [/getElementById\(["']sb-clock["']\)[\s\S]*?setInterval\(\s*tick\s*,/.test(ihtcScript), "the live-clock behavior"],
-    [/getElementById\(["']replay["']\)[\s\S]*?addEventListener\(\s*["']click["']\s*,\s*runBoot/.test(ihtcScript), "the boot-log replay behavior"],
+    [/getElementById\(["']sb-clock["']\)[\s\S]*?setInterval\(\s*tick\s*,/.test(uncommentedScript), "the live-clock behavior"],
+    [/getElementById\(["']replay["']\)[\s\S]*?addEventListener\(\s*["']click["']\s*,\s*runBoot/.test(uncommentedScript), "the boot-log replay behavior"],
   ];
 
   for (const [present, feature] of terminalContract) {
