@@ -67,12 +67,12 @@ try {
   await readRequired("starter/ihtc/robots.txt");
 
   const terminalContract = [
-    [ihtcIndex, /class=["'][^"']*term-window/, "terminal window chrome"],
-    [ihtcIndex, /class=["'][^"']*sec-head/, "shell-prompt section headers"],
-    [ihtcIndex, /class=["'][^"']*ghost-num/, "ghost section numbers"],
-    [ihtcIndex, /id=["']replay["']/, "the replayable boot log"],
-    [ihtcIndex, /id=["']sb-clock["']/, "the live status-bar clock"],
-    [ihtcIndex, /class=["'][^"']*template-backlink[^"']*mobile-safe-backlink[^"']*["'][^>]*href=["']\.\.\/["']/, "the template-library backlink"],
+    [ihtcIndex, /<div\b[^>]*class=["'][^"']*\bterm-window\b[^"']*["']/, "terminal window chrome"],
+    [ihtcIndex, /<p\b[^>]*class=["'][^"']*\bsec-head\b[^"']*["']/, "shell-prompt section headers"],
+    [ihtcIndex, /<span\b[^>]*class=["'][^"']*\bghost-num\b[^"']*["']/, "ghost section numbers"],
+    [ihtcIndex, /<button\b[^>]*id=["']replay["']/, "the replayable boot log"],
+    [ihtcIndex, /<span\b[^>]*id=["']sb-clock["']/, "the live status-bar clock"],
+    [ihtcIndex, /<a\b[^>]*class=["'][^"']*template-backlink[^"']*mobile-safe-backlink[^"']*["'][^>]*href=["']\.\.\/["']/, "the template-library backlink"],
     [ihtcStyles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/, "reduced-motion styles"],
     [ihtcStyles, /@media\s*\(max-width:\s*520px\)[\s\S]*?\.mobile-safe-backlink[\s\S]*?position:\s*static/, "the mobile-safe backlink rule"],
     [ihtcScript, /getElementById\(["']sb-clock["']\)/, "the live-clock behavior"],
