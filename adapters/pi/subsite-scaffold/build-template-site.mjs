@@ -74,13 +74,11 @@ function hasClass(tag, className) {
   return attribute(tag, "class").split(/\s+/).includes(className);
 }
 
-function hasElement(tags, tagName, { className, id, href, src } = {}) {
+function hasElement(tags, tagName, { className, id } = {}) {
   return tags.some((tag) => (
     tag.name === tagName &&
     (!className || hasClass(tag.text, className)) &&
-    (!id || attribute(tag.text, "id") === id) &&
-    (!href || href.test(attribute(tag.text, "href"))) &&
-    (!src || src.test(attribute(tag.text, "src")))
+    (!id || attribute(tag.text, "id") === id)
   ));
 }
 
@@ -130,6 +128,16 @@ try {
     hasClass(tag.text, "mobile-safe-backlink") &&
     /^\.\.\/(?:index\.html)?$/.test(attribute(tag.text, "href"))
   ));
+  const stylesheet = tags.find((tag) => (
+    tag.name === "link" &&
+    attribute(tag.text, "rel").split(/\s+/).includes("stylesheet") &&
+    /^styles\.css(?:\?[^#]*)?$/.test(attribute(tag.text, "href"))
+  ));
+  const executableScript = tags.find((tag) => {
+    if (tag.name !== "script" || !/^script\.js(?:\?[^#]*)?$/.test(attribute(tag.text, "src"))) return false;
+    const type = attribute(tag.text, "type").toLowerCase();
+    return !type || ["text/javascript", "application/javascript", "module"].includes(type);
+  });
 
   const terminalContract = [
     [hasElement(tags, "div", { className: "term-window" }), "terminal window chrome"],
@@ -139,8 +147,8 @@ try {
     [hasElement(tags, "button", { id: "replay" }), "the replayable boot-log control"],
     [hasElement(tags, "span", { id: "sb-clock" }), "the live status-bar clock"],
     [Boolean(backlink), "the template-library backlink"],
-    [hasElement(tags, "link", { href: /^styles\.css(?:\?[^#]*)?$/ }), "the local stylesheet link"],
-    [hasElement(tags, "script", { src: /^script\.js(?:\?[^#]*)?$/ }), "the local script link"],
+    [Boolean(stylesheet), "the active local stylesheet link"],
+    [Boolean(executableScript), "the executable local script link"],
     [/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(uncommentedCss), "reduced-motion styles"],
     [hasMobileBacklinkRule(ihtcStyles), "the mobile-safe backlink rule"],
     [/getElementById\(["']sb-clock["']\)[\s\S]*?setInterval\(\s*tick\s*,/.test(uncommentedScript), "the live-clock behavior"],
