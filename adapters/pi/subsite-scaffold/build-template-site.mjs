@@ -9,10 +9,35 @@
 // preserved IHTC terminal behaviors are present, then exits without writing.
 //
 //   node build-template-site.mjs [repoPath]
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import * as path from "node:path";
 
-const repo = path.resolve(process.argv[2] || process.cwd());
+const defaultRepo = "/home/dyadmin/githubStaging/dyuhaus.com";
+
+function isSiteRepo(candidate) {
+  return (
+    existsSync(path.join(candidate, ".htaccess")) &&
+    existsSync(path.join(candidate, "README.md")) &&
+    existsSync(path.join(candidate, "index.html"))
+  );
+}
+
+function resolveRepo() {
+  const candidates = [];
+  if (process.argv[2]) candidates.push(path.resolve(process.argv[2]));
+  if (process.env.DYUHAUS_SITE_REPO) candidates.push(path.resolve(process.env.DYUHAUS_SITE_REPO));
+  let current = process.cwd();
+  for (let depth = 0; depth < 8; depth += 1) {
+    candidates.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  candidates.push(defaultRepo);
+  return candidates.find(isSiteRepo) || defaultRepo;
+}
+
+const repo = resolveRepo();
 
 async function readRequired(relativePath) {
   const file = path.join(repo, relativePath);
