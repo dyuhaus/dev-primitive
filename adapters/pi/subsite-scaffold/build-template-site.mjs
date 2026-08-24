@@ -136,13 +136,16 @@ const page = `<!doctype html>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <title>${esc(starter.title)} · dyuhaus.com</title>
     <meta name="description" content="${esc(starter.description)}" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src https://fonts.gstatic.com; connect-src 'self';" />
     <meta property="og:title" content="${esc(starter.title)}" />
     <meta property="og:description" content="${esc(starter.description)}" />
     <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="${T.HOUSE_FONTS_HREF}" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -380,4 +383,4 @@ console.log("Refreshed the IHTC child without changing the template-library hub 
 console.log("  starter/ihtc/index.html  (" + page.length + " bytes)");
 console.log("  starter/ihtc/styles.css, starter/ihtc/script.js, starter/ihtc/robots.txt, starter/ihtc/assets/");
 console.log("  preserved starter/index.html, the other genre templates, subsite-artifacts/starter/, and routing");
-console.log("\nSubdomain: https://starter.dyuhaus.com");
+console.log("\nTemplate: https://starter.dyuhaus.com/ihtc/");
