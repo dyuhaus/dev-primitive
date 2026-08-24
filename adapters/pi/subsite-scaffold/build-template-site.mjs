@@ -1,9 +1,9 @@
 // build-template-site.mjs
 //
-// Generates the "starter" showcase sub-site in the dyuhaus.com repo. It renders
-// the exact layout newly created sites get, plus the portable artifact bundle
-// (manifest / tokens / brief / prompt) for an example site, shown in code
-// panels. Reproducible: re-run to refresh the showcase after template changes.
+// Refreshes the IHTC showcase inside the dyuhaus.com template library. It
+// renders the exact layout newly created IHTC sites get and displays a portable
+// artifact example in code panels. The hand-authored library hub and its curated
+// artifact bundle are deliberately preserved.
 //
 //   node build-template-site.mjs [repoPath]
 //
@@ -23,6 +23,18 @@ const C = await jiti.import(path.join(here, "core.ts"));
 const repo = process.argv[2] || C.resolveRepo(process.cwd());
 if (!C.isSiteRepo(repo)) {
   console.error(`Not a dyuhaus.com site repo: ${repo}`);
+  process.exit(1);
+}
+
+const hubIndexPath = path.join(repo, "starter", "index.html");
+let hubIndex = "";
+try {
+  hubIndex = await fs.readFile(hubIndexPath, "utf8");
+} catch {
+  // The explicit message below also covers a missing starter directory.
+}
+if (!/<title>Template Library · dyuhaus\.com<\/title>/.test(hubIndex) || !/href=["']ihtc\/["']/.test(hubIndex)) {
+  console.error("Template library hub not found. Land the dyuhaus.com genre-template library before refreshing its IHTC child.");
   process.exit(1);
 }
 
@@ -134,6 +146,7 @@ const page = `<!doctype html>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <a class="template-backlink mobile-safe-backlink" href="../">← Template library</a>
     <header class="site-header">
       <div class="wrap header-row">
         <a href="index.html" class="brand"><span class="brand-name">Sub-site Starter</span></a>
@@ -266,6 +279,9 @@ const page = `<!doctype html>
 /* ---- styles (base tokens + style-guide additions) ---------------------- */
 const styleguideCss = `
 /* ---- starter showcase additions ---------------------------------------- */
+.template-backlink { position: fixed; right: 1rem; bottom: 1rem; z-index: 50; padding: 0.55rem 0.75rem; border: 1px solid var(--accent-2); border-radius: var(--radius); color: var(--bright); background: rgba(23, 22, 22, 0.96); font-family: var(--font-mono); font-size: 0.78rem; text-decoration: none; }
+.template-backlink:hover { color: #06130b; background: var(--bright); }
+@media (max-width: 520px) { .mobile-safe-backlink { position: static; display: block; width: fit-content; margin: 0.75rem 1rem 0 auto; } }
 .demo-label { margin: 30px 0 12px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
 .demo-row { margin-bottom: 8px; }
 
@@ -351,8 +367,8 @@ const script = `// Sub-site Starter showcase — tabs + copy buttons. Self-conta
 })();
 `;
 
-/* ---- write site + real artifact + wiring ------------------------------- */
-const siteDir = path.join(repo, "starter");
+/* ---- write the IHTC child only ----------------------------------------- */
+const siteDir = path.join(repo, "starter", "ihtc");
 await fs.mkdir(path.join(siteDir, "assets"), { recursive: true });
 await fs.writeFile(path.join(siteDir, "index.html"), page, "utf8");
 await fs.writeFile(path.join(siteDir, "styles.css"), T.buildStylesCss(starter) + styleguideCss, "utf8");
@@ -360,56 +376,8 @@ await fs.writeFile(path.join(siteDir, "script.js"), script, "utf8");
 await fs.writeFile(path.join(siteDir, "robots.txt"), T.buildRobots(starter), "utf8");
 await fs.writeFile(path.join(siteDir, "assets", ".gitkeep"), "", "utf8");
 
-// Real artifact bundle for the starter itself.
-const aDir = path.join(repo, C.ARTIFACT_ROOT, "starter");
-await fs.mkdir(aDir, { recursive: true });
-await fs.writeFile(path.join(aDir, "site.manifest.json"), T.buildTokensJson(starter), "utf8");
-await fs.writeFile(path.join(aDir, "tokens.css"), T.buildTokensCss(starter), "utf8");
-await fs.writeFile(path.join(aDir, "BRIEF.md"), T.buildBrief(starter), "utf8");
-await fs.writeFile(path.join(aDir, "PROMPT.md"), T.buildPrompt(starter), "utf8");
-await fs.writeFile(path.join(aDir, "README.md"), T.buildArtifactReadme(starter), "utf8");
-
-// Idempotent wiring on the live (possibly dirty) files.
-const changes = [];
-async function patchFile(rel, fns) {
-  const p = path.join(repo, rel);
-  let content;
-  try {
-    content = await fs.readFile(p, "utf8");
-  } catch {
-    return;
-  }
-  let changed = false;
-  for (const fn of fns) {
-    const next = fn(content);
-    if (next && next !== content) {
-      content = next;
-      changed = true;
-    }
-  }
-  if (changed) {
-    await fs.writeFile(p, content, "utf8");
-    changes.push(rel);
-  }
-}
-await patchFile(".htaccess", [
-  (c) => C.patchHtaccessRewrite(c, starter),
-  (c) => C.patchHtaccessCache(c, starter),
-  (c) => C.patchHtaccessBlockArtifacts(c),
-]);
-await patchFile("tunnel/config.yml", [(c) => C.patchTunnelIngress(c, starter)]);
-// Replace any prior starter Domains row so the wording reflects the tunnel.
-await patchFile("README.md", [
-  (c) => {
-    const stripped = c.replace(/^\|\s*`starter\.dyuhaus\.com`.*\n/m, "");
-    return stripped !== c ? stripped : null;
-  },
-  (c) => C.patchReadmeRow(c, starter),
-]);
-
-console.log("Wrote starter/ showcase site:");
-console.log("  starter/index.html  (" + page.length + " bytes)");
-console.log("  starter/styles.css, starter/script.js, starter/robots.txt, starter/assets/");
-console.log("  subsite-artifacts/starter/ (manifest, tokens.css, BRIEF.md, PROMPT.md, README.md)");
-console.log("Wiring updated: " + (changes.length ? changes.join(", ") : "already present"));
+console.log("Refreshed the IHTC child without changing the template-library hub or curated artifact:");
+console.log("  starter/ihtc/index.html  (" + page.length + " bytes)");
+console.log("  starter/ihtc/styles.css, starter/ihtc/script.js, starter/ihtc/robots.txt, starter/ihtc/assets/");
+console.log("  preserved starter/index.html, the other genre templates, subsite-artifacts/starter/, and routing");
 console.log("\nSubdomain: https://starter.dyuhaus.com");
