@@ -55,6 +55,50 @@ function requireMatch(content, pattern, message) {
   if (!pattern.test(content)) throw new Error(message);
 }
 
+function startTags(html) {
+  return [...html.matchAll(/<\s*([a-z][\w-]*)\b[^>]*>/gi)].map((match) => ({
+    name: match[1].toLowerCase(),
+    text: match[0],
+  }));
+}
+
+function attribute(tag, name) {
+  return tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i"))?.[1] || "";
+}
+
+function hasClass(tag, className) {
+  return attribute(tag, "class").split(/\s+/).includes(className);
+}
+
+function hasElement(tags, tagName, { className, id, href, src } = {}) {
+  return tags.some((tag) => (
+    tag.name === tagName &&
+    (!className || hasClass(tag.text, className)) &&
+    (!id || attribute(tag.text, "id") === id) &&
+    (!href || href.test(attribute(tag.text, "href"))) &&
+    (!src || src.test(attribute(tag.text, "src")))
+  ));
+}
+
+function hasMobileBacklinkRule(css) {
+  const mediaPattern = /@media\s*\(\s*max-width\s*:\s*(\d+)px\s*\)\s*\{/gi;
+  for (const match of css.matchAll(mediaPattern)) {
+    if (Number(match[1]) > 520) continue;
+    const openBrace = match.index + match[0].lastIndexOf("{");
+    let depth = 1;
+    let cursor = openBrace + 1;
+    while (cursor < css.length && depth > 0) {
+      if (css[cursor] === "{") depth += 1;
+      if (css[cursor] === "}") depth -= 1;
+      cursor += 1;
+    }
+    if (depth !== 0) continue;
+    const mediaBody = css.slice(openBrace + 1, cursor - 1);
+    if (/\.mobile-safe-backlink(?![\w-])[^{}]*\{[^{}]*\bposition\s*:\s*static\b/i.test(mediaBody)) return true;
+  }
+  return false;
+}
+
 try {
   const hub = await readRequired("starter/index.html");
   requireMatch(hub, /<title>Template Library · dyuhaus\.com<\/title>/, "starter/index.html is not the template-library hub");
@@ -66,21 +110,32 @@ try {
   await readRequired("starter/ihtc/favicon.svg");
   await readRequired("starter/ihtc/robots.txt");
 
+  const tags = startTags(ihtcIndex);
+  const backlink = tags.find((tag) => (
+    tag.name === "a" &&
+    hasClass(tag.text, "template-backlink") &&
+    hasClass(tag.text, "mobile-safe-backlink") &&
+    /^\.\.\/(?:index\.html)?$/.test(attribute(tag.text, "href"))
+  ));
+
   const terminalContract = [
-    [ihtcIndex, /<div\b[^>]*class=["'][^"']*\bterm-window\b[^"']*["']/, "terminal window chrome"],
-    [ihtcIndex, /<p\b[^>]*class=["'][^"']*\bsec-head\b[^"']*["']/, "shell-prompt section headers"],
-    [ihtcIndex, /<span\b[^>]*class=["'][^"']*\bghost-num\b[^"']*["']/, "ghost section numbers"],
-    [ihtcIndex, /<button\b[^>]*id=["']replay["']/, "the replayable boot log"],
-    [ihtcIndex, /<span\b[^>]*id=["']sb-clock["']/, "the live status-bar clock"],
-    [ihtcIndex, /<a\b[^>]*class=["'][^"']*template-backlink[^"']*mobile-safe-backlink[^"']*["'][^>]*href=["']\.\.\/["']/, "the template-library backlink"],
-    [ihtcStyles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/, "reduced-motion styles"],
-    [ihtcStyles, /@media\s*\(max-width:\s*520px\)[\s\S]*?\.mobile-safe-backlink[\s\S]*?position:\s*static/, "the mobile-safe backlink rule"],
-    [ihtcScript, /getElementById\(["']sb-clock["']\)/, "the live-clock behavior"],
-    [ihtcScript, /getElementById\(["']replay["']\)/, "the boot-log replay behavior"],
+    [hasElement(tags, "div", { className: "term-window" }), "terminal window chrome"],
+    [hasElement(tags, "p", { className: "sec-head" }), "shell-prompt section headers"],
+    [hasElement(tags, "span", { className: "ghost-num" }), "ghost section numbers"],
+    [hasElement(tags, "code", { id: "boot" }), "the boot-log output"],
+    [hasElement(tags, "button", { id: "replay" }), "the replayable boot-log control"],
+    [hasElement(tags, "span", { id: "sb-clock" }), "the live status-bar clock"],
+    [Boolean(backlink), "the template-library backlink"],
+    [hasElement(tags, "link", { href: /^styles\.css(?:\?[^#]*)?$/ }), "the local stylesheet link"],
+    [hasElement(tags, "script", { src: /^script\.js(?:\?[^#]*)?$/ }), "the local script link"],
+    [/@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(ihtcStyles), "reduced-motion styles"],
+    [hasMobileBacklinkRule(ihtcStyles), "the mobile-safe backlink rule"],
+    [/getElementById\(["']sb-clock["']\)[\s\S]*?setInterval\(\s*tick\s*,/.test(ihtcScript), "the live-clock behavior"],
+    [/getElementById\(["']replay["']\)[\s\S]*?addEventListener\(\s*["']click["']\s*,\s*runBoot/.test(ihtcScript), "the boot-log replay behavior"],
   ];
 
-  for (const [content, pattern, feature] of terminalContract) {
-    requireMatch(content, pattern, `starter/ihtc/ is missing ${feature}; restore the curated IHTC template instead of regenerating it`);
+  for (const [present, feature] of terminalContract) {
+    if (!present) throw new Error(`starter/ihtc/ is missing ${feature}; restore the curated IHTC template instead of regenerating it`);
   }
 } catch (error) {
   console.error(`IHTC template verification failed: ${error.message}`);
