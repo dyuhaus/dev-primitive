@@ -27,7 +27,9 @@ if (!C.isSiteRepo(repo)) {
 }
 
 const hubIndexPath = path.join(repo, "starter", "index.html");
+const hubFaviconPath = path.join(repo, "starter", "favicon.svg");
 let hubIndex = "";
+let hubFavicon = "";
 try {
   hubIndex = await fs.readFile(hubIndexPath, "utf8");
 } catch {
@@ -35,6 +37,12 @@ try {
 }
 if (!/<title>Template Library · dyuhaus\.com<\/title>/.test(hubIndex) || !/href=["']ihtc\/["']/.test(hubIndex)) {
   console.error("Template library hub not found. Land the dyuhaus.com genre-template library before refreshing its IHTC child.");
+  process.exit(1);
+}
+try {
+  hubFavicon = await fs.readFile(hubFaviconPath, "utf8");
+} catch {
+  console.error("Template library favicon not found. Restore starter/favicon.svg before refreshing the IHTC child.");
   process.exit(1);
 }
 
@@ -192,7 +200,7 @@ const page = `<!doctype html>
 
           <h3 class="demo-label">Cards</h3>
           <div class="grid-3">
-            <article class="tile"><h3>Self-contained</h3><p>Local HTML/CSS/JS + <code>assets/</code>. No build step, no CDN, relative paths.</p></article>
+            <article class="tile"><h3>Self-contained</h3><p>Local HTML/CSS/JS + <code>assets/</code>. No build step or CDN JavaScript; fonts load from Google Fonts.</p></article>
             <article class="tile"><h3>Brand-wired</h3><p>Colors, type, spacing, and radius arrive as CSS variables from the brand profile.</p></article>
             <article class="tile"><h3>Routing-wired</h3><p>By default a local static origin is fronted by the <b>Cloudflare tunnel</b>, with an <code>.htaccess</code> fallback on Hostinger.</p></article>
           </div>
@@ -377,10 +385,11 @@ await fs.writeFile(path.join(siteDir, "index.html"), page, "utf8");
 await fs.writeFile(path.join(siteDir, "styles.css"), T.buildStylesCss(starter) + styleguideCss, "utf8");
 await fs.writeFile(path.join(siteDir, "script.js"), script, "utf8");
 await fs.writeFile(path.join(siteDir, "robots.txt"), T.buildRobots(starter), "utf8");
+await fs.writeFile(path.join(siteDir, "favicon.svg"), hubFavicon, "utf8");
 await fs.writeFile(path.join(siteDir, "assets", ".gitkeep"), "", "utf8");
 
 console.log("Refreshed the IHTC child without changing the template-library hub or curated artifact:");
 console.log("  starter/ihtc/index.html  (" + page.length + " bytes)");
-console.log("  starter/ihtc/styles.css, starter/ihtc/script.js, starter/ihtc/robots.txt, starter/ihtc/assets/");
+console.log("  starter/ihtc/styles.css, starter/ihtc/script.js, starter/ihtc/robots.txt, starter/ihtc/favicon.svg, starter/ihtc/assets/");
 console.log("  preserved starter/index.html, the other genre templates, subsite-artifacts/starter/, and routing");
 console.log("\nTemplate: https://starter.dyuhaus.com/ihtc/");
