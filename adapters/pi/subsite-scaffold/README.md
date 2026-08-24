@@ -91,24 +91,24 @@ to match — the brand profile always wins.
 | `templates.ts` | HTML/CSS/JS + manifest/brief/prompt builders + brand themes |
 | `_selftest.mjs` | unit test for `core.ts`/`templates.ts` (uses pi's bundled jiti) |
 | `_loadtest.mjs` | loads `index.ts` like pi does and exercises the tool end-to-end |
-| `build-template-site.mjs` | refreshes the IHTC child in the `starter/` template library |
+| `build-template-site.mjs` | read-only verification for the curated IHTC child in the `starter/` template library |
 
 ## Template / showcase site
 
-`build-template-site.mjs` refreshes the IHTC reference at
-`starter/ihtc/` (→ `starter.dyuhaus.com/ihtc/`). It renders the exact layout new
-IHTC sites ship with and displays a portable artifact example in tabbed,
-copyable code panels. The script requires the template-library hub to be present
-and never writes the hub or its curated artifact bundle:
+`build-template-site.mjs` is retained as a compatibility command, but it no
+longer generates the template. The IHTC reference at `starter/ihtc/` (→
+`starter.dyuhaus.com/ihtc/`) is hand-authored and authoritative. The command
+verifies that the library, backlink, and required terminal behaviors are still
+present, then exits without writing any file:
 
 ```bash
 cd ~/.pi/agent/extensions/subsite-scaffold
-node build-template-site.mjs [repoPath]   # writes starter/ihtc/ only
+node build-template-site.mjs [repoPath]   # verifies only; writes nothing
 ```
 
-It is safe to re-run after the library has landed: only `starter/ihtc/` is
-created or overwritten; `starter/index.html`, the other genre templates, and
-`subsite-artifacts/starter/`, routing, and repository documentation are preserved.
+It is safe to run after the library has landed because it is non-mutating. If
+the curated IHTC child is missing or incomplete, restore it from the
+`dyuhaus.com` repository; do not regenerate or overwrite it from this extension.
 
 ## Tests
 
