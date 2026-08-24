@@ -98,8 +98,9 @@ to match — the brand profile always wins.
 `build-template-site.mjs` is retained as a compatibility command, but it no
 longer generates the template. The IHTC reference at `starter/ihtc/` (→
 `starter.dyuhaus.com/ihtc/`) is hand-authored and authoritative. The command
-verifies that the library, backlink, and required terminal behaviors are still
-present, then exits without writing any file:
+delegates to the library-owned `ops/validate-starter-templates.mjs`, then exits
+without writing any file; the site repo therefore owns the one validation
+contract:
 
 ```bash
 cd ~/.pi/agent/extensions/subsite-scaffold
