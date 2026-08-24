@@ -23,9 +23,9 @@ function isSiteRepo(candidate) {
 }
 
 function resolveRepo() {
+  if (process.argv[2]) return path.resolve(process.argv[2]);
+  if (process.env.DYUHAUS_SITE_REPO) return path.resolve(process.env.DYUHAUS_SITE_REPO);
   const candidates = [];
-  if (process.argv[2]) candidates.push(path.resolve(process.argv[2]));
-  if (process.env.DYUHAUS_SITE_REPO) candidates.push(path.resolve(process.env.DYUHAUS_SITE_REPO));
   let current = process.cwd();
   for (let depth = 0; depth < 8; depth += 1) {
     candidates.push(current);
