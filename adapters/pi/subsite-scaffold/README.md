@@ -11,11 +11,17 @@ Global extension, auto-discovered from `~/.pi/agent/extensions/subsite-scaffold/
 
 Given a slug (e.g. `labs`), in one pass it:
 
-1. **Creates the sub-site folder** `<slug>/` with a working static skeleton:
-   `index.html` (+ any extra pages), `styles.css` (brand tokens + base layout),
-   `script.js`, `robots.txt`, `assets/`. Self-contained, no build step, relative
-   asset paths, CSP meta intact — matching the repo's static sub-site pattern.
-2. **Wires up routing** (idempotently). Hosting mode decides how:
+1. **Requires an explicit template-theme choice** before any files are planned
+   or written: Literary, Noir, Science Fiction, High Fantasy, Horror, Poetry,
+   Correspondence, or IHTC. There is no default.
+2. **Creates the sub-site folder from that confirmed template**:
+   `index.html` (+ any extra pages), the template's `styles.css` and exact
+   `script.js`, `robots.txt`, and `assets/`. IHTC CSS variables are reconciled
+   to the canonical brand profile as they are copied. The page title and description are
+   adapted to the new project while the selected composition, palette, type,
+   and behavior remain intact. It is self-contained, has no build step, uses
+   relative asset paths, and keeps the template CSP.
+3. **Wires up routing** (idempotently). Hosting mode decides how:
    - **tunnel** (default) → static files served by `ops/static-server.cjs` on an
      auto-assigned port, fronted by the Cloudflare tunnel: adds a
      `tunnel/config.yml` ingress entry (`<slug>.dyuhaus.com → http://localhost:<port>`,
@@ -28,24 +34,26 @@ Given a slug (e.g. `labs`), in one pass it:
    - Adds a row to the `README.md` **Domains** table in every mode.
    - Adds `subsite-artifacts` to the `.htaccess` block list so the artifact is
      never served publicly.
-3. **Emits a portable artifact** in `subsite-artifacts/<slug>/`:
-   - `site.manifest.json` — machine-readable spec (routing, brand, tokens, pages, hosting)
+4. **Emits a portable artifact** in `subsite-artifacts/<slug>/`:
+   - `site.manifest.json` — machine-readable spec (routing, brand, confirmed template, pages, hosting; portable design data only when authoritative)
+   - `scaffold.complete.json` — exact-manifest completion record, written last
    - `BRIEF.md` — human/LLM design brief + deploy checklist
-   - `tokens.css` — portable CSS variables (drop-in)
+   - `tokens.css` — authoritative brand/IHTC variables when applicable; otherwise an explicit pointer to the confirmed genre reference with no generic fallback values
    - `PROMPT.md` — ready-to-paste UI generation prompt
    - `README.md` — how to use the artifact off-box
    - optionally zips it into `~/transfer/` for handoff (uses `zip`, falls back to `tar.gz`).
 
-The idea: this box is headless, so the extension builds the skeleton + wiring
-here, and the artifact carries everything a UI generator needs elsewhere. Drop
-the generated files back into `<slug>/`, commit, push `main` — Hostinger auto-pulls.
+The idea: this box is headless, so the extension copies the confirmed template
+as the working site and adds the wiring here. The artifact carries everything a
+UI generator needs to replace the sample content elsewhere. Drop the finished
+files back into `<slug>/`, commit, and push through the normal PR workflow.
 
 ## Usage
 
 ### Interactive (TUI)
 
 ```
-/new-subsite            # prompts for slug, title, brand, mode, pages, etc.
+/new-subsite            # prompts for theme, slug, title, brand, mode, pages, etc.
 /new-subsite labs       # pre-fills the slug
 ```
 
@@ -56,12 +64,28 @@ The model can call `create_subsite`. Example intents:
 - "Add a new static IHTC sub-site `labs` under dyuhaus.com."
 - "Scaffold `widget.dyuhaus.com` as a service on port 8790 and zip the artifact."
 
+For any new site, including one for an existing project, the tool itself opens
+a selector in the local Pi TUI and waits for David to choose the theme. Theme
+selection is deliberately absent from the model-callable schema, and
+RPC/headless selection responses are not accepted. Those supported extension
+entrypoints cannot silently supply the choice; direct shell or source-level
+actions remain governed by the machine contract's mandatory ask-first rule. A
+non-interactive call or a cancelled selection is refused before planning.
+
+For an existing site, the tool does not ask again. It reuses the complete
+persisted creation settings; the pinned pre-theme Job Sweep manifest carrying
+the old terminal style is recognized as a legacy IHTC site. Conflicting new arguments are
+ignored. An existing site with no reusable manifest is handed to the
+existing-site workflow instead of being guessed at.
+
+The selector offers `literary`, `noir`, `science-fiction`, `high-fantasy`,
+`horror`, `poetry`, `correspondence`, and `ihtc`.
+
 Key parameters: `slug` (required), `title`, `description`, `brand`
 (`ihtc` | `personal` | `none`, default `ihtc`), `mode` (`tunnel` | `static` |
 `service`, default **`tunnel`**), `port` (required for `service`; auto-assigned
 for `tunnel`), `routeAsPath`, `immutableAssets`,
-`pages` (extra page slugs), `emitArtifact` (default true), `zipArtifact`,
-`dryRun`, `repoPath`.
+`pages` (extra page slugs), `zipArtifact`, `dryRun`, `repoPath`.
 
 ## Repo resolution
 
@@ -73,14 +97,31 @@ for `tunnel`), `routeAsPath`, `immutableAssets`,
 
 `ihtc` tokens mirror `/home/dyadmin/brand/ihtc/BRAND-PROFILE.md` (the canonical
 source of truth). If that profile changes, update `templates.ts` `THEMES.ihtc`
-to match — the brand profile always wins.
+to match — the brand profile always wins. For every non-IHTC genre choice,
+including a site that carries the IHTC name or mark, the artifact omits generic
+token/font fields and points to the confirmed live template so fallback design
+data cannot override its palette or typography.
 
 ## Safety / idempotency
 
 - Existing site files and artifact files are **never overwritten** (create-only),
   so re-running won't clobber generated UI. Delete a file/folder to regenerate it.
+- Supported new-site entrypoints take theme confirmation only from the local
+  interactive selector; model arguments and RPC responses cannot supply it.
+  Refused calls write nothing. This is a visible workflow control, not an OS
+  privilege boundary: Pi and its tools share one Unix account, so direct file or
+  source actions must obey the machine-level rule.
+- Existing sites reuse all persisted creation settings without a second theme
+  prompt. Conflicting arguments cannot mix new routing with stale artifacts.
+- New sites atomically publish the confirmed site identity before any site file
+  is written, then publish a manifest-bound completion record only after every
+  scaffold write succeeds. Concurrent extension attempts cannot mix themes. A
+  partial site directory is never treated as complete; an interrupted run
+  reuses its recorded settings only after David reconfirms the theme in the
+  local TUI. Completed sites remain regenerable if their generated folder is
+  removed.
 - Wiring patches are added at most once (re-running is a no-op).
-- Nothing is committed or pushed; no secrets are read or written.
+- Nothing is committed or pushed.
 
 ## Files
 

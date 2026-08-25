@@ -16,7 +16,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
-import { buildManifest, type BrandKey, type SiteMode } from "./templates";
+import {
+  buildManifest,
+  type BrandKey,
+  type SubsiteConfig,
+  type SiteMode,
+  type SiteTheme,
+  SITE_THEME_KEYS,
+  siteThemeLabel,
+} from "./templates";
 import {
   ARTIFACT_ROOT,
   type RawInput,
@@ -27,34 +35,38 @@ import {
   normalizeSlug,
   pageListSummary,
   plan,
+  readPersistedSiteConfig,
   resolveRepo,
   summarize,
   validSlug,
   RESERVED,
+  withConfirmedTheme,
   zipArtifact,
 } from "./core";
 
-export type CreateSubsiteInput = RawInput & {
+export type CreateSubsiteInput = Omit<RawInput, "theme"> & {
   repoPath?: string;
-  emitArtifact?: boolean;
   zipArtifact?: boolean;
   dryRun?: boolean;
 };
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   /* ---- LLM tool -------------------------------------------------------- */
   pi.registerTool({
     name: "create_subsite",
     label: "Create dyuhaus sub-site",
     description:
       "Scaffold a new sub-site under the dyuhaus.com repo (folder + .htaccess/tunnel routing + README row) " +
-      "and emit a portable artifact (manifest, brief, tokens, prompt) for generating the UI elsewhere. " +
+      "after the user explicitly chooses a template theme, and emit a portable artifact (manifest, brief, tokens, prompt) for generating the UI elsewhere. " +
       "Idempotent: existing files are skipped and wiring is added only once.",
     promptSnippet: "Scaffold a new dyuhaus.com sub-site and emit its portable UI artifact",
     promptGuidelines: [
       "Use create_subsite when the user asks to add a new sub-site/subdomain under dyuhaus.com.",
+      "For any new site, including one for an existing project, the tool opens a local interactive selector and waits for the user to choose one of the eight template themes before it plans or writes anything.",
+      "Do not infer or default a new-site theme. Existing sites reuse their persisted creation settings without asking again.",
       "For create_subsite, prefer mode 'static' unless the sub-site is backed by a running service on a port.",
     ],
+    executionMode: "sequential",
     parameters: Type.Object({
       slug: Type.String({ description: "Subdomain label / folder name, e.g. 'labs' for labs.dyuhaus.com" }),
       title: Type.Optional(Type.String({ description: "Human title for the site" })),
@@ -75,11 +87,10 @@ export default function (pi: ExtensionAPI) {
       pages: Type.Optional(Type.Array(Type.String(), { description: "Extra page slugs, e.g. ['pricing','about']" })),
       tagline: Type.Optional(Type.String()),
       repoPath: Type.Optional(Type.String({ description: "Override path to the dyuhaus.com repo" })),
-      emitArtifact: Type.Optional(Type.Boolean({ description: "Emit the portable artifact bundle (default true)" })),
       zipArtifact: Type.Optional(Type.Boolean({ description: "Also zip the artifact into ~/transfer (default false)" })),
       dryRun: Type.Optional(Type.Boolean({ description: "Only report the plan; write nothing" })),
     }),
-    async execute(_id, params: CreateSubsiteInput, _signal, _onUpdate, ctx) {
+    async execute(_id, params: CreateSubsiteInput, signal, _onUpdate, ctx) {
       const repo = resolveRepo(ctx.cwd, params.repoPath);
       if (!isSiteRepo(repo)) {
         return {
@@ -88,12 +99,79 @@ export default function (pi: ExtensionAPI) {
           details: {},
         };
       }
-      const { cfg, error } = buildConfig(params);
-      if (!cfg) {
-        return { content: [{ type: "text", text: error! }], isError: true, details: {} };
+      const persisted = await readPersistedSiteConfig(repo, params.slug);
+      if (signal?.aborted) {
+        return { content: [{ type: "text", text: "Operation aborted; nothing was planned or written." }], isError: true, details: {} };
       }
-      const emitArtifact = params.emitArtifact !== false;
-      const planned = await plan(repo, cfg, emitArtifact);
+      let cfg: SubsiteConfig;
+      if (persisted.error) {
+        return { content: [{ type: "text", text: persisted.error }], isError: true, details: {} };
+      }
+      if (persisted.exists) {
+        if (!persisted.cfg) {
+          return {
+            content: [{ type: "text", text: `Existing site "${normalizeSlug(params.slug)}" has no reusable persisted configuration.` }],
+            isError: true,
+            details: {},
+          };
+        }
+        cfg = persisted.cfg;
+      } else {
+        if (!ctx.hasUI || ctx.mode !== "tui") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "A new-site theme must be chosen by David in a local interactive Pi session. Nothing was planned or written.",
+              },
+            ],
+            isError: true,
+            details: {},
+          };
+        }
+        const themeLabel = await ctx.ui.select(
+          "Which theme should this new site use? Preview: https://starter.dyuhaus.com/",
+          SITE_THEME_KEYS.map(siteThemeLabel),
+          { signal },
+        );
+        if (signal?.aborted) {
+          return { content: [{ type: "text", text: "Operation aborted; nothing was planned or written." }], isError: true, details: {} };
+        }
+        const theme = SITE_THEME_KEYS.find((key) => siteThemeLabel(key) === themeLabel) as SiteTheme | undefined;
+        if (!theme) {
+          return {
+            content: [{ type: "text", text: "Theme selection was cancelled; nothing was planned or written." }],
+            isError: true,
+            details: {},
+          };
+        }
+        if (persisted.pendingCfg) {
+          if (theme !== persisted.pendingCfg.theme) {
+            return {
+              content: [{ type: "text", text: `The interrupted scaffold recorded ${siteThemeLabel(persisted.pendingCfg.theme)}. Confirm that theme to resume, or use the existing-site workflow to replace the pending scaffold.` }],
+              isError: true,
+              details: {},
+            };
+          }
+          cfg = persisted.pendingCfg;
+        } else {
+          const built = buildConfig(withConfirmedTheme(params, theme));
+          if (!built.cfg) {
+            return { content: [{ type: "text", text: built.error! }], isError: true, details: {} };
+          }
+          cfg = built.cfg;
+        }
+      }
+      let planned;
+      try {
+        planned = await plan(repo, cfg, true);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return { content: [{ type: "text", text: message }], isError: true, details: {} };
+      }
+      if (signal?.aborted) {
+        return { content: [{ type: "text", text: "Operation aborted; nothing was written." }], isError: true, details: {} };
+      }
       const summary = summarize(cfg, planned, repo);
 
       if (params.dryRun) {
@@ -103,9 +181,15 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const done = await apply(repo, planned);
+      let done;
+      try {
+        done = await apply(repo, planned, signal);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return { content: [{ type: "text", text: message }], isError: true, details: {} };
+      }
       let zipPath: string | null = null;
-      if (params.zipArtifact && emitArtifact) zipPath = await zipArtifact(repo, cfg);
+      if (params.zipArtifact) zipPath = await zipArtifact(repo, cfg);
 
       const tail = [
         "",
@@ -124,7 +208,12 @@ export default function (pi: ExtensionAPI) {
       if (zipPath) tail.push(`  Artifact archive: ${zipPath}`);
 
       return {
-        content: [{ type: "text", text: `${summary}\n\nApplied ${done.length} change(s).${tail.join("\n")}` }],
+        content: [
+          {
+            type: "text",
+            text: `${persisted.exists ? "Existing site detected; reused its persisted creation settings.\n\n" : persisted.pendingCfg ? "Interrupted scaffold detected; David reconfirmed its recorded theme.\n\n" : ""}${summary}\n\nApplied ${done.length} change(s).${tail.join("\n")}`,
+          },
+        ],
         details: { applied: done, manifest: buildManifest(cfg), zip: zipPath },
       };
     },
@@ -135,7 +224,7 @@ export default function (pi: ExtensionAPI) {
     description: "Scaffold a new dyuhaus.com sub-site + portable UI artifact",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) {
-        ctx.ui.notify("/new-subsite needs an interactive UI. Use the create_subsite tool instead.", "warn");
+        ctx.ui.notify("/new-subsite needs an interactive UI so David can choose the site theme.", "warn");
         return;
       }
       const repo = resolveRepo(ctx.cwd);
@@ -152,43 +241,106 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const title = (await ctx.ui.input("Site title:", defaultTitle(slug, "ihtc"))) || defaultTitle(slug, "ihtc");
-      const description = (await ctx.ui.input("One-line description:", `${title} — a dyuhaus.com sub-site.`)) || "";
-      const brand = (await ctx.ui.select("Brand:", ["ihtc", "personal", "none"])) as BrandKey | undefined;
-      const mode = (await ctx.ui.select("Hosting mode:", ["tunnel", "static", "service"])) as SiteMode | undefined;
-      let port: number | undefined;
-      if (mode === "service" || mode === "tunnel") {
-        const hint = mode === "tunnel" ? "Local origin port (blank = auto-assign):" : "Local origin port (e.g. 8790):";
-        const portStr = await ctx.ui.input(hint, "");
-        port = portStr ? Number(portStr) : undefined;
-        if (portStr && (Number.isNaN(port) || !port)) {
-          ctx.ui.notify("Invalid port.", "error");
-          return;
-        }
-        if (mode === "service" && !port) {
-          ctx.ui.notify("Service mode needs a valid port.", "error");
-          return;
-        }
-      }
-      const routeAsPath = await ctx.ui.confirm("Also serve at dyuhaus.com/<slug>/ ?", `Add path route for /${slug}/`);
-      const pagesStr = await ctx.ui.input("Extra pages (comma-separated, optional):", "");
-      const pages = pagesStr ? pagesStr.split(",").map((s) => s.trim()).filter(Boolean) : [];
-      const zipIt = await ctx.ui.confirm("Zip artifact to ~/transfer?", "Create a portable archive for handoff");
-
-      const { cfg, error } = buildConfig({ slug, title, description, brand, mode, port, routeAsPath, pages });
-      if (!cfg) {
-        ctx.ui.notify(error!, "error");
+      const persisted = await readPersistedSiteConfig(repo, slug);
+      let cfg: SubsiteConfig;
+      let zipIt = false;
+      if (persisted.error) {
+        ctx.ui.notify(persisted.error, "error");
         return;
       }
+      if (persisted.exists) {
+        if (!persisted.cfg) {
+          ctx.ui.notify(`Existing site "${slug}" has no reusable persisted configuration.`, "error");
+          return;
+        }
+        cfg = persisted.cfg;
+      } else {
+        if (ctx.mode !== "tui") {
+          ctx.ui.notify("A new-site theme must be chosen by David in a local interactive Pi session.", "error");
+          return;
+        }
+        const themeLabel = await ctx.ui.select(
+          "Which theme should this new site use? Preview: https://starter.dyuhaus.com/",
+          SITE_THEME_KEYS.map(siteThemeLabel),
+          { signal: ctx.signal },
+        );
+        if (ctx.signal?.aborted) return;
+        const theme = SITE_THEME_KEYS.find((key) => siteThemeLabel(key) === themeLabel) as SiteTheme | undefined;
+        if (!theme) return;
 
-      const planned = await plan(repo, cfg, true);
+        if (persisted.pendingCfg) {
+          if (theme !== persisted.pendingCfg.theme) {
+            ctx.ui.notify(
+              `The interrupted scaffold recorded ${siteThemeLabel(persisted.pendingCfg.theme)}. Confirm that theme to resume, or use the existing-site workflow to replace the pending scaffold.`,
+              "error",
+            );
+            return;
+          }
+          cfg = persisted.pendingCfg;
+        } else {
+
+          const title = (await ctx.ui.input("Site title:", defaultTitle(slug, "ihtc"))) || defaultTitle(slug, "ihtc");
+          const description = (await ctx.ui.input("One-line description:", `${title} — a dyuhaus.com sub-site.`)) || "";
+          const brand = (await ctx.ui.select("Brand:", ["ihtc", "personal", "none"])) as BrandKey | undefined;
+          const mode = (await ctx.ui.select("Hosting mode:", ["tunnel", "static", "service"])) as SiteMode | undefined;
+          let port: number | undefined;
+          if (mode === "service" || mode === "tunnel") {
+            const hint = mode === "tunnel" ? "Local origin port (blank = auto-assign):" : "Local origin port (e.g. 8790):";
+            const portStr = await ctx.ui.input(hint, "");
+            port = portStr ? Number(portStr) : undefined;
+            if (portStr && (Number.isNaN(port) || !port)) {
+              ctx.ui.notify("Invalid port.", "error");
+              return;
+            }
+            if (mode === "service" && !port) {
+              ctx.ui.notify("Service mode needs a valid port.", "error");
+              return;
+            }
+          }
+          const routeAsPath = await ctx.ui.confirm("Also serve at dyuhaus.com/<slug>/ ?", `Add path route for /${slug}/`);
+          const pagesStr = await ctx.ui.input("Extra pages (comma-separated, optional):", "");
+          const pages = pagesStr ? pagesStr.split(",").map((s) => s.trim()).filter(Boolean) : [];
+          const built = buildConfig(withConfirmedTheme({
+            slug,
+            title,
+            description,
+            brand,
+            mode,
+            port,
+            routeAsPath,
+            pages,
+          }, theme));
+          if (!built.cfg) {
+            ctx.ui.notify(built.error!, "error");
+            return;
+          }
+          cfg = built.cfg;
+        }
+      }
+
+      zipIt = await ctx.ui.confirm("Zip artifact to ~/transfer?", "Create a portable archive for handoff");
+
+      let planned;
+      try {
+        planned = await plan(repo, cfg, true);
+      } catch (cause) {
+        ctx.ui.notify(cause instanceof Error ? cause.message : String(cause), "error");
+        return;
+      }
+      if (ctx.signal?.aborted) return;
       const proceed = await ctx.ui.confirm("Apply this plan?", summarize(cfg, planned, repo));
       if (!proceed) {
         ctx.ui.notify("Cancelled — nothing written.", "info");
         return;
       }
 
-      const done = await apply(repo, planned);
+      let done;
+      try {
+        done = await apply(repo, planned, ctx.signal);
+      } catch (cause) {
+        ctx.ui.notify(cause instanceof Error ? cause.message : String(cause), "error");
+        return;
+      }
       let zipPath: string | null = null;
       if (zipIt) zipPath = await zipArtifact(repo, cfg);
 

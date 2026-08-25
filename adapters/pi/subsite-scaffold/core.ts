@@ -6,30 +6,42 @@ import { promises as fs } from "node:fs";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
 import {
   type SubsiteConfig,
   type BrandKey,
+  type SiteTheme,
   type SiteMode,
-  buildPage,
-  buildStylesCss,
-  buildScriptJs,
+  SITE_THEME_KEYS,
   buildRobots,
   buildTokensJson,
-  buildTokensCss,
+  buildArtifactTokensCss,
   buildBrief,
   buildPrompt,
   buildArtifactReadme,
+  applyCanonicalIhtcTokens,
   pageList,
+  themeFor,
   slugRegex,
 } from "./templates";
+
+export { applyCanonicalIhtcTokens };
 
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_REPO = "/home/dyadmin/githubStaging/dyuhaus.com";
 export const ARTIFACT_ROOT = "subsite-artifacts";
+export const COMPLETION_FILE = "scaffold.complete.json";
 export const TRANSFER_DIR = "/home/dyadmin/transfer";
+
+// Exact pre-v2 manifests that may reuse their historical theme without
+// prompting. Pinning the content prevents an unknown slug from downgrading its
+// schema and masquerading as a legacy site.
+const TRUSTED_LEGACY_MANIFESTS: Readonly<Record<string, string>> = {
+  jobs: "d6c1a47760876ab3260048335a9637d398ae2dd3126558fec3b0e4db7c1296da",
+};
 
 // Live public-exposure path: the homelab Docker Compose stack + its cloudflared
 // ingress. Static sub-sites run as nginx containers reached by service name;
@@ -46,7 +58,7 @@ export const COMPOSE_PORT_BASE = 8786;
 
 export interface PlannedFile {
   path: string; // repo-relative
-  kind: "create" | "patch" | "skip";
+  kind: "claim" | "create" | "verify" | "patch" | "complete" | "skip";
   note: string;
   contents?: string;
 }
@@ -55,6 +67,7 @@ export interface RawInput {
   slug: string;
   title?: string;
   description?: string;
+  theme?: SiteTheme;
   brand?: BrandKey;
   mode?: SiteMode;
   port?: number;
@@ -62,6 +75,22 @@ export interface RawInput {
   immutableAssets?: boolean;
   pages?: string[];
   tagline?: string;
+}
+
+// Supported entrypoints add this marker after a local interactive choice, or
+// while reusing an existing manifest. It guards API misuse; the machine
+// contract remains authoritative for direct shell and source-level actions.
+const THEME_AUTHORIZED: unique symbol = Symbol("theme-authorized");
+type AuthorizedRawInput = RawInput & {
+  [THEME_AUTHORIZED]: { confirmedByUser: boolean };
+};
+
+export function withConfirmedTheme(raw: RawInput, theme: SiteTheme): AuthorizedRawInput {
+  return { ...raw, theme, [THEME_AUTHORIZED]: { confirmedByUser: true } };
+}
+
+function withExistingTheme(raw: RawInput, theme: SiteTheme, confirmedByUser: boolean): AuthorizedRawInput {
+  return { ...raw, theme, [THEME_AUTHORIZED]: { confirmedByUser } };
 }
 
 export function isSiteRepo(dir: string): boolean {
@@ -126,6 +155,16 @@ export function buildConfig(raw: RawInput): { cfg?: SubsiteConfig; error?: strin
   if (!slug) return { error: "A slug/subdomain name is required." };
   if (!validSlug(slug)) return { error: `Invalid slug "${slug}". Use lowercase letters, numbers, and hyphens.` };
   if (RESERVED.has(slug)) return { error: `"${slug}" is a reserved folder name.` };
+  if (!raw.theme || !SITE_THEME_KEYS.includes(raw.theme)) {
+    return {
+      error:
+        "A site theme is required. Ask David to choose Literary, Noir, Science Fiction, High Fantasy, Horror, Poetry, Correspondence, or IHTC.",
+    };
+  }
+  const themeAuthorization = (raw as AuthorizedRawInput)[THEME_AUTHORIZED];
+  if (!themeAuthorization) {
+    return { error: "Theme confirmation is required. Wait for David to choose or confirm the theme before continuing." };
+  }
   const mode: SiteMode = raw.mode ?? "tunnel";
   if (mode === "service" && !raw.port) return { error: "Service mode requires a port for the tunnel ingress." };
   const brand: BrandKey = raw.brand ?? "ihtc";
@@ -136,6 +175,8 @@ export function buildConfig(raw: RawInput): { cfg?: SubsiteConfig; error?: strin
     subdomain: `${slug}.dyuhaus.com`,
     title,
     description,
+    theme: raw.theme,
+    themeConfirmedByUser: themeAuthorization.confirmedByUser,
     brand,
     mode,
     port: raw.port,
@@ -301,6 +342,263 @@ async function readIf(p: string): Promise<string | null> {
   }
 }
 
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function readThemeScaffold(repo: string, cfg: SubsiteConfig): Promise<{
+  index: string;
+  styles: string;
+  script: string;
+  favicon: string | null;
+}> {
+  const themeDir = path.join(repo, "starter", cfg.theme);
+  const [index, styles, script, favicon] = await Promise.all([
+    readIf(path.join(themeDir, "index.html")),
+    readIf(path.join(themeDir, "styles.css")),
+    readIf(path.join(themeDir, "script.js")),
+    readIf(path.join(themeDir, "favicon.svg")),
+  ]);
+  if (index === null || styles === null || script === null) {
+    throw new Error(
+      `Confirmed ${cfg.theme} theme is incomplete under "starter/${cfg.theme}"; restore its index.html, styles.css, and script.js before scaffolding.`,
+    );
+  }
+  return {
+    index,
+    styles: cfg.theme === "ihtc" ? applyCanonicalIhtcTokens(styles) : styles,
+    script,
+    favicon,
+  };
+}
+
+function customizeThemePage(
+  source: string,
+  cfg: SubsiteConfig,
+  page: { file: string; label: string; isIndex: boolean },
+): string {
+  const title = page.isIndex ? cfg.title : `${page.label} · ${cfg.title}`;
+  const extraNavigation = pageList(cfg)
+    .filter((candidate) => candidate.file !== "index.html" || !page.isIndex)
+    .map(
+      (candidate) =>
+        `<a href="${escapeHtml(candidate.file)}"${candidate.file === page.file ? ' aria-current="page"' : ""}>${escapeHtml(candidate.label)}</a>`,
+    )
+    .join("");
+  let rendered = source
+    .replace(/<title>[\s\S]*?<\/title>/i, () => `<title>${escapeHtml(title)}</title>`)
+    .replace(
+      /(<meta\s+name="description"\s+content=")[^"]*("\s*\/?>)/i,
+      (_match, prefix: string, suffix: string) => `${prefix}${escapeHtml(cfg.description)}${suffix}`,
+    )
+    .replace(/href="\.\.\/"/g, 'href="https://starter.dyuhaus.com/"');
+  rendered = rendered
+    .replace(
+      /(<meta\s+property="og:title"\s+content=")[^"]*("\s*\/?>)/i,
+      (_match, prefix: string, suffix: string) => `${prefix}${escapeHtml(cfg.title)}${suffix}`,
+    )
+    .replace(
+      /(<meta\s+property="og:description"\s+content=")[^"]*("\s*\/?>)/i,
+      (_match, prefix: string, suffix: string) => `${prefix}${escapeHtml(cfg.description)}${suffix}`,
+    );
+  if (extraNavigation) {
+    rendered = rendered.replace(
+      /(<nav\b[^>]*>[\s\S]*?)(<\/nav>)/i,
+      (_match, navigation: string, closingTag: string) => `${navigation}${extraNavigation}${closingTag}`,
+    );
+  }
+  return rendered;
+}
+
+export async function buildCompletionRecord(cfg: SubsiteConfig): Promise<string> {
+  const manifestSha256 = sha256(buildTokensJson(cfg));
+  return JSON.stringify(
+    {
+      schema: "dyuhaus.subsite-completion/v1",
+      slug: cfg.slug,
+      manifestSha256,
+      completedAt: cfg.createdAt,
+    },
+    null,
+    2,
+  ) + "\n";
+}
+
+export interface PersistedSiteConfig {
+  exists: boolean;
+  cfg?: SubsiteConfig;
+  pendingCfg?: SubsiteConfig;
+  error?: string;
+}
+
+/** Reconstruct immutable creation inputs for an existing scaffold. */
+export async function readPersistedSiteConfig(repo: string, rawSlug: string): Promise<PersistedSiteConfig> {
+  const slug = normalizeSlug(rawSlug);
+  const siteEntryExists = !!slug && existsSync(path.join(repo, slug, "index.html"));
+  const manifestPath = path.join(repo, ARTIFACT_ROOT, slug, "site.manifest.json");
+  const completionPath = path.join(repo, ARTIFACT_ROOT, slug, COMPLETION_FILE);
+  const manifestText = slug ? await readIf(manifestPath) : null;
+  if (!siteEntryExists && manifestText === null) {
+    if (existsSync(completionPath)) {
+      return {
+        exists: false,
+        error: `Orphaned completion record for "${slug}" has no matching manifest or site entry page; refusing to scaffold over it.`,
+      };
+    }
+    return { exists: false };
+  }
+  if (manifestText === null) {
+    return {
+      exists: siteEntryExists,
+      error: `Existing site "${slug}" has no persisted scaffold configuration. Use the existing-site workflow instead.`,
+    };
+  }
+
+  let manifest: any;
+  try {
+    manifest = JSON.parse(manifestText);
+  } catch {
+    return { exists: true, error: `Existing artifact for "${slug}" is unreadable; refusing to modify it.` };
+  }
+
+  const recordedSlug = typeof manifest?.site?.slug === "string" ? normalizeSlug(manifest.site.slug) : "";
+  const recordedSubdomain = typeof manifest?.site?.subdomain === "string" ? manifest.site.subdomain : "";
+  const recordedSiteDir = typeof manifest?.files?.subsiteDir === "string" ? manifest.files.subsiteDir : "";
+  const recordedEntry = typeof manifest?.files?.entry === "string" ? manifest.files.entry : "";
+  const recordedStyles = typeof manifest?.files?.styles === "string" ? manifest.files.styles : "";
+  const recordedScript = typeof manifest?.files?.script === "string" ? manifest.files.script : "";
+  if (
+    recordedSlug !== slug ||
+    recordedSubdomain !== `${slug}.dyuhaus.com` ||
+    (recordedSiteDir && recordedSiteDir !== `${slug}/`) ||
+    (recordedEntry && recordedEntry !== `${slug}/index.html`) ||
+    (recordedStyles && recordedStyles !== `${slug}/styles.css`) ||
+    (recordedScript && recordedScript !== `${slug}/script.js`)
+  ) {
+    return {
+      exists: siteEntryExists,
+      error: `Existing artifact for "${slug}" identifies a different site; refusing to reuse its settings.`,
+    };
+  }
+
+  const recordedTheme = manifest?.design?.template?.key;
+  const legacyIhtc = !recordedTheme && manifest?.design?.style === "dyuhaus-terminal-house-style";
+  const theme = SITE_THEME_KEYS.includes(recordedTheme as SiteTheme)
+    ? (recordedTheme as SiteTheme)
+    : legacyIhtc
+      ? "ihtc"
+      : undefined;
+  if (!theme) {
+    return { exists: siteEntryExists, error: `Existing artifact for "${slug}" has no reusable template theme.` };
+  }
+
+  const confirmedByUser = manifest?.design?.template?.confirmedByUser === true;
+  const trustedLegacy = legacyIhtc && TRUSTED_LEGACY_MANIFESTS[slug] === sha256(manifestText);
+  const currentManifest =
+    manifest?.schema === "dyuhaus.subsite-artifact/v2" &&
+    manifest?.generatedBy === "pi extension: subsite-scaffold" &&
+    !legacyIhtc;
+  if (currentManifest && !confirmedByUser) {
+    return { exists: false, error: `Current artifact for "${slug}" has no recorded user theme confirmation.` };
+  }
+  if (!currentManifest && !trustedLegacy) {
+    return {
+      exists: false,
+      error: `Artifact "${slug}" is neither a current scaffold nor a pinned legacy scaffold.`,
+    };
+  }
+  if (trustedLegacy && !siteEntryExists) {
+    return {
+      exists: false,
+      error: `Legacy artifact "${slug}" has no matching existing site entry page.`,
+    };
+  }
+
+  const brand = ["ihtc", "personal", "none"].includes(manifest?.brand?.key)
+    ? (manifest.brand.key as BrandKey)
+    : "ihtc";
+  const mode = ["tunnel", "static", "service"].includes(manifest?.hosting?.mode)
+    ? (manifest.hosting.mode as SiteMode)
+    : "static";
+  const pages = Array.isArray(manifest?.pages)
+    ? manifest.pages
+        .map((page: any) => (typeof page?.file === "string" ? page.file.replace(/\.html$/i, "") : ""))
+        .filter((page: string) => page && page !== "index")
+    : [];
+  const raw = withExistingTheme(
+    {
+      slug,
+      title: typeof manifest?.site?.title === "string" ? manifest.site.title : undefined,
+      description: typeof manifest?.site?.description === "string" ? manifest.site.description : undefined,
+      brand,
+      mode,
+      port: typeof manifest?.hosting?.port === "number" ? manifest.hosting.port : undefined,
+      routeAsPath: !!manifest?.site?.pathRoute,
+      immutableAssets: manifest?.hosting?.immutableAssets === true,
+      pages,
+      tagline: typeof manifest?.brand?.tagline === "string" ? manifest.brand.tagline : undefined,
+    },
+    theme,
+    confirmedByUser,
+  );
+  const built = buildConfig(raw);
+  if (!built.cfg) return { exists: true, error: built.error };
+  if (typeof manifest?.generatedAt === "string") built.cfg.createdAt = manifest.generatedAt;
+  if (trustedLegacy) return { exists: true, cfg: built.cfg };
+
+  const completionText = await readIf(completionPath);
+  if (completionText === null) {
+    if (existsSync(completionPath)) {
+      return { exists: false, error: `Completion record for "${slug}" is unreadable; refusing to reuse it.` };
+    }
+    // A directory is not proof of completion. Until this marker is published
+    // last, even a partially written site returns through the local selector.
+    return { exists: false, pendingCfg: built.cfg };
+  }
+  let completion: any;
+  try {
+    completion = JSON.parse(completionText);
+  } catch {
+    return { exists: false, error: `Completion record for "${slug}" is unreadable; refusing to reuse it.` };
+  }
+  if (
+    completion?.schema !== "dyuhaus.subsite-completion/v1" ||
+    completion?.slug !== slug ||
+    completion?.manifestSha256 !== sha256(manifestText) ||
+    completion?.completedAt !== manifest?.generatedAt
+  ) {
+    return { exists: false, error: `Completion record for "${slug}" does not match its manifest.` };
+  }
+  // A valid marker remains reusable if the generated site directory is later
+  // removed intentionally for create-only regeneration.
+  return { exists: true, cfg: built.cfg };
+}
+
+function persistedDifference(recorded: SubsiteConfig, requested: SubsiteConfig): string | null {
+  const comparisons: [string, unknown, unknown][] = [
+    ["title", recorded.title, requested.title],
+    ["description", recorded.description, requested.description],
+    ["tagline", recorded.tagline || themeFor(recorded).tagline, requested.tagline || themeFor(requested).tagline],
+    ["theme", recorded.theme, requested.theme],
+    ["brand", recorded.brand, requested.brand],
+    ["mode", recorded.mode, requested.mode],
+    ["port", recorded.port ?? null, requested.port ?? null],
+    ["path routing", recorded.routeAsPath, requested.routeAsPath],
+    ["asset caching", recorded.immutableAssets, requested.immutableAssets],
+    ["pages", JSON.stringify(recorded.pages), JSON.stringify(requested.pages)],
+    ["creation timestamp", recorded.createdAt, requested.createdAt],
+  ];
+  return comparisons.find(([, a, b]) => a !== b)?.[0] ?? null;
+}
+
 /** Next free host port at/above `base` not already published in the compose file. */
 export function nextFreeComposePort(composeContent: string, base = COMPOSE_PORT_BASE): number {
   const used = new Set<number>();
@@ -325,60 +623,78 @@ export async function resolvePort(_repo: string, cfg: SubsiteConfig): Promise<Su
 
 export async function plan(repo: string, cfg: SubsiteConfig, emitArtifact: boolean): Promise<PlannedFile[]> {
   const out: PlannedFile[] = [];
+  const persisted = await readPersistedSiteConfig(repo, cfg.slug);
+  if (persisted.error) throw new Error(persisted.error);
+  const recorded = persisted.exists ? persisted.cfg : persisted.pendingCfg;
+  if (persisted.exists && !recorded) {
+    throw new Error(`Existing site "${cfg.slug}" has no reusable persisted configuration.`);
+  }
+  if (recorded) {
+    const difference = persistedDifference(recorded, cfg);
+    if (difference) {
+      throw new Error(`Site "${cfg.slug}" has different persisted ${difference}; use the existing-site workflow.`);
+    }
+  }
   await resolvePort(repo, cfg);
-  const siteDir = cfg.slug;
-
-  for (const p of pageList(cfg)) {
-    const full = path.join(repo, siteDir, p.file);
+  const isNew = !persisted.exists && !persisted.pendingCfg;
+  const isPending = !persisted.exists && !!persisted.pendingCfg;
+  const themeScaffold = await readThemeScaffold(repo, cfg);
+  if (isNew) {
     out.push({
-      path: path.join(siteDir, p.file),
-      kind: existsSync(full) ? "skip" : "create",
-      note: existsSync(full) ? "exists" : p.isIndex ? "landing page" : "extra page",
-      contents: buildPage(cfg, p),
+      path: path.join(ARTIFACT_ROOT, cfg.slug, "site.manifest.json"),
+      kind: "claim",
+      note: "atomically persist the confirmed site identity",
+      contents: buildTokensJson(cfg),
     });
   }
-  out.push({
-    path: path.join(siteDir, "styles.css"),
-    kind: existsSync(path.join(repo, siteDir, "styles.css")) ? "skip" : "create",
-    note: "brand tokens + base layout",
-    contents: buildStylesCss(cfg),
-  });
-  out.push({
-    path: path.join(siteDir, "script.js"),
-    kind: existsSync(path.join(repo, siteDir, "script.js")) ? "skip" : "create",
-    note: "starter script",
-    contents: buildScriptJs(cfg),
-  });
-  out.push({
-    path: path.join(siteDir, "robots.txt"),
-    kind: existsSync(path.join(repo, siteDir, "robots.txt")) ? "skip" : "create",
-    note: "robots",
-    contents: buildRobots(cfg),
-  });
-  out.push({
-    path: path.join(siteDir, "assets", ".gitkeep"),
-    kind: existsSync(path.join(repo, siteDir, "assets")) ? "skip" : "create",
-    note: "assets dir",
-    contents: "",
-  });
+  const siteDir = cfg.slug;
+
+  const addCreate = async (relativePath: string, note: string, contents: string) => {
+    const full = path.join(repo, relativePath);
+    if (!existsSync(full)) {
+      out.push({ path: relativePath, kind: "create", note, contents });
+      return;
+    }
+    if ((isNew || isPending) && (await readIf(full)) !== contents) {
+      throw new Error(
+        `${isNew ? "Pre-existing" : "Interrupted scaffold"} file "${relativePath}" differs from the confirmed site identity; use the existing-site workflow.`,
+      );
+    }
+    out.push({
+      path: relativePath,
+      kind: isNew || isPending ? "verify" : "skip",
+      note: isNew ? "verified pre-existing file" : isPending ? "verified interrupted write" : "exists",
+      contents,
+    });
+  };
+
+  for (const p of pageList(cfg)) {
+    await addCreate(
+      path.join(siteDir, p.file),
+      p.isIndex ? `landing page copied from the confirmed ${cfg.theme} theme` : `extra page using the confirmed ${cfg.theme} theme`,
+      customizeThemePage(themeScaffold.index, cfg, p),
+    );
+  }
+  await addCreate(path.join(siteDir, "styles.css"), `confirmed ${cfg.theme} theme styles`, themeScaffold.styles);
+  await addCreate(path.join(siteDir, "script.js"), `confirmed ${cfg.theme} theme behavior`, themeScaffold.script);
+  await addCreate(path.join(siteDir, "robots.txt"), "robots", buildRobots(cfg));
+  await addCreate(path.join(siteDir, "assets", ".gitkeep"), "assets dir", "");
+  if (themeScaffold.favicon !== null) {
+    await addCreate(path.join(siteDir, "favicon.svg"), `confirmed ${cfg.theme} theme favicon`, themeScaffold.favicon);
+  }
 
   if (emitArtifact) {
     const aDir = path.join(ARTIFACT_ROOT, cfg.slug);
     const artifactFiles: [string, string][] = [
       ["site.manifest.json", buildTokensJson(cfg)],
-      ["tokens.css", buildTokensCss(cfg)],
+      ["tokens.css", buildArtifactTokensCss(cfg)],
       ["BRIEF.md", buildBrief(cfg)],
       ["PROMPT.md", buildPrompt(cfg)],
       ["README.md", buildArtifactReadme(cfg)],
     ];
     for (const [name, body] of artifactFiles) {
-      const full = path.join(repo, aDir, name);
-      out.push({
-        path: path.join(aDir, name),
-        kind: existsSync(full) ? "skip" : "create",
-        note: existsSync(full) ? "artifact exists" : "artifact",
-        contents: body,
-      });
+      if (isNew && name === "site.manifest.json") continue;
+      await addCreate(path.join(aDir, name), "artifact", body);
     }
   }
 
@@ -430,11 +746,62 @@ export async function plan(repo: string, cfg: SubsiteConfig, emitArtifact: boole
     }
   }
 
+  if (!persisted.exists) {
+    out.push({
+      path: path.join(ARTIFACT_ROOT, cfg.slug, COMPLETION_FILE),
+      kind: "complete",
+      note: "publish completion only after every scaffold write",
+      contents: await buildCompletionRecord(cfg),
+    });
+  }
+
   return out;
 }
 
-export async function apply(repo: string, planned: PlannedFile[]): Promise<string[]> {
+export async function apply(repo: string, planned: PlannedFile[], signal?: AbortSignal): Promise<string[]> {
   const done: string[] = [];
+  const completionInputs = new Map<string, string>();
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw new Error("Operation aborted; the scaffold can be retried safely.");
+  };
+  const publishExclusive = async (full: string, contents: string, tag: string) => {
+    await fs.mkdir(path.dirname(full), { recursive: true });
+    const temp = `${full}.${tag}-${process.pid}-${randomUUID()}`;
+    try {
+      const handle = await fs.open(temp, "wx", 0o644);
+      try {
+        await handle.writeFile(contents, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      throwIfAborted();
+      await fs.link(temp, full);
+    } finally {
+      await fs.unlink(temp).catch(() => {});
+    }
+  };
+  const replaceAtomically = async (full: string, contents: string) => {
+    await fs.mkdir(path.dirname(full), { recursive: true });
+    const temp = `${full}.patch-${process.pid}-${randomUUID()}`;
+    try {
+      // Start from a metadata-preserving copy so rename does not silently drop
+      // group-write, ACLs, or extended attributes from the existing file.
+      await execFileAsync("cp", ["--preserve=mode,xattr", "--reflink=auto", "--", full, temp]);
+      const handle = await fs.open(temp, "r+");
+      try {
+        await handle.truncate(0);
+        await handle.writeFile(contents, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      throwIfAborted();
+      await fs.rename(temp, full);
+    } finally {
+      await fs.unlink(temp).catch(() => {});
+    }
+  };
   // Collapse multiple patches to the same file: apply the last (fully patched) version.
   const seenPatch = new Set<string>();
   for (let i = planned.length - 1; i >= 0; i--) {
@@ -444,14 +811,109 @@ export async function apply(repo: string, planned: PlannedFile[]): Promise<strin
       else seenPatch.add(item.path);
     }
   }
+  // A plan is only a snapshot. Recheck all create/verify destinations before
+  // publishing the slug claim so a site created after plan() cannot be
+  // mislabeled as an interrupted scaffold.
   for (const item of planned) {
-    if (item.kind === "skip" || item.contents === undefined) continue;
-    const full = path.join(repo, item.path);
-    await fs.mkdir(path.dirname(full), { recursive: true });
-    await fs.writeFile(full, item.contents, "utf8");
-    done.push(`${item.kind === "patch" ? "patched" : "created"} ${item.path}`);
+    if ((item.kind !== "create" && item.kind !== "verify") || item.contents === undefined) continue;
+    const current = await readIf(path.join(repo, item.path));
+    if (item.kind === "verify" && current !== item.contents) {
+      throw new Error(`Scaffold file "${item.path}" changed before completion; refusing to claim the site.`);
+    }
+    if (item.kind === "create" && current !== null && current !== item.contents) {
+      throw new Error(`Concurrent write changed "${item.path}"; refusing to claim the site.`);
+    }
   }
-  return done;
+
+  const claimsCreated: Array<{ full: string; contents: string }> = [];
+  const completionPaths = planned
+    .filter((item) => item.kind === "complete")
+    .map((item) => path.join(repo, item.path));
+  try {
+    for (const item of planned) {
+      throwIfAborted();
+      const full = path.join(repo, item.path);
+      if (item.kind === "claim") {
+        throwIfAborted();
+        try {
+          await publishExclusive(full, item.contents!, "claim");
+        } catch (cause: any) {
+          if (cause?.code === "EEXIST") {
+            throw new Error(`Site identity was claimed by another scaffold: ${item.path}`);
+          }
+          throw cause;
+        }
+        done.push(`claimed ${item.path}`);
+        completionInputs.set(item.path, item.contents!);
+        claimsCreated.push({ full, contents: item.contents! });
+        continue;
+      }
+      if (item.kind === "verify") {
+        completionInputs.set(item.path, item.contents!);
+        continue;
+      }
+      if (item.kind === "skip" || item.contents === undefined) continue;
+      await fs.mkdir(path.dirname(full), { recursive: true });
+      if (item.kind === "create") {
+        try {
+          await publishExclusive(full, item.contents, "create");
+        } catch (cause: any) {
+          if (cause?.code === "EEXIST") {
+            if ((await readIf(full)) !== item.contents) {
+              throw new Error(`Concurrent write changed "${item.path}"; refusing to publish completion.`);
+            }
+          } else {
+            throw cause;
+          }
+        }
+      } else if (item.kind === "complete") {
+        for (const [relativePath, expected] of completionInputs) {
+          if ((await readIf(path.join(repo, relativePath))) !== expected) {
+            throw new Error(`Scaffold file "${relativePath}" changed before completion; refusing to mark it complete.`);
+          }
+        }
+        try {
+          await publishExclusive(full, item.contents, "complete");
+        } catch (cause: any) {
+          if (cause?.code === "EEXIST" && (await readIf(full)) === item.contents) continue;
+          if (cause?.code === "EEXIST") throw new Error(`Completion record changed concurrently: ${item.path}`);
+          throw cause;
+        }
+      } else {
+        await replaceAtomically(full, item.contents);
+      }
+      if (item.kind !== "complete") completionInputs.set(item.path, item.contents);
+      // Publishing the completion record is the scaffold's commit point. A
+      // cancellation observed after that durable link must not turn a finished
+      // site into a reported failure or prevent caller-side post-processing.
+      if (item.kind !== "complete") throwIfAborted();
+      done.push(`${item.kind === "patch" ? "patched" : item.kind === "complete" ? "completed" : "created"} ${item.path}`);
+    }
+    return done;
+  } catch (cause) {
+    // Remove this invocation's claim only when nothing matching the scaffold
+    // survived. A partial output needs the claim so the next run can safely
+    // identify and resume it; an empty failed attempt must not reserve a slug.
+    const completed = (await Promise.all(completionPaths.map((full) => readIf(full)))).some(
+      (contents) => contents !== null,
+    );
+    const claimPaths = new Set(claimsCreated.map(({ full }) => path.relative(repo, full)));
+    const recoverableOutputSurvives = (
+      await Promise.all(
+        [...completionInputs]
+          .filter(([relativePath]) => !claimPaths.has(relativePath))
+          .map(async ([relativePath, expected]) => (await readIf(path.join(repo, relativePath))) === expected),
+      )
+    ).some(Boolean);
+    if (!completed && !recoverableOutputSurvives) {
+      for (const claim of claimsCreated.reverse()) {
+        if ((await readIf(claim.full)) === claim.contents) {
+          await fs.unlink(claim.full).catch(() => {});
+        }
+      }
+    }
+    throw cause;
+  }
 }
 
 export async function zipArtifact(repo: string, cfg: SubsiteConfig): Promise<string | null> {
@@ -481,17 +943,20 @@ export function pageListSummary(cfg: SubsiteConfig): string {
 }
 
 export function summarize(cfg: SubsiteConfig, planned: PlannedFile[], repo: string): string {
+  const claims = planned.filter((p) => p.kind === "claim").length;
   const creates = planned.filter((p) => p.kind === "create").length;
+  const verifies = planned.filter((p) => p.kind === "verify").length;
   const patches = planned.filter((p) => p.kind === "patch").length;
+  const completions = planned.filter((p) => p.kind === "complete").length;
   const skips = planned.filter((p) => p.kind === "skip").length;
   return [
     `Sub-site: ${cfg.title}`,
     `Subdomain: https://${cfg.subdomain}${cfg.routeAsPath ? `  (also /${cfg.slug}/)` : ""}`,
-    `Brand: ${cfg.brand}   Mode: ${cfg.mode}${cfg.mode !== "static" && cfg.port ? ` (:${cfg.port})` : ""}`,
+    `Theme: ${cfg.theme}   Brand: ${cfg.brand}   Mode: ${cfg.mode}${cfg.mode !== "static" && cfg.port ? ` (:${cfg.port})` : ""}`,
     `Repo: ${repo}`,
     `Pages: ${pageList(cfg).map((p) => p.file).join(", ")}`,
     "",
-    `Plan: ${creates} create, ${patches} patch, ${skips} skip`,
+    `Plan: ${claims} claim, ${creates} create, ${verifies} verify, ${patches} patch, ${completions} complete, ${skips} skip`,
     ...planned.map((p) => `  [${p.kind}] ${p.path}${p.note ? `  — ${p.note}` : ""}`),
   ].join("\n");
 }
