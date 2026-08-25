@@ -23,14 +23,14 @@ for every agent profile on this machine. Each profile is installed here as an
 run the deterministic router, delegate with `spawn_agent`, and run a real code
 review with the native `codex review` subcommand.
 
-**Cannot: route a profile to its configured model.** Codex dispatches OpenAI
-models; every profile in this registry is configured on a provider Codex cannot
-reach. A profile you adopt runs on **your session's model**. Say that plainly if
-asked — never report that a profile ran on its configured model.
+**Direct adoption does not route a model.** A profile you adopt runs on **your
+current session's model**. Substantive automated work must use `spawn_agent`
+with the profile's configured OpenAI `model` and `reasoning_effort`, unless the
+current session is explicitly confirmed to match both. Direct adoption is for
+trivial/manual work and must say which session model ran.
 
-`spawn_agent` gives a child a fresh context, not a profile. Its `model` field
-takes OpenAI models only. If you delegate, paste the profile's mission and
-boundaries into the child's task; nothing carries them automatically.
+`spawn_agent` gives a child a fresh context, not a profile. Paste the profile's
+mission and boundaries into its task; nothing carries them automatically.
 
 The `tools:` list in each profile is Claude Code's tool vocabulary. Codex does
 not enforce it, so a read-only profile's boundary is a discipline here, not a

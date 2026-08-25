@@ -6,18 +6,20 @@
     "planner": {
       "purpose": "planning and reasoning about the project: architecture, design, root-cause analysis, trade-off calls, sequencing work, and reviewing an approach before it is built",
       "model": {
-        "class": "fable",
+        "class": "gpt-5.6-sol",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": true
     },
     "builder": {
       "purpose": "senior engineering implementation: designing and building complex systems, writing and editing code, running builds and tests, and delegating clearly outlined, well-scoped subtasks to the L1 Programmer",
       "model": {
-        "class": "opus",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "canDelegate": true,
@@ -32,9 +34,10 @@
       "displayName": "Runner",
       "purpose": "everyday tasks and maintenance; identify the kind of work, perform routine work, and recommend or escalate to the appropriate specialist",
       "model": {
-        "class": "sonnet",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -85,9 +88,10 @@
       "displayName": "Tech Writer",
       "purpose": "create, update, and organize technical documentation, including READMEs, API references, runbooks, architecture notes, and implementation guides",
       "model": {
-        "class": "sonnet",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -133,9 +137,10 @@
       "displayName": "Prose Writer",
       "purpose": "write and revise non-technical prose such as correspondence, proposals, narratives, speeches, and general-purpose communications",
       "model": {
-        "class": "sonnet",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -180,9 +185,10 @@
       "displayName": "Team Leader",
       "purpose": "coordinate large tasks that genuinely require multiple agents, establish workstreams, sequence dependencies, reconcile outputs, and report an integrated result",
       "model": {
-        "class": "opus",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -241,9 +247,10 @@
       "displayName": "L1 Programmer",
       "purpose": "implement basic scripts, small fixes, tests, and explicitly outlined programming tasks under the direction of a senior engineer or clear plan",
       "model": {
-        "class": "haiku",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -290,9 +297,10 @@
       "displayName": "Librarian",
       "purpose": "maintain the Vault and documentation information architecture, including organization, navigation, naming, cross-links, indexes, and structural consistency",
       "model": {
-        "class": "sonnet",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -338,9 +346,10 @@
       "displayName": "FE-Designer",
       "purpose": "design and implement polished frontend interfaces: translate product requirements and design-system guidance into accessible, responsive UI components, layouts, interactions, and visual refinements",
       "model": {
-        "class": "sonnet",
+        "class": "gpt-5.6-terra",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -388,9 +397,10 @@
       "displayName": "Audit",
       "purpose": "audit and repair AI harness, agent-routing, extension, and developer-tooling failures by reproducing symptoms, inspecting live runtime and durable source, applying direct fixes without delegated agents, validating installed and source surfaces, and preserving verified changes through the native Git and pull-request workflow",
       "model": {
-        "class": "fable",
+        "class": "gpt-5.6-sol",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": false,
       "tools": [
@@ -438,9 +448,10 @@
       "displayName": "Code Reviewer",
       "purpose": "adversarially review a branch, diff, or codebase for real defects before it reaches main: correctness, credential and privacy leaks, destructive or lossy operations, concurrency and ordering bugs, and violations of the project's own stated guarantees",
       "model": {
-        "class": "fable",
+        "class": "gpt-5.6-sol",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
       "readOnly": true,
       "tools": [
@@ -492,11 +503,12 @@
     "postWorkflowAudit": {
       "enabled": true,
       "model": {
-        "class": "sonnet",
+        "class": "gpt-5.6-sol",
         "id": "",
-        "provider": "anthropic"
+        "provider": "openai",
+        "effort": "xhigh"
       },
-      "thinking": "medium"
+      "thinking": "xhigh"
     },
     "automaticSelection": {
       "enabled": true,
@@ -512,10 +524,10 @@
     "note": "Runner is the everyday front door. Use router.py or a harness /route command for an explainable, confirmation-required handoff. Team Leader is direct-call-only."
   },
   "providers": {
-    "anthropic": {
-      "type": "anthropic",
-      "apiKeyEnv": "ANTHROPIC_API_KEY",
-      "baseUrlEnv": ""
+    "openai": {
+      "type": "openai",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "baseUrlEnv": "OPENAI_BASE_URL"
     }
   }
 }

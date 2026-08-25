@@ -121,6 +121,10 @@ def main():
                 raise SystemExit(f"ERROR: {exc}")
             skipped.append("claude")
             print(f"WARNING: skipping the Claude Code adapter — {exc}", file=sys.stderr)
+            # The all-installer has the same intentional retirement obligation
+            # as apply.py all: obsolete, manifest-owned PB/profile files must
+            # not remain as a silent Anthropic automation fallback.
+            primitive.retire_stale_claude_surface(cfg, home, args.dry_run)
 
     if skipped:
         print(

@@ -48,7 +48,12 @@ export interface ModelSpec {
 	class?: string;
 	id?: string;
 	provider?: string;
+	/** Required for OpenAI automation; passed verbatim as Pi --thinking. */
+	effort?: ThinkingLevel;
 }
+
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export interface RoleSpec {
 	purpose?: string;
@@ -86,7 +91,8 @@ export interface RolesConfig {
 		postWorkflowAudit?: {
 			enabled?: boolean;
 			model?: ModelSpec;
-			thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+			/** Historical compatibility only; child automation uses model.effort. */
+			thinking?: ThinkingLevel;
 		};
 		automaticSelection?: {
 			enabled?: boolean;
@@ -125,6 +131,8 @@ export interface RoleView {
 	infoSources: string[];
 	/** true when a pinned id is active (no auto-upgrade). */
 	pinned: boolean;
+	/** The exact registry effort required for every automated Pi child. */
+	effort: ThinkingLevel | null;
 }
 
 export interface LoadResult {
@@ -297,9 +305,17 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 		if (model.class !== undefined && typeof model.class !== "string") errs.push(`${pathName}.model.class must be a string`);
 		if (model.id !== undefined && typeof model.id !== "string") errs.push(`${pathName}.model.id must be a string`);
 		if (!(String(mid).trim() || String(cls).trim())) errs.push(`${pathName}.model needs a non-empty class or id`);
-		const provName = model.provider;
-		if (typeof provName !== "string" || !provName) errs.push(`${pathName}.model.provider must be a string`);
-		else if (!(provName in (providers as object))) errs.push(`${pathName}.model.provider '${provName}' is not defined in providers`);
+			const provName = model.provider;
+			if (typeof provName !== "string" || !provName) errs.push(`${pathName}.model.provider must be a string`);
+			else if (!(provName in (providers as object))) errs.push(`${pathName}.model.provider '${provName}' is not defined in providers`);
+			const effort = model.effort;
+			if (effort !== undefined && !THINKING_LEVELS.includes(effort as ThinkingLevel)) {
+				errs.push(`${pathName}.model.effort must be a supported thinking level`);
+			}
+			const providerType = typeof provName === "string" ? (providers as Record<string, ProviderSpec>)[provName]?.type : undefined;
+			if (providerType === "openai" && !THINKING_LEVELS.includes(effort as ThinkingLevel)) {
+				errs.push(`${pathName}.model.effort is required for OpenAI automation`);
+			}
 		if (entry.canDelegate !== undefined && typeof entry.canDelegate !== "boolean") errs.push(`${pathName}.canDelegate must be boolean`);
 		if (entry.delegateTo !== undefined && (!Array.isArray(entry.delegateTo) || !entry.delegateTo.every((x) => typeof x === "string"))) errs.push(`${pathName}.delegateTo must be a list of strings`);
 		if (!specialist) return;
@@ -323,7 +339,7 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 		else {
 			if (typeof postAudit.enabled !== "boolean") errs.push("routing.postWorkflowAudit.enabled must be boolean");
 			if (postAudit.enabled === true || postAudit.model !== undefined) validateEntry({ purpose: "post-workflow audit", model: postAudit.model }, "routing.postWorkflowAudit");
-			if (postAudit.thinking !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(postAudit.thinking))) errs.push("routing.postWorkflowAudit.thinking must be a supported thinking level");
+				if (postAudit.thinking !== undefined && !THINKING_LEVELS.includes(postAudit.thinking)) errs.push("routing.postWorkflowAudit.thinking must be a supported thinking level");
 		}
 	}
 	const selection = cfg.routing?.automaticSelection;
@@ -482,6 +498,7 @@ export function roleView(cfg: RolesConfig, key: string): RoleView {
 		outputContract: Array.isArray(role.outputContract) ? role.outputContract.map(String) : [],
 		infoSources: Array.isArray(role.infoSources) ? role.infoSources.map(String) : [],
 		pinned: id.trim().length > 0,
+		effort: THINKING_LEVELS.includes(model.effort as ThinkingLevel) ? model.effort as ThinkingLevel : null,
 	};
 }
 

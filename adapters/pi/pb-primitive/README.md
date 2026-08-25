@@ -1,10 +1,10 @@
 # pb-primitive — native pi plan/build adapter
 
-A global Pi extension for the machine's portable agent framework. It reads a
-**Pi-only runtime overlay** live from
-`/home/dyadmin/dev-primitive/adapters/pi/roles.config.pi.json` when no project
-configuration is present. The portable, harness-neutral registry remains
-`/home/dyadmin/dev-primitive/roles.config.json`.
+A global Pi extension for the machine's portable agent framework. It reads the
+nearest project registry or the shared active OpenAI registry at
+`/home/dyadmin/dev-primitive/roles.config.json`. A deliberately installed
+Pi-only overlay remains an optional compatibility layer; none is active by
+default.
 
 ## Commands and tools
 
@@ -19,14 +19,15 @@ configuration is present. The portable, harness-neutral registry remains
 - `/pb-show` — show the selected config and resolved provider/model table.
 - `/pb <task>` — one read-only planner pass followed by a builder pass and a
   compact read-only post-workflow audit. The builder receives the original task
-  and planner output verbatim; the audit uses the configured post-workflow model at medium thinking.
+  and planner output verbatim; every child uses its configured model and exact
+  registry effort (`xhigh` in the active registry).
 - `/pbg <task> [until: <done-condition>]` — bounded planner/build/light-audit/
   verification loop, at most three rounds. If `until:` is omitted, the first
   planner derives explicit acceptance criteria.
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
 - `workflow_audit` — internal post-workflow tool the parent invokes exactly once
-  after Planner → Builder/specialist work; it is a read-only review at the configured model and medium thinking,
+  after Planner → Builder/specialist work; it is a read-only review at the configured model and registry effort,
   not the full direct-call Audit agent.
 - `/planner`, `/builder`, `/runner`, `/tech-writer`, `/prose-writer`,
   `/team-leader`, `/l1-programmer`, `/librarian`, `/fe-designer`, and `/audit` —
@@ -47,8 +48,8 @@ configuration is present. The portable, harness-neutral registry remains
 Examples:
 
 ```text
-/planner-model moonshotai/kimi-k3 --provider openrouter --id moonshotai/kimi-k3
-/librarian-model openai/gpt-5.6-terra --provider openrouter
+/planner-model gpt-5.6-sol --provider openai --id gpt-5.6-sol
+/librarian-model gpt-5.6-terra --provider openai
 ```
 
 No arguments displays the configured Pi-only model and usage. A bare model sets
@@ -83,12 +84,11 @@ this order:
 4. Shared harness-neutral registry: `/home/dyadmin/dev-primitive/roles.config.json`.
 
 Project configuration always wins and is never merged with the Pi overlay. The
-Pi overlay is a complete schema-valid config that sets Planner to
-`moonshotai/kimi-k3` and Builder to `openai/gpt-5.6-terra` through OpenRouter.
-Claude Code, Codex, generic adapters, and other harnesses do not read it; they
-use the shared registry (`fable`/`opus` on Anthropic) unless separately
-configured. If the overlay is absent or invalid, Pi warns and safely falls back
-to the shared registry. `/pb-show` reports both source layer and path.
+Pi overlay is an optional complete schema-valid config. The active shared
+registry maps Planner/review to `gpt-5.6-sol` and Builder/action roles to
+`gpt-5.6-terra`, all through OpenAI at `xhigh`. If an optional overlay is absent
+or invalid, Pi warns and safely uses that shared registry. `/pb-show` reports
+both source layer and path.
 
 Pinned `model.id` wins over `model.class`; otherwise Pi resolves the configured
 class/alias for the configured provider.
@@ -98,8 +98,9 @@ class/alias for the configured provider.
 - Each role and the lightweight reviewer run in separate
   `pi --mode json -p --no-session --no-extensions`
   process. Child roles cannot recursively load the global routing extension.
-- Provider and model are always passed explicitly; child processes cannot
-  silently inherit the parent's model.
+- Provider, model, and validated `model.effort` are always passed explicitly;
+  child processes cannot silently inherit the parent's model or thinking level.
+  OpenAI children fail closed when the registry omits or invalidates effort.
 - A read-only role is structurally restricted to `read,grep,find,ls`. It has no
   bash, edit, or write tool.
 - The builder receives normal pi tools and therefore has the same host access as

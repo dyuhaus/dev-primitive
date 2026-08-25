@@ -23,19 +23,15 @@ const roles = await jiti.import(path.join(here, "roles.ts"));
 const subagent = await jiti.import(path.join(here, "subagent.ts"));
 const indexModule = await jiti.import(path.join(here, "index.ts"));
 
-const valid = {
-	version: 1,
-	roles: {
-		planner: { purpose: "reason", readOnly: true, model: { class: "fable", id: "", provider: "anthropic" } },
-		builder: { purpose: "build", readOnly: false, model: { class: "opus", id: "claude-opus-pinned", provider: "anthropic" } },
-	},
-	providers: { anthropic: { type: "anthropic", apiKeyEnv: "ANTHROPIC_API_KEY", baseUrlEnv: "" } },
-};
+// Exercise the active OpenAI registry, not a historical Anthropic fixture: Pi
+// must carry each role's registered effort instead of inheriting ambient state.
+const valid = JSON.parse(await fs.readFile(path.resolve(here, "../../../roles.config.json"), "utf8"));
 
 assert.deepEqual(config.validateConfig(valid), []);
 assert.ok(config.validateConfig({ version: 0, roles: {}, providers: {} }).length >= 3);
-assert.equal(config.resolveModel(valid.roles.builder), "claude-opus-pinned");
-assert.equal(config.roleView(valid, "planner").model, "fable");
+assert.equal(config.resolveModel(valid.roles.builder), "gpt-5.6-terra");
+assert.equal(config.roleView(valid, "planner").model, "gpt-5.6-sol");
+assert.equal(config.roleView(valid, "planner").effort, "xhigh");
 assert.deepEqual(config.roleView(valid, "planner").infoSources, []);
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "pb-primitive-test-"));
@@ -55,23 +51,23 @@ await fs.mkdir(defaultsCwd, { recursive: true });
 const machinePath = path.join(defaultsRoot, "machine.json");
 const overlayPath = path.join(defaultsRoot, "overlay.json");
 const overlay = structuredClone(valid);
-overlay.roles.planner.model = { class: "moonshotai/kimi-k3", id: "moonshotai/kimi-k3", provider: "openrouter" };
-overlay.roles.builder.model = { class: "openai/gpt-5.6-terra", id: "openai/gpt-5.6-terra", provider: "openrouter" };
+overlay.roles.planner.model = { class: "gpt-5.6-sol", id: "gpt-5.6-sol", provider: "openrouter", effort: "xhigh" };
+overlay.roles.builder.model = { class: "gpt-5.6-terra", id: "gpt-5.6-terra", provider: "openrouter", effort: "xhigh" };
 overlay.providers.openrouter = { type: "openai", apiKeyEnv: "OPENROUTER_API_KEY", baseUrlEnv: "OPENROUTER_BASE_URL" };
 overlay.routing = {
 	postWorkflowAudit: {
 		enabled: true,
-		model: { class: "openai/gpt-5.6-sol", id: "openai/gpt-5.6-sol", provider: "openrouter" },
-		thinking: "medium",
+		model: { class: "gpt-5.6-sol", id: "gpt-5.6-sol", provider: "openrouter", effort: "xhigh" },
+		thinking: "xhigh",
 	},
 };
 await fs.writeFile(machinePath, JSON.stringify(valid));
 await fs.writeFile(overlayPath, JSON.stringify(overlay));
 let resolved = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: overlayPath });
 assert.equal(resolved.sourceKind, "pi-overlay");
-assert.equal(config.roleView(resolved.cfg, "planner").model, "moonshotai/kimi-k3");
-assert.equal(config.roleView(resolved.cfg, "builder").model, "openai/gpt-5.6-terra");
-assert.equal(resolved.cfg.routing.postWorkflowAudit.thinking, "medium");
+assert.equal(config.roleView(resolved.cfg, "planner").model, "gpt-5.6-sol");
+assert.equal(config.roleView(resolved.cfg, "builder").model, "gpt-5.6-terra");
+assert.equal(resolved.cfg.routing.postWorkflowAudit.thinking, "xhigh");
 const disabledAuditConfig = structuredClone(overlay);
 disabledAuditConfig.routing.postWorkflowAudit = { enabled: false };
 assert.deepEqual(config.validateConfig(disabledAuditConfig), []);
@@ -81,13 +77,13 @@ assert.deepEqual(config.validateConfig(defaultThinkingConfig), []);
 await fs.writeFile(path.join(defaultsRoot, "roles.config.json"), JSON.stringify(valid));
 resolved = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: overlayPath });
 assert.equal(resolved.sourceKind, "project");
-assert.equal(config.roleView(resolved.cfg, "planner").model, "fable");
+assert.equal(config.roleView(resolved.cfg, "planner").model, "gpt-5.6-sol");
 await fs.rm(path.join(defaultsRoot, "roles.config.json"));
 await fs.writeFile(overlayPath, "not json");
 resolved = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: overlayPath });
 assert.equal(resolved.sourceKind, "machine");
 assert.match(resolved.overlayWarning, /Pi overlay unavailable/);
-assert.equal(config.roleView(resolved.cfg, "planner").model, "fable");
+assert.equal(config.roleView(resolved.cfg, "planner").model, "gpt-5.6-sol");
 resolved = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: path.join(defaultsRoot, "missing.json") });
 assert.equal(resolved.sourceKind, "machine");
 assert.match(resolved.overlayWarning, /Pi overlay unavailable/);
@@ -99,22 +95,32 @@ assert.deepEqual(config.parseTaskAndUntil("task until: one until: final conditio
 	until: "final condition",
 });
 
-const plannerArgs = roles.buildChildArgs(config.roleView(valid, "planner"), { thinking: "high" });
+const plannerArgs = roles.buildChildArgs(config.roleView(valid, "planner"));
 assert.ok(plannerArgs.includes("--no-session"));
 assert.ok(plannerArgs.includes("--no-extensions"), "child Pi must not recursively load global routing/extensions");
-assert.ok(plannerArgs.includes("anthropic"));
-assert.ok(plannerArgs.includes("fable"));
+assert.ok(plannerArgs.includes("openai"));
+assert.ok(plannerArgs.includes("gpt-5.6-sol"));
+assert.equal(plannerArgs[plannerArgs.indexOf("--thinking") + 1], "xhigh");
 assert.equal(plannerArgs[plannerArgs.indexOf("--tools") + 1], "read,grep,find,ls");
 assert.ok(!plannerArgs.includes("bash"));
 const builderArgs = roles.buildChildArgs(config.roleView(valid, "builder"));
-assert.ok(builderArgs.includes("claude-opus-pinned"));
+assert.ok(builderArgs.includes("gpt-5.6-terra"));
+assert.equal(builderArgs[builderArgs.indexOf("--thinking") + 1], "xhigh");
 assert.ok(!builderArgs.includes("--tools"));
 const auditView = config.roleView({ ...overlay, agents: { "workflow-audit": { purpose: "audit", readOnly: true, model: overlay.routing.postWorkflowAudit.model } } }, "workflow-audit");
-const auditArgs = roles.buildChildArgs(auditView, { thinking: "medium" });
-assert.equal(auditView.model, "openai/gpt-5.6-sol");
-assert.equal(auditArgs[auditArgs.indexOf("--thinking") + 1], "medium");
+const auditArgs = roles.buildChildArgs(auditView);
+assert.equal(auditView.model, "gpt-5.6-sol");
+assert.equal(auditArgs[auditArgs.indexOf("--thinking") + 1], "xhigh");
 assert.equal(auditArgs[auditArgs.indexOf("--tools") + 1], "read,grep,find,ls");
 assert.match(roles.workflowAuditSystemPrompt(), /smaller and more focused than the direct-call Audit specialist/);
+
+const missingOpenAiEffort = structuredClone(valid);
+delete missingOpenAiEffort.roles.planner.model.effort;
+assert.ok(config.validateConfig(missingOpenAiEffort).some((error) => /model\.effort is required for OpenAI/.test(error)));
+const invalidOpenAiEffort = structuredClone(valid);
+invalidOpenAiEffort.roles.planner.model.effort = "ambient";
+assert.ok(config.validateConfig(invalidOpenAiEffort).some((error) => /model\.effort must be a supported/.test(error)));
+assert.throws(() => roles.buildChildArgs({ ...config.roleView(valid, "planner"), effort: null }), /refusing ambient Pi thinking/);
 
 const tools = new Map();
 const commands = new Map();
@@ -132,6 +138,7 @@ await factory(pi);
 assert.deepEqual([...tools.keys()].sort(), [
 	"audit_agent",
 	"builder_agent",
+	"code_reviewer_agent",
 	"fe_designer_agent",
 	"l1_programmer_agent",
 	"librarian_agent",
@@ -229,16 +236,18 @@ assert.equal(widgetUpdates.at(-1)[1], undefined);
 const fakeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pb-fake-pi-"));
 const fakePi = path.join(fakeDir, "pi");
 const argsFile = path.join(fakeDir, "args.json");
+const argsLog = path.join(fakeDir, "args.jsonl");
 const promptCopy = path.join(fakeDir, "prompt-copy.txt");
 const taskCopy = path.join(fakeDir, "task-copy.txt");
 await fs.writeFile(
 	fakePi,
-	`#!/usr/bin/env node\nconst fs=require("node:fs");\nconst args=process.argv.slice(2);\nfs.writeFileSync(process.env.PB_ARGS_FILE, JSON.stringify(args));\nconst i=args.indexOf("--append-system-prompt");\nif(i>=0) fs.writeFileSync(process.env.PB_PROMPT_COPY, fs.readFileSync(args[i+1], "utf8"));\nconst taskArg=args.find((arg)=>arg.startsWith("@"));\nif(taskArg) fs.writeFileSync(process.env.PB_TASK_COPY, fs.readFileSync(taskArg.slice(1), "utf8"));\nconst message={role:"assistant",content:[{type:"text",text:"FAKE CHILD OK"}],api:"test",provider:"test",model:"test-model",usage:{input:3,output:2,cacheRead:0,cacheWrite:0,totalTokens:5,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()};\nconsole.log(JSON.stringify({type:"message_end",message}));\n`,
+		`#!/usr/bin/env node\nconst fs=require("node:fs");\nconst args=process.argv.slice(2);\nfs.writeFileSync(process.env.PB_ARGS_FILE, JSON.stringify(args));\nfs.appendFileSync(process.env.PB_ARGS_LOG, JSON.stringify(args)+"\\n");\nconst i=args.indexOf("--append-system-prompt");\nif(i>=0) fs.writeFileSync(process.env.PB_PROMPT_COPY, fs.readFileSync(args[i+1], "utf8"));\nconst taskArg=args.find((arg)=>arg.startsWith("@"));\nif(taskArg) fs.writeFileSync(process.env.PB_TASK_COPY, fs.readFileSync(taskArg.slice(1), "utf8"));\nconst message={role:"assistant",content:[{type:"text",text:"PB_VERIFY: PASS — FAKE CHILD OK"}],api:"test",provider:"test",model:"test-model",usage:{input:3,output:2,cacheRead:0,cacheWrite:0,totalTokens:5,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()};\nconsole.log(JSON.stringify({type:"message_end",message}));\n`,
 	{ mode: 0o755 },
 );
 const oldPath = process.env.PATH;
 process.env.PATH = `${fakeDir}:${oldPath ?? ""}`;
 process.env.PB_ARGS_FILE = argsFile;
+process.env.PB_ARGS_LOG = argsLog;
 process.env.PB_PROMPT_COPY = promptCopy;
 process.env.PB_TASK_COPY = taskCopy;
 const savedArgv1 = process.argv[1];
@@ -251,7 +260,7 @@ const fakeResult = await subagent.runRole({
 	timeoutMs: 5000,
 });
 assert.equal(subagent.isFailed(fakeResult), false);
-assert.equal(subagent.getFinalOutput(fakeResult.messages), "FAKE CHILD OK");
+assert.equal(subagent.getFinalOutput(fakeResult.messages), "PB_VERIFY: PASS — FAKE CHILD OK");
 const fakeArgs = JSON.parse(await fs.readFile(argsFile, "utf8"));
 assert.equal(fakeArgs[fakeArgs.indexOf("--tools") + 1], "read,grep,find,ls");
 assert.equal(await fs.readFile(promptCopy, "utf8"), "OFFLINE ROLE PROMPT");
@@ -266,7 +275,7 @@ assert.equal(subagent.liveChildCount(), 0);
 
 const auditCwd = path.join(fakeDir, "audit-work");
 await fs.mkdir(auditCwd, { recursive: true });
-await fs.writeFile(path.join(auditCwd, "roles.config.json"), JSON.stringify(overlay));
+await fs.writeFile(path.join(auditCwd, "roles.config.json"), JSON.stringify(valid));
 const auditReport = await indexModule.runPostWorkflowAudit(
 	"Implement feature",
 	"Plan with acceptance criteria",
@@ -276,9 +285,29 @@ const auditReport = await indexModule.runPostWorkflowAudit(
 );
 assert.match(auditReport.text, /FAKE CHILD OK/);
 const auditRunArgs = JSON.parse(await fs.readFile(argsFile, "utf8"));
-assert.equal(auditRunArgs[auditRunArgs.indexOf("--model") + 1], "openai/gpt-5.6-sol");
-assert.equal(auditRunArgs[auditRunArgs.indexOf("--thinking") + 1], "medium");
+assert.equal(auditRunArgs[auditRunArgs.indexOf("--model") + 1], "gpt-5.6-sol");
+assert.equal(auditRunArgs[auditRunArgs.indexOf("--thinking") + 1], "xhigh");
 assert.equal(auditRunArgs[auditRunArgs.indexOf("--tools") + 1], "read,grep,find,ls");
+
+// Exercise every automated entrypoint through the fake binary. This includes
+// direct planner/builder/specialist tools and the pbg continuation path
+// (planner, builder, post-workflow reviewer, verifier). Every child must carry
+// the registry's OpenAI model and xhigh effort; none may inherit Pi ambient
+// thinking or substitute an Anthropic fallback.
+const childCtx = { cwd: root, signal: undefined, hasUI: false, mode: "rpc" };
+await tools.get("planner_agent").execute("test", { task: "plan safely" }, new AbortController().signal, () => {}, childCtx);
+await tools.get("builder_agent").execute("test", { task: "build safely" }, new AbortController().signal, () => {}, childCtx);
+await tools.get("runner_agent").execute("test", { task: "run safely" }, new AbortController().signal, () => {}, childCtx);
+await commands.get("pbg").handler("complete the test until: child routing is evidenced", childCtx);
+const allChildArgs = (await fs.readFile(argsLog, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+assert.equal(allChildArgs.length, 9, "planner, builder, specialist, reviewer, and pbg continuation children must all spawn exactly once");
+for (const argv of allChildArgs) {
+	assert.equal(argv[argv.indexOf("--provider") + 1], "openai", `child provider drifted: ${JSON.stringify(argv)}`);
+	assert.ok(["gpt-5.6-sol", "gpt-5.6-terra"].includes(argv[argv.indexOf("--model") + 1]), `child model drifted: ${JSON.stringify(argv)}`);
+	assert.equal(argv[argv.indexOf("--thinking") + 1], "xhigh", `child omitted registry xhigh: ${JSON.stringify(argv)}`);
+}
+assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-sol"), "planner/reviewer Sol child was not exercised");
+assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-terra"), "builder/specialist Terra child was not exercised");
 const savedPathForFailure = process.env.PATH;
 process.env.PATH = "/nonexistent";
 const failedAudit = await indexModule.runPostWorkflowAudit(
@@ -308,8 +337,8 @@ await fs.rm(freshDir, { recursive: true, force: true });
 assert.deepEqual(indexModule.parseModelCommandArguments("moonshotai/kimi-k3 --provider openrouter --id exact/kimi"), {
 	model: "moonshotai/kimi-k3", provider: "openrouter", id: "exact/kimi",
 });
-assert.deepEqual(indexModule.parseModelCommandArguments("--provider openrouter --id openai/gpt-5.6-terra"), {
-	provider: "openrouter", id: "openai/gpt-5.6-terra",
+assert.deepEqual(indexModule.parseModelCommandArguments("--provider openrouter --id gpt-5.6-terra"), {
+	provider: "openrouter", id: "gpt-5.6-terra",
 });
 assert.throws(() => indexModule.parseModelCommandArguments("model --unknown value"), /unknown flag/);
 assert.throws(() => indexModule.parseModelCommandArguments("--provider"), /needs a value/);
@@ -317,14 +346,14 @@ assert.throws(() => indexModule.parseModelCommandArguments("--provider"), /needs
 const writableConfigPath = path.join(defaultsRoot, "writable-overlay.json");
 const writable = structuredClone(overlay);
 await fs.writeFile(writableConfigPath, JSON.stringify(writable));
-const mutation = config.mutateModel(writable, "builder", { model: "openai/gpt-5.6-terra", provider: "openrouter", id: "openai/gpt-5.6-terra" });
+const mutation = config.mutateModel(writable, "builder", { model: "gpt-5.6-terra", provider: "openrouter", id: "gpt-5.6-terra" });
 assert.ok(mutation.some((change) => change.includes("gpt-5.6-terra")));
 const normalized = config.mutateModel(writable, "planner", { model: "openrouter/moonshotai/kimi-k3", provider: "openrouter" });
 assert.ok(normalized.some((change) => change.includes("moonshotai/kimi-k3")));
 assert.equal(writable.roles.planner.model.class, "moonshotai/kimi-k3");
 assert.deepEqual(config.validateConfig(writable), []);
 const routed = structuredClone(valid);
-routed.agents = { runner: { displayName: "Runner", purpose: "routine", readOnly: false, model: { class: "sonnet", provider: "anthropic" }, tools: [], invocation: "default", autoSelectEligible: true, capabilities: [], boundaries: [], escalateTo: [], canDelegate: false, delegateTo: [], outputContract: [], infoSources: ["read docs"] } };
+routed.agents.runner = { displayName: "Runner", purpose: "routine", readOnly: false, model: { class: "gpt-5.6-terra", provider: "openai", effort: "xhigh" }, tools: [], invocation: "default", autoSelectEligible: true, capabilities: [], boundaries: [], escalateTo: [], canDelegate: false, delegateTo: [], outputContract: [], infoSources: ["read docs"] };
 routed.routing = { automaticSelection: { enabled: true, status: "confirmation-required", threshold: 0.6, fallback: "runner", audit: { enabled: false, path: "runtime/audit.jsonl" } } };
 assert.deepEqual(config.validateConfig(routed), []);
 const missingDelegation = structuredClone(routed);
@@ -334,9 +363,9 @@ assert.ok(config.validateConfig(missingDelegation).some((error) => error.include
 assert.ok(config.validateConfig(missingDelegation).some((error) => error.includes("delegateTo must be a list")));
 config.writeConfigAtomic(writableConfigPath, writable);
 const persisted = JSON.parse(await fs.readFile(writableConfigPath, "utf8"));
-assert.equal(persisted.roles.builder.model.id, "openai/gpt-5.6-terra");
+assert.equal(persisted.roles.builder.model.id, "gpt-5.6-terra");
 assert.equal(persisted.roles.planner.model.class, "moonshotai/kimi-k3");
-assert.equal(valid.roles.planner.model.class, "fable");
+assert.equal(valid.roles.planner.model.class, "gpt-5.6-sol");
 
 const machine = config.loadResolved(defaultsCwd, { machineDefault: machinePath, piOverlay: writableConfigPath });
 assert.equal(machine.loadError, null);
@@ -344,7 +373,7 @@ assert.equal(machine.sourceKind, "pi-overlay");
 assert.equal(machine.overlayWarning, null);
 assert.deepEqual(machine.errors, []);
 assert.match(config.renderValidatedReport(machine.cfg), /planner\s+-> model 'moonshotai\/kimi-k3'/);
-assert.match(config.renderValidatedReport(machine.cfg), /builder\s+-> model 'openai\/gpt-5\.6-terra'/);
+assert.match(config.renderValidatedReport(machine.cfg), /builder\s+-> model 'gpt-5\.6-terra'/);
 
 await fs.rm(root, { recursive: true, force: true });
 await fs.rm(defaultsRoot, { recursive: true, force: true });

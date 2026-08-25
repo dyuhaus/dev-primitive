@@ -20,11 +20,12 @@ contract. Read this whole file before acting on it.
 ## Which model this actually runs on
 {{AGENT_MODEL_ROUTING_NOTE}}
 
-Codex's `spawn_agent` tool takes a `model` field, but the models it accepts are
-OpenAI models — the registry's classes are not among them. Delegating with
-`spawn_agent` therefore gives the child a fresh context, not this profile's
-configured model. If you delegate, paste this profile's Mission and Boundaries
-into the child's task; nothing else carries them across.
+For substantive automated profile work, delegate with `spawn_agent` using
+`model: "{{AGENT_MODEL}}"` and `reasoning_effort: "{{AGENT_EFFORT}}"`, unless
+the current session is explicitly confirmed to match both values. Direct
+adoption is limited to trivial/manual work and must disclose the current session
+model; it does not satisfy configured routing by itself. A child gets a fresh
+context, so paste this profile's Mission and Boundaries into its task.
 
 ## Invocation policy
 - Mode: **{{AGENT_INVOCATION}}**. Auto-select eligible: **{{AGENT_AUTO_SELECT}}**.

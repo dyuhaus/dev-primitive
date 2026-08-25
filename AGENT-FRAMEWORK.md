@@ -13,17 +13,17 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 <!-- BEGIN GENERATED: roster-table (apply.py docs) -->
 | Key | Display name | Model | Provider | Invocation | Auto-select |
 |---|---|---|---|---|---|
-| `planner` | Planner | `fable` | `anthropic` | `default` | `false` |
-| `builder` | Builder | `opus` | `anthropic` | `default` | `false` |
-| `runner` | Runner | `sonnet` | `anthropic` | `default` | `true` |
-| `tech-writer` | Tech Writer | `sonnet` | `anthropic` | `default` | `true` |
-| `prose-writer` | Prose Writer | `sonnet` | `anthropic` | `default` | `true` |
-| `team-leader` | Team Leader | `opus` | `anthropic` | `direct-call-only` | `false` |
-| `l1-programmer` | L1 Programmer | `haiku` | `anthropic` | `default` | `true` |
-| `librarian` | Librarian | `sonnet` | `anthropic` | `default` | `true` |
-| `fe-designer` | FE-Designer | `sonnet` | `anthropic` | `default` | `true` |
-| `audit` | Audit | `fable` | `anthropic` | `direct-call-only` | `false` |
-| `code-reviewer` | Code Reviewer | `fable` | `anthropic` | `default` | `false` |
+| `planner` | Planner | `gpt-5.6-sol` | `openai` | `default` | `false` |
+| `builder` | Builder | `gpt-5.6-terra` | `openai` | `default` | `false` |
+| `runner` | Runner | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `tech-writer` | Tech Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `prose-writer` | Prose Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `team-leader` | Team Leader | `gpt-5.6-terra` | `openai` | `direct-call-only` | `false` |
+| `l1-programmer` | L1 Programmer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `librarian` | Librarian | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `fe-designer` | FE-Designer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `audit` | Audit | `gpt-5.6-sol` | `openai` | `direct-call-only` | `false` |
+| `code-reviewer` | Code Reviewer | `gpt-5.6-sol` | `openai` | `default` | `false` |
 <!-- END GENERATED: roster-table -->
 
 ## Architecture
@@ -55,7 +55,7 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
   read-only and never fixes what it finds.
 - **Light workflow audit** is an automatic, read-only post-step after completed
   Planner → Builder or Planner → specialist work. It checks plan adherence,
-  evidence, omissions, and follow-up at medium thinking; it is intentionally
+  evidence, omissions, and follow-up at `xhigh` effort; it is intentionally
   smaller than the direct-call Audit specialist and never edits or delegates.
 - **Audit** reproduces and repairs failures in AI harnesses, routing,
   extensions, runtime processes, and developer-tool integrations. It works
@@ -63,7 +63,7 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
   surfaces, and verifies reinstall/PR preservation. It is **direct-call-only**.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `sonnet` for the light post-workflow audit and `fable` for the direct-call Audit profile. Both are Anthropic models chosen to differ from the builder's, which is model-level independence, not cross-family independence — say so when an artifact ranks or compares AI models.
+The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
 <!-- END GENERATED: auditor-models -->
 - **Team Leader** coordinates genuinely large tasks that require multiple
   workstreams. It is **direct-call-only** and must never be automatically
@@ -111,7 +111,9 @@ OpenRouter, dsh on DeepSeek. See the provider-posture paragraph in
 `/home/dyadmin/AGENTS.md` for the current position; do not treat the older
 Anthropic-only wording anywhere as a live rule.
 
-What *is* a live constraint is **dispatchability, which is per harness**:
+The active registry is OpenAI-only: Sol at `xhigh` for planning/audit/review and
+Terra at `xhigh` for build/action roles. What remains a live constraint is
+**dispatchability, which is per harness**:
 
 | Adapter | Can dispatch | Emits a `model:` field |
 |---|---|---|
@@ -122,13 +124,12 @@ What *is* a live constraint is **dispatchability, which is per harness**:
 | Hermes | nothing — model comes from its harness config | no |
 
 Claude Code **silently discards** a `model:` value it cannot resolve and runs the
-subagent on the session model, so a wrong value looks exactly like success.
-`apply.py` therefore refuses to render such a profile and refuses to write a
-registry change that would create one — `set` renders every installed adapter
-against the in-memory config *before* the file is written, so a rejected change
-leaves the registry and every surface still agreeing. The adapters that cannot
-route a model do not pretend to: each rendered profile states which model the
-registry intends and that the session model is what actually runs.
+subagent on the session model, so its manual adapter refuses the active OpenAI
+registry. `all` then retires only manifest-owned stale generated Claude
+PB/profile files. For Codex, direct adoption states that it uses the current
+session model; delegation must explicitly set `spawn_agent` `model` and
+`reasoning_effort`. Other adapters do not pretend to dispatch unsupported
+registry models.
 
 The Pi-only OpenRouter overlay (`adapters/pi/roles.config.pi.json`) was removed
 on 2026-07-26; Pi's `config.ts` falls back to the shared registry when no overlay
@@ -143,14 +144,14 @@ python3 apply.py show
 python3 apply.py roster                    # the canonical roster line
 python3 apply.py generic
 python3 apply.py docs                      # refresh the generated doc blocks
-python3 apply.py set l1-programmer sonnet --no-apply
+python3 apply.py set l1-programmer --effort xhigh --no-apply
 python3 apply.py claude --dry-run
 python3 install_harness.py all --dry-run   # every harness surface + shared skills
 ```
 
-`apply.py claude` renders the PB adapters and one generic Claude Code adapter
-for every configured specialist; `install_harness.py codex|dsh|hermes` renders
-the same registry as native skills. The generated files are not hand-edited.
+`apply.py claude` is manual-only and requires an Anthropic-compatible registry;
+the active registry is intentionally refused. `install_harness.py codex|dsh|hermes`
+renders native skills. The generated files are not hand-edited.
 
 ## Explainable routing
 
@@ -167,7 +168,7 @@ python3 router.py --json "Refactor the broker service architecture"
 
 After each successfully completed Planner → executor workflow—including every
 completed `/pbg` round—supporting adapters run one small post-workflow audit
-using `routing.postWorkflowAudit` (medium thinking by default).
+using `routing.postWorkflowAudit` at the registry's `xhigh` effort.
 The reviewer receives the task, plan, executor identity, and executor evidence;
 it is read-only, does not delegate, and appends an advisory verdict. It does not
 replace the full explicit `/audit` specialist.

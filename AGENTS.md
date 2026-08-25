@@ -36,14 +36,14 @@ python3 install_harness.py all --dry-run
 
 ### What each harness can actually do here
 
-`AGENTS.md` is read by Codex and dsh, and both of them get the full profile set
-as native skills under `~/.codex/skills/agent-*` and `~/.dsh/skills/agent-*`.
-**Neither can route a profile to its configured model** — Codex dispatches
-OpenAI models, dsh dispatches DeepSeek models, and this registry configures
-Anthropic classes. A profile adopted on Codex or dsh runs on the session model,
-and the rendered skill says so. Only the Claude Code adapter writes a `model:`
-field, and it refuses to render a profile it cannot dispatch, because Claude
-Code discards an unresolvable value silently and runs the session model anyway.
+`AGENTS.md` is read by Codex and dsh, and both get native profile skills. The
+active registry is OpenAI-only: `gpt-5.6-sol` at `xhigh` for planning/audit/review
+and `gpt-5.6-terra` at `xhigh` for build/action roles. In Codex, direct profile adoption uses
+the current session model; a delegated child must receive explicit
+`spawn_agent` `model` and `reasoning_effort` values. dsh cannot dispatch the
+active OpenAI routing. The manual Claude adapter refuses this registry because
+Claude discards an unresolvable `model:` value silently; `all` retires only
+manifest-owned stale generated Claude PB/profile files.
 
 Codex additionally has a native `codex review` subcommand, which is its path
 for the mandatory pre-PR review. Hermes has no delegation mechanism at all.

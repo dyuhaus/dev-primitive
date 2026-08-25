@@ -21,6 +21,7 @@ spec.loader.exec_module(apply)
 # field, so a provider-keyed check could not fire, and the "no slash in the name"
 # heuristic in the test suite passed it too.
 UNDISPATCHABLE_CLASS = "gpt-5.6-terra"
+UNKNOWN_ANTHROPIC_CLASS = "unknown-anthropic-class"
 
 
 def run_apply(*args, **kwargs):
@@ -38,25 +39,39 @@ class ApplyTests(unittest.TestCase):
     def setUpClass(cls):
         with (ROOT / "roles.config.json").open(encoding="utf-8") as fh:
             cls.config = json.load(fh)
+        # Claude rendering is still safety-tested, but the live registry is
+        # intentionally OpenAI-only.  Keep a fully dispatchable Anthropic
+        # fixture so these tests exercise rendering rather than failing at the
+        # active-registry refusal boundary they are not about.
+        cls.claude_config = copy.deepcopy(cls.config)
+        cls.claude_config["providers"]["anthropic"] = {
+            "type": "anthropic", "apiKeyEnv": "ANTHROPIC_API_KEY", "baseUrlEnv": ""
+        }
+        for key, entry in cls.claude_config["roles"].items():
+            entry["model"].update({"class": "fable" if key == "planner" else "opus", "provider": "anthropic"})
+        for key, entry in cls.claude_config["agents"].items():
+            entry["model"].update({"class": "fable" if key in ("audit", "code-reviewer") else "sonnet", "provider": "anthropic"})
+        cls.claude_config["routing"]["postWorkflowAudit"]["model"].update({"class": "sonnet", "provider": "anthropic"})
+        cls.claude_config["routing"]["postWorkflowAudit"]["thinking"] = "medium"
 
     def test_current_config_and_all_specialists_validate(self):
         self.assertEqual(apply.validate(self.config), [])
         self.assertEqual(set(apply.SPECIALIST_KEYS), set(self.config["agents"]))
-        self.assertEqual(self.config["roles"]["planner"]["model"], {"class": "fable", "id": "", "provider": "anthropic"})
-        self.assertEqual(self.config["roles"]["builder"]["model"], {"class": "opus", "id": "", "provider": "anthropic"})
+        self.assertEqual(self.config["roles"]["planner"]["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(self.config["roles"]["builder"]["model"], {"class": "gpt-5.6-terra", "id": "", "provider": "openai", "effort": "xhigh"})
         fe = self.config["agents"]["fe-designer"]
         self.assertEqual(fe["displayName"], "FE-Designer")
         self.assertTrue(fe["autoSelectEligible"])
-        self.assertEqual(fe["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
+        self.assertEqual(fe["model"], {"class": "gpt-5.6-terra", "id": "", "provider": "openai", "effort": "xhigh"})
         workflow_audit = self.config["routing"]["postWorkflowAudit"]
         self.assertTrue(workflow_audit["enabled"])
-        self.assertEqual(workflow_audit["model"], {"class": "sonnet", "id": "", "provider": "anthropic"})
-        self.assertEqual(workflow_audit["thinking"], "medium")
+        self.assertEqual(workflow_audit["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(workflow_audit["thinking"], "xhigh")
         audit = self.config["agents"]["audit"]
         self.assertEqual(audit["displayName"], "Audit")
         # Deliberately not the builder's model: an audit should not be the same
         # model reviewing its own work.
-        self.assertEqual(audit["model"], {"class": "fable", "id": "", "provider": "anthropic"})
+        self.assertEqual(audit["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
         self.assertNotEqual(audit["model"]["class"], self.config["roles"]["builder"]["model"]["class"])
         self.assertEqual(audit["invocation"], "direct-call-only")
         self.assertFalse(audit["autoSelectEligible"])
@@ -78,6 +93,17 @@ class ApplyTests(unittest.TestCase):
             self.assertIn(model["provider"], self.config["providers"], model)
             declared = self.config["providers"][model["provider"]]
             self.assertIn(declared["type"], apply.PROVIDER_TYPES, declared)
+
+    def test_openai_models_require_effort_and_reject_anthropic_aliases(self):
+        missing = copy.deepcopy(self.config)
+        missing["roles"]["builder"]["model"].pop("effort")
+        self.assertTrue(any("effort" in error for error in apply.validate(missing)))
+        wrong_openai = copy.deepcopy(self.config)
+        wrong_openai["agents"]["l1-programmer"]["model"]["class"] = "sonnet"
+        self.assertTrue(any("Anthropic" in error for error in apply.validate(wrong_openai)))
+        wrong_anthropic = copy.deepcopy(self.claude_config)
+        wrong_anthropic["roles"]["builder"]["model"]["class"] = "gpt-5.6-terra"
+        self.assertTrue(any("OpenAI" in error for error in apply.validate(wrong_anthropic)))
 
     def test_provider_keys_are_names_downstream_consumers_recognise(self):
         """Maestro maps a role to a harness by the provider's KEY, not its type.
@@ -113,11 +139,11 @@ class ApplyTests(unittest.TestCase):
         ]
         for label, path in places:
             with self.subTest(profile="/".join(path)):
-                bad = copy.deepcopy(self.config)
+                bad = copy.deepcopy(self.claude_config)
                 node = bad
                 for step in path[:-1]:
                     node = node[step]
-                node[path[-1]]["class"] = UNDISPATCHABLE_CLASS
+                node[path[-1]]["class"] = UNKNOWN_ANTHROPIC_CLASS
                 self.assertEqual(apply.validate(bad), [], "the config itself stays valid — that is the point")
                 self.assertTrue(apply.claude_dispatch_report(bad), label)
                 with self.assertRaises(apply.AdapterUnsupported):
@@ -132,7 +158,7 @@ class ApplyTests(unittest.TestCase):
         """
         for audit in ({"enabled": False}, {"enabled": False, "thinking": "low"}):
             with self.subTest(audit=audit):
-                cfg = copy.deepcopy(self.config)
+                cfg = copy.deepcopy(self.claude_config)
                 cfg["routing"]["postWorkflowAudit"] = audit
                 self.assertEqual(apply.validate(cfg), [])
                 rendered = apply.render_claude(cfg, Path("/tmp/agent-framework-test-home"))
@@ -142,14 +168,13 @@ class ApplyTests(unittest.TestCase):
         """The regression test the audit asked for, asserted on the exit code."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "roles.config.json"
-            good = copy.deepcopy(self.config)
+            good = copy.deepcopy(self.claude_config)
             path.write_text(json.dumps(good), encoding="utf-8")
             ok = run_apply("claude", "--config", str(path), "--home", directory, "--dry-run")
             self.assertEqual(ok.returncode, 0, ok.stderr)
 
-            bad = copy.deepcopy(self.config)
-            bad["providers"]["openai"] = {"type": "openai", "apiKeyEnv": "OPENAI_API_KEY", "baseUrlEnv": ""}
-            bad["roles"]["planner"]["model"] = {"class": UNDISPATCHABLE_CLASS, "id": "", "provider": "openai"}
+            bad = copy.deepcopy(self.claude_config)
+            bad["roles"]["planner"]["model"] = {"class": UNDISPATCHABLE_CLASS, "id": "", "provider": "openai", "effort": "xhigh"}
             path.write_text(json.dumps(bad), encoding="utf-8")
             result = run_apply("claude", "--config", str(path), "--home", directory, "--dry-run")
             self.assertNotEqual(result.returncode, 0, "a non-Anthropic planner must fail the Claude render")
@@ -162,12 +187,43 @@ class ApplyTests(unittest.TestCase):
             path = Path(directory) / "roles.config.json"
             bad = copy.deepcopy(self.config)
             bad["providers"]["openai"] = {"type": "openai", "apiKeyEnv": "OPENAI_API_KEY", "baseUrlEnv": ""}
-            bad["roles"]["planner"]["model"] = {"class": UNDISPATCHABLE_CLASS, "id": "", "provider": "openai"}
+            bad["roles"]["planner"]["model"] = {"class": UNDISPATCHABLE_CLASS, "id": "", "provider": "openai", "effort": "xhigh"}
             path.write_text(json.dumps(bad), encoding="utf-8")
             result = run_apply("all", "--config", str(path), "--home", directory, "--dry-run")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("skipping the Claude Code adapter", result.stderr)
             self.assertIn("Specialist registry", result.stdout, "the generic block must still be emitted")
+
+    def test_all_retirement_removes_only_exactly_marked_manifest_paths(self):
+        """Both all entrypoints retire stale PB/profile files, never neighbours."""
+        marker = apply.CLAUDE_REGISTRY_MARKER
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            owned = home / ".claude" / "agents" / "planner.md"
+            route = home / ".claude" / "commands" / "route.md"
+            catalog = home / ".claude" / "commands" / "agent-catalog.md"
+            unrelated = home / ".claude" / "commands" / "manual.md"
+            for command in (
+                [sys.executable, str(ROOT / "apply.py"), "all", "--home", directory],
+                [sys.executable, str(ROOT / "install_harness.py"), "all", "--home", directory],
+            ):
+                owned.parent.mkdir(parents=True, exist_ok=True)
+                unrelated.parent.mkdir(parents=True, exist_ok=True)
+                owned.write_text(marker + "\nowned\n", encoding="utf-8")
+                route.write_text(apply.CLAUDE_GENERIC_MARKER + "\nroute\n", encoding="utf-8")
+                catalog.write_text(apply.CLAUDE_GENERIC_MARKER + "\ncatalog\n", encoding="utf-8")
+                unrelated.write_text(marker + "\nunrelated\n", encoding="utf-8")
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(owned.exists(), command)
+                self.assertFalse(route.exists(), command)
+                self.assertFalse(catalog.exists(), command)
+                self.assertTrue(unrelated.exists(), command)
+
+    def test_retirement_marker_matches_actual_claude_template_output(self):
+        rendered = dict(apply.render_claude(self.claude_config, Path("/tmp/agent-framework-test-home")))
+        planner = next(content for path, content in rendered.items() if path.name == "planner.md")
+        self.assertIn(apply.CLAUDE_REGISTRY_MARKER, planner)
 
     def test_direct_call_only_cannot_be_auto_selected(self):
         bad = copy.deepcopy(self.config)
@@ -230,16 +286,16 @@ class ApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "roles.config.json"
             path.write_text(json.dumps(self.config), encoding="utf-8")
-            args = type("Args", (), {"role": "l1-programmer", "model": "test-model", "cls": None, "pin_id": None, "provider": None})()
+            args = type("Args", (), {"role": "l1-programmer", "model": "test-model", "cls": None, "pin_id": None, "provider": None, "effort": None})()
             changed = copy.deepcopy(self.config)
             apply.apply_set(changed, args)
             self.assertEqual(changed["agents"]["l1-programmer"]["model"]["class"], "test-model")
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "haiku")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "gpt-5.6-terra")
 
     def test_claude_dry_run_has_all_specialist_targets_and_policy(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+            apply.install_claude(self.claude_config, Path("/tmp/agent-framework-test-home"), True)
         rendered = output.getvalue()
         for key in apply.SPECIALIST_KEYS:
             self.assertIn(f"/tmp/agent-framework-test-home/.claude/agents/{key}.md", rendered)
@@ -255,7 +311,7 @@ class ApplyTests(unittest.TestCase):
     def test_every_agent_gets_invoke_and_model_commands(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+            apply.install_claude(self.claude_config, Path("/tmp/agent-framework-test-home"), True)
         rendered = output.getvalue()
         base = "/tmp/agent-framework-test-home/.claude/commands"
         for key in apply.SPECIALIST_KEYS:
@@ -268,7 +324,7 @@ class ApplyTests(unittest.TestCase):
     def test_catalog_names_the_direct_call_only_profiles(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+            apply.install_claude(self.claude_config, Path("/tmp/agent-framework-test-home"), True)
         rendered = output.getvalue()
         self.assertIn("team-leader", rendered)
         self.assertIn("audit", rendered)
@@ -278,7 +334,7 @@ class ApplyTests(unittest.TestCase):
         """A generated command must not instruct the user to run a deleted path."""
         output = io.StringIO()
         with redirect_stdout(output):
-            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+            apply.install_claude(self.claude_config, Path("/tmp/agent-framework-test-home"), True)
         rendered = output.getvalue()
         for gone in ("external_review.py", "roles.config.pi.json", "openrouter"):
             self.assertNotIn(gone, rendered, f"generated output still references {gone}")
@@ -286,7 +342,7 @@ class ApplyTests(unittest.TestCase):
     def test_no_unsubstituted_placeholders_remain(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            apply.install_claude(self.config, Path("/tmp/agent-framework-test-home"), True)
+            apply.install_claude(self.claude_config, Path("/tmp/agent-framework-test-home"), True)
         self.assertNotIn("{{", output.getvalue())
 
     def test_short_purpose_trims_without_breaking_a_word(self):
@@ -304,7 +360,7 @@ class ApplyTests(unittest.TestCase):
     def test_claude_adapter_never_emits_a_model_it_cannot_dispatch(self):
         """The portable invariant, asserted on every rendered frontmatter line."""
         emitted = 0
-        for _target, content in apply.render_claude(self.config, Path("/tmp/agent-framework-test-home")):
+        for _target, content in apply.render_claude(self.claude_config, Path("/tmp/agent-framework-test-home")):
             for line in content.splitlines():
                 if line.startswith("model:"):
                     value = line.split(":", 1)[1].strip()
@@ -328,18 +384,18 @@ class ApplyTests(unittest.TestCase):
             self.skipTest("PyYAML is not installed; the structural check still runs")
         return yaml
 
-    def _scratch_registry(self, directory):
+    def _scratch_registry(self, directory, cfg=None):
         path = Path(directory) / "roles.config.json"
-        path.write_text(json.dumps(self.config, indent=2) + "\n", encoding="utf-8")
+        path.write_text(json.dumps(self.config if cfg is None else cfg, indent=2) + "\n", encoding="utf-8")
         return path
 
     def test_set_leaves_the_registry_untouched_when_an_adapter_refuses(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = self._scratch_registry(directory)
+            path = self._scratch_registry(directory, self.claude_config)
             before = path.read_text(encoding="utf-8")
-            (Path(directory) / ".claude").mkdir()
+            apply.install_claude(self.claude_config, Path(directory), False)
             result = run_apply(
-                "set", "builder", UNDISPATCHABLE_CLASS,
+                "set", "builder", UNKNOWN_ANTHROPIC_CLASS,
                 "--config", str(path), "--home", directory,
             )
             self.assertNotEqual(result.returncode, 0, result.stdout)
@@ -349,10 +405,13 @@ class ApplyTests(unittest.TestCase):
     def test_set_refreshes_every_installed_surface_not_only_claude(self):
         """A model change must reach every surface that is already installed."""
         with tempfile.TemporaryDirectory() as directory:
-            path = self._scratch_registry(directory)
+            path = self._scratch_registry(directory, self.claude_config)
             home = Path(directory)
-            # Install the surfaces deliberately first, the way an operator would.
-            for target in ("claude", "codex", "dsh"):
+            # Install the Claude fixture directly (the source-only installer
+            # deliberately loads the live OpenAI registry), then install the
+            # OpenAI-capable skill surfaces normally.
+            apply.install_claude(self.claude_config, home, False)
+            for target in ("codex", "dsh"):
                 install = subprocess.run(
                     [sys.executable, str(ROOT / "install_harness.py"), target, "--home", directory],
                     capture_output=True, text=True,
@@ -360,9 +419,7 @@ class ApplyTests(unittest.TestCase):
                 self.assertEqual(install.returncode, 0, install.stderr)
             result = run_apply("set", "l1-programmer", "sonnet", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "sonnet"
-            )
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "sonnet")
             self.assertIn("sonnet", (home / ".claude" / "agents" / "l1-programmer.md").read_text(encoding="utf-8"))
             for adapter in ("codex", "dsh"):
                 skill = home / f".{adapter}" / "skills" / "agent-l1-programmer" / "SKILL.md"
@@ -381,22 +438,19 @@ class ApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = self._scratch_registry(directory)
             home = Path(directory)
-            for name in (".claude", ".codex", ".dsh", ".hermes"):
+            for name in (".codex", ".dsh", ".hermes"):
                 (home / name).mkdir()
-            result = run_apply("set", "l1-programmer", "sonnet", "--config", str(path), "--home", directory)
+            result = run_apply("set", "l1-programmer", "gpt-5.6-terra", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
             # The registry still changed: refusing to create surfaces is not
             # refusing to do the job it was asked to do.
             self.assertEqual(
-                json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "sonnet"
+                json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "gpt-5.6-terra"
             )
             for adapter in ("codex", "dsh", "hermes"):
                 root = home / f".{adapter}" / "skills"
                 self.assertFalse(root.exists(), f"set created a {adapter} surface that did not exist")
-            self.assertFalse(
-                (home / ".claude" / "agents").exists(),
-                "set created a Claude Code surface that did not exist",
-            )
+            self.assertFalse((home / ".claude").exists(), "set created a Claude Code surface that did not exist")
             self.assertIn("no generated surface installed for", result.stdout)
 
     def test_set_updates_an_installed_surface_without_adding_new_files(self):
@@ -413,9 +467,9 @@ class ApplyTests(unittest.TestCase):
             removed = root / "agent-audit"
             shutil.rmtree(removed)
             before = sorted(p.name for p in root.iterdir())
-            result = run_apply("set", "librarian", "haiku", "--config", str(path), "--home", directory)
+            result = run_apply("set", "librarian", "gpt-5.6-terra", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("`haiku`", (root / "agent-librarian" / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertIn("`gpt-5.6-terra`", (root / "agent-librarian" / "SKILL.md").read_text(encoding="utf-8"))
             self.assertEqual(sorted(p.name for p in root.iterdir()), before)
             self.assertFalse(removed.exists(), "refresh re-created a file the operator had removed")
 
@@ -432,7 +486,7 @@ class ApplyTests(unittest.TestCase):
             home = Path(directory)
             for name in (".codex", ".dsh"):
                 (home / name).mkdir()
-            result = run_apply("set", "librarian", "haiku", "--config", str(path), "--home", directory)
+            result = run_apply("set", "librarian", "gpt-5.6-terra", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
             validated = [line for line in result.stdout.splitlines() if line.startswith("Model class validated by:")]
             self.assertEqual(len(validated), 1, result.stdout)
@@ -440,13 +494,41 @@ class ApplyTests(unittest.TestCase):
             for adapter in ("codex", "dsh"):
                 self.assertNotIn(adapter, validated[0], "an adapter that cannot object was named as a validator")
 
+            # A manual or empty ~/.claude tree is not a generated adapter.
             (home / ".claude").mkdir()
-            result = run_apply("set", "librarian", "sonnet", "--config", str(path), "--home", directory)
+            result = run_apply("set", "librarian", "gpt-5.6-sol", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
             validated = [line for line in result.stdout.splitlines() if line.startswith("Model class validated by:")]
-            self.assertIn("claude", validated[0])
-            for adapter in ("codex", "dsh"):
-                self.assertNotIn(adapter, validated[0], "an adapter that cannot object was named as a validator")
+            self.assertIn("nothing", validated[0])
+            self.assertFalse((home / ".claude" / "agents").exists())
+
+    def test_set_ignores_unmarked_manual_claude_profiles(self):
+        """Manual ~/.claude agents neither veto a change nor get rewritten."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._scratch_registry(directory)
+            home = Path(directory)
+            planner = home / ".claude" / "agents" / "planner.md"
+            builder = home / ".claude" / "agents" / "builder.md"
+            planner.parent.mkdir(parents=True)
+            planner.write_text("# Manual planner\n", encoding="utf-8")
+            builder.write_text("# Manual builder\n", encoding="utf-8")
+
+            result = run_apply("set", "librarian", "gpt-5.6-sol", "--config", str(path), "--home", directory)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Model class validated by: nothing", result.stdout)
+            self.assertEqual(planner.read_text(encoding="utf-8"), "# Manual planner\n")
+            self.assertEqual(builder.read_text(encoding="utf-8"), "# Manual builder\n")
+            self.assertFalse((home / ".claude" / "commands").exists())
+
+    def test_set_effort_updates_the_registry_and_rejects_invalid_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._scratch_registry(directory)
+            result = run_apply("set", "builder", "--effort", "high", "--no-apply", "--config", str(path), "--home", directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["roles"]["builder"]["model"]["effort"], "high")
+            invalid = run_apply("set", "builder", "--effort", "invalid", "--no-apply", "--config", str(path), "--home", directory)
+            self.assertNotEqual(invalid.returncode, 0)
 
     # ----------------------------------------------------------------- #
     # Codex / dsh / Hermes surfaces
@@ -469,9 +551,15 @@ class ApplyTests(unittest.TestCase):
                     self.assertNotIn("{{", content, f"unsubstituted placeholder in {path}")
                     self.assertTrue(content.startswith("---\nname: "), path)
 
-    def test_skill_adapters_state_honestly_that_they_cannot_route_the_model(self):
-        """A harness that cannot dispatch the configured model must say so."""
-        for adapter in ("codex", "dsh", "hermes"):
+    def test_skill_adapters_state_honestly_how_they_route_the_model(self):
+        rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "codex"))
+        planner = next(c for p, c in rendered.items() if p.parent.name == "agent-planner")
+        self.assertIn("current Codex session model", planner)
+        self.assertIn('model: "gpt-5.6-sol"', planner)
+        self.assertIn('reasoning_effort: "xhigh"', planner)
+        self.assertIn("substantive automated", planner)
+        self.assertIn("explicitly confirmed", planner)
+        for adapter in ("dsh", "hermes"):
             with self.subTest(adapter=adapter):
                 rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), adapter))
                 planner = next(c for p, c in rendered.items() if p.parent.name == "agent-planner")
@@ -561,11 +649,11 @@ class ApplyTests(unittest.TestCase):
                 self.assertEqual(yaml.safe_load(f"v: {quoted}")["v"], raw)
 
     # ----------------------------------------------------------------- #
-    # The SAME guarantee, for the adapter that is actually installed here
+    # The same guarantee, for a Claude-specific adapter fixture
     # ----------------------------------------------------------------- #
     # The three skill adapters were covered above from the first version of this
-    # fix. The Claude Code adapter was not, and it is the only one installed on
-    # this machine: `render_claude()` never called `check_frontmatter()`, and
+    # fix. The Claude Code adapter was not: `render_claude()` never called
+    # `check_frontmatter()`, and
     # `agent-invoke.md.tmpl` / `agent-model.md.tmpl` interpolated a registry
     # purpose into an unquoted plain scalar — the exact shape that cost dsh four
     # skills. `apply.py claude` exited 0 and wrote a slash command whose
@@ -580,14 +668,14 @@ class ApplyTests(unittest.TestCase):
 
     def test_the_claude_adapter_puts_a_registry_purpose_in_frontmatter(self):
         """A vacuous pass would be the real failure mode of the tests below."""
-        blocks = self._claude_frontmatter(self.config)
+        blocks = self._claude_frontmatter(self.claude_config)
         self.assertIn("commands/runner.md", blocks)
-        purpose = apply.short_purpose(apply.role_view(self.config, "runner")["purpose"])
+        purpose = apply.short_purpose(apply.role_view(self.claude_config, "runner")["purpose"])
         self.assertIn(purpose, blocks["commands/runner.md"])
 
     def test_generated_claude_frontmatter_parses_as_yaml(self):
         yaml = self._require_yaml()
-        blocks = self._claude_frontmatter(self.config)
+        blocks = self._claude_frontmatter(self.claude_config)
         self.assertGreaterEqual(len(blocks), 3 * len(apply.ALL_AGENT_KEYS))
         for name, block in blocks.items():
             with self.subTest(file=name):
@@ -608,7 +696,7 @@ class ApplyTests(unittest.TestCase):
         runner.md` unloadable.
         """
         yaml = self._require_yaml()
-        cfg = copy.deepcopy(self.config)
+        cfg = copy.deepcopy(self.claude_config)
         cfg["agents"]["runner"]["purpose"] = self.CLAUDE_COLON_PURPOSE
         cfg["agents"]["code-reviewer"]["purpose"] = self.HOSTILE_PURPOSE
         self.assertEqual(apply.validate(cfg), [])
@@ -632,7 +720,7 @@ class ApplyTests(unittest.TestCase):
         `~/.claude` surface is touched.
         """
         for injected in ("triage work\nmodel: opus", "triage work\ntools: Bash"):
-            cfg = copy.deepcopy(self.config)
+            cfg = copy.deepcopy(self.claude_config)
             cfg["agents"]["runner"]["purpose"] = injected
             self.assertEqual(apply.validate(cfg), [], "validate cannot see this; the render must")
             with self.subTest(injected=injected), self.assertRaises(SystemExit):
@@ -676,23 +764,25 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual(len(rendered), expected, adapter)
             self.assertEqual(len({path for path, _ in rendered}), expected, f"{adapter} renders a duplicate target")
 
-    def test_the_model_routing_note_reads_as_english(self):
-        """It rendered "(a anthropic endpoint)" in every non-dispatchable profile.
-
-        Every provider in this registry is `anthropic` and no skill adapter can
-        dispatch an Anthropic model, so this was not an edge case — it was the
-        only sentence those skills ever showed about model routing.
-        """
-        for adapter in ("codex", "dsh", "hermes"):
+    def test_the_model_routing_note_is_honest_for_codex_delegation(self):
+        for adapter in ("dsh", "hermes"):
             for key in apply.ALL_AGENT_KEYS:
                 note = apply.model_routing_note(apply.role_view(self.config, key), adapter)
                 with self.subTest(adapter=adapter, agent=key):
                     self.assertNotRegex(note, r"\ba (anthropic|openai|openrouter|undeclared)\b")
-        for provider_type in apply.PROVIDER_TYPES:
-            view = dict(apply.role_view(self.config, "planner"), provider_type=provider_type)
-            note = apply.model_routing_note(view, "codex")
-            with self.subTest(provider_type=provider_type):
-                self.assertNotRegex(note, r"\ba [aeiou]")
+        note = apply.model_routing_note(apply.role_view(self.config, "planner"), "codex")
+        self.assertIn("current Codex session model", note)
+        self.assertIn('model: "gpt-5.6-sol"', note)
+        self.assertIn('reasoning_effort: "xhigh"', note)
+
+    def test_codex_pb_spawns_the_post_workflow_audit_child(self):
+        rendered = apply.render_harness_skills(
+            self.config, Path("/tmp/agent-framework-test-home"), "codex")
+        pb = next(text for path, text in rendered if path.parent.name == "agent-pb")
+        self.assertIn('separate **read-only** child', pb)
+        self.assertIn('model: "gpt-5.6-sol"', pb)
+        self.assertIn('reasoning_effort: "xhigh"', pb)
+        self.assertIn('orchestrator must not', pb)
 
     def test_apply_py_does_not_mirror_the_shared_skill_roots(self):
         """The two entry points differ, and the difference is deliberate.
@@ -750,9 +840,10 @@ class ApplyTests(unittest.TestCase):
             if not path.exists():
                 continue
             text = path.read_text(encoding="utf-8")
-            self.assertNotIn("GPT-5.6 Sol", text, f"{name} names a model the registry does not configure")
-        self.assertIn("fable", configured)
-        self.assertIn("sonnet", configured)
+            self.assertIn("gpt-5.6-sol", text, f"{name} omits the live review model")
+            self.assertIn("gpt-5.6-terra", text, f"{name} omits the live action model")
+        self.assertIn("gpt-5.6-sol", configured)
+        self.assertIn("gpt-5.6-terra", configured)
 
 
 if __name__ == "__main__":

@@ -251,7 +251,6 @@ export async function runPostWorkflowAudit(
 				view,
 				systemPrompt: workflowAuditSystemPrompt(),
 				prompt,
-				thinking: spec.thinking ?? "medium",
 				signal,
 				label,
 			}),

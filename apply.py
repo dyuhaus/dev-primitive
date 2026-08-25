@@ -22,6 +22,7 @@ ALL_AGENT_KEYS = ROLE_KEYS + SPECIALIST_KEYS
 # (Codex on OpenAI, Pi on OpenRouter, dsh on DeepSeek) and a registry that
 # cannot name them cannot describe the machine it configures.
 PROVIDER_TYPES = ("anthropic", "openai", "google", "deepseek", "openrouter", "local")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 # Provider *key* names consumers recognise. Downstream tools (Maestro's
 # backend/lib/roles.js, the harness adapters below) map a role to a harness by
@@ -121,6 +122,17 @@ def validate(cfg: dict) -> list:
             errs.append(f"{path}.provider must be a string")
         elif provider not in providers:
             errs.append(f"{path}.provider '{provider}' is not defined in providers")
+        effort = model.get("effort")
+        provider_type = (providers.get(provider) or {}).get("type") if isinstance(provider, str) else None
+        if provider_type == "openai" and effort is None:
+            errs.append(f"{path}.effort is required for an openai provider")
+        if effort is not None and effort not in EFFORT_LEVELS:
+            errs.append(f"{path}.effort must be one of {'|'.join(EFFORT_LEVELS)}")
+        value = (mid or cls).strip().lower()
+        if provider_type == "openai" and is_anthropic_model(value):
+            errs.append(f"{path} names Anthropic model '{value}' on an openai provider")
+        if provider_type == "anthropic" and value.startswith(("gpt-", "openai/")):
+            errs.append(f"{path} names OpenAI model '{value}' on an anthropic provider")
 
     def validate_entry(entry, path, specialist=False):
         if not isinstance(entry, dict):
@@ -258,8 +270,11 @@ def apply_set(cfg: dict, args) -> list:
     if args.provider is not None:
         model["provider"] = args.provider
         changes.append(f"provider -> '{args.provider}'")
+    if args.effort is not None:
+        model["effort"] = args.effort
+        changes.append(f"effort -> '{args.effort}'")
     if not changes:
-        fail("nothing to set — pass a model class, or --id/--class/--provider")
+        fail("nothing to set — pass a model class, or --id/--class/--provider/--effort")
     return changes
 
 
@@ -274,6 +289,7 @@ def role_view(cfg: dict, key: str) -> dict:
         "id": entry["model"].get("id", ""),
         "provider": provider_name,
         "provider_type": provider.get("type", ""),
+        "effort": entry["model"].get("effort", ""),
         "purpose": entry.get("purpose", ""),
         "read_only": bool(entry.get("readOnly", False)),
         "display_name": entry.get("displayName", key.title()),
@@ -402,6 +418,8 @@ def template_mapping(cfg: dict, adapter: str = "claude-code") -> dict:
     return {
         "PLANNER_MODEL": p["model"],
         "BUILDER_MODEL": b["model"],
+        "PLANNER_EFFORT": p["effort"],
+        "BUILDER_EFFORT": b["effort"],
         "PLANNER_MODEL_FIELD": field(p["model"], p["provider_type"]),
         "BUILDER_MODEL_FIELD": field(b["model"], b["provider_type"]),
         "PLANNER_PURPOSE": p["purpose"],
@@ -588,6 +606,30 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
         write_out(target, content, dry)
 
 
+def retire_stale_claude_surface(cfg: dict, home: Path, dry: bool) -> None:
+    """Retire only manifest-owned generated Claude PB/profile paths.
+
+    These paths are deliberately narrower than every Claude-generated surface:
+    the catalog and routing commands can coexist with a manually maintained
+    Claude workflow, while these PB/profile files would advertise a routing
+    configuration Claude Code cannot dispatch.  A path must be both in this
+    manifest *and* carry the exact marker emitted by the Claude templates.
+    """
+    root = home / ".claude"
+    owned = claude_manifest_paths(home, cfg)
+    removed = 0
+    for target, marker in owned:
+        if is_marked_generated(target, marker):
+            if dry:
+                print(f"--- would retire stale Claude generated file {target} ---")
+            else:
+                target.unlink()
+                print(f"  retired stale Claude generated file {target}")
+            removed += 1
+    if not removed:
+        print("  no manifest-owned stale Claude PB/profile files to retire")
+
+
 ROLE_INFO_SOURCES = {
     "planner": [
         "Read the nearest AGENTS.md, README, manifests, affected source, and relevant tests before planning.",
@@ -711,8 +753,8 @@ def generic_block(cfg: dict) -> str:
 # per-harness templates carry the differences (which delegation tool exists,
 # which review command exists, what the harness can and cannot dispatch).
 #
-# None of these three write a model field, because none of them can dispatch the
-# Anthropic classes this registry configures. Rather than pretending otherwise,
+# The skill adapters must describe dispatchability truthfully rather than
+# emitting a frontmatter model field the harness will ignore.
 # each profile states plainly which model the registry intends and that the
 # session model is what actually runs.
 
@@ -884,6 +926,12 @@ def check_frontmatter(target, content: str, required=("name", "description")) ->
 
 
 def model_routing_note(view: dict, adapter: str) -> str:
+    if adapter == "codex" and view["provider_type"] == "openai":
+        return (
+            f"Direct adoption runs on the current Codex session model, not the registry's "
+            f"`{view['model']}` assignment. To route delegated work, call `spawn_agent` "
+            f"with `model: \"{view['model']}\"` and `reasoning_effort: \"{view['effort']}\"`."
+        )
     """One honest sentence about whether this harness can run the model configured."""
     label = HARNESS_LABELS.get(adapter, adapter)
     dispatchable = ADAPTER_DISPATCHABLE_PROVIDER_TYPES.get(adapter, ())
@@ -946,7 +994,12 @@ def auditor_models(cfg: dict) -> str:
     post_audit = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {})
     light = resolve_model({"model": post_audit.get("model", {})}) or "(unset)"
     full = role_view(cfg, "audit")["model"] if "audit" in cfg.get("agents", {}) else "(unset)"
-    return f"`{light}` for the light post-workflow audit and `{full}` for the direct-call Audit profile"
+    light_cfg = post_audit.get("model") or {}
+    audit_cfg = (cfg.get("agents", {}).get("audit", {}).get("model") or {})
+    return (f"`{light}` on `{light_cfg.get('provider', '(unset)')}` at "
+            f"`{light_cfg.get('effort', post_audit.get('thinking', '(unset)'))}` for the light post-workflow audit and "
+            f"`{full}` on `{audit_cfg.get('provider', '(unset)')}` at "
+            f"`{audit_cfg.get('effort', '(unset)')}` for the direct-call Audit profile")
 
 
 def skill_list(cfg: dict, prefix: str = "agent-") -> str:
@@ -1022,6 +1075,7 @@ def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
                 "AGENT_PROVIDER": view["provider"],
                 "AGENT_PROVIDER_TYPE": view["provider_type"],
                 "AGENT_MODEL_ROUTING_NOTE": model_routing_note(view, adapter),
+                "AGENT_EFFORT": view["effort"],
                 "AGENT_DELEGATION_NOTE": delegation_note(view),
                 "AGENT_INVOCATION": view["invocation"],
                 "AGENT_INVOCATION_RULE": invocation_rule(view),
@@ -1102,23 +1156,44 @@ ALL_ADAPTERS = ("claude", "codex", "dsh", "hermes")
 MODEL_OBJECTING_ADAPTERS = ("claude",)
 
 
-def installed_adapters(home: Path) -> list:
-    """Which harnesses are PRESENT on this machine (a `.<harness>` config root).
+CLAUDE_REGISTRY_MARKER = "<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;"
+CLAUDE_GENERIC_MARKER = "<!-- Generated by dev-primitive/apply.py. Do not hand-edit. -->"
 
-    Presence is the right test for the pre-write veto: a machine that runs
-    Claude Code has a real problem with a model Claude Code cannot dispatch,
-    whether or not a generated surface has been installed there yet.
+
+def claude_manifest_paths(home: Path, cfg: dict) -> list:
+    """Exact paths and markers the Claude renderer owns for this registry.
+
+    A user-maintained ~/.claude file must never be mistaken for an installed
+    primitive adapter merely because it happens to be named planner or builder.
     """
+    root = home / ".claude"
+    owned = [(root / "agents" / name, CLAUDE_REGISTRY_MARKER) for name in ("planner.md", "builder.md", "workflow-audit.md")]
+    owned += [(root / "agents" / f"{key}.md", CLAUDE_REGISTRY_MARKER) for key in cfg.get("agents", {})]
+    owned += [(root / "commands" / name, CLAUDE_REGISTRY_MARKER) for name in ("pb.md", "pbg.md", "pbg-builder.md", "pbg-planner.md")]
+    # Route/catalog are manifest-owned too, but carry their templates' distinct
+    # exact marker. They must not survive an OpenAI-only registry cutover.
+    owned += [(root / "commands" / name, CLAUDE_GENERIC_MARKER) for name in ("route.md", "agent-catalog.md")]
+    for key in cfg.get("agents", {}):
+        owned.extend(((root / "commands" / f"{key}.md", CLAUDE_REGISTRY_MARKER), (root / "commands" / f"{key}-model.md", CLAUDE_REGISTRY_MARKER)))
+    return owned
+
+
+def is_marked_generated(target: Path, marker: str) -> bool:
+    return target.is_file() and marker in target.read_text(encoding="utf-8", errors="replace")
+
+
+def installed_adapters(home: Path, cfg: dict) -> list:
+    """Which harnesses have an installed generated surface in this home."""
     present = []
-    if (home / ".claude").is_dir():
+    if surface_installed(home, "claude", cfg):
         present.append("claude")
     for adapter in ("codex", "dsh", "hermes"):
-        if (home / f".{adapter}").is_dir():
+        if surface_installed(home, adapter, cfg):
             present.append(adapter)
     return present
 
 
-def surface_installed(home: Path, adapter: str) -> bool:
+def surface_installed(home: Path, adapter: str, cfg: dict = None) -> bool:
     """Whether this harness already has a GENERATED surface on disk.
 
     Presence of `~/.dsh` means dsh is installed. It does not mean this primitive
@@ -1128,8 +1203,7 @@ def surface_installed(home: Path, adapter: str) -> bool:
     job, run on purpose.
     """
     if adapter == "claude":
-        agents = home / ".claude" / "agents"
-        return any((agents / f"{key}.md").is_file() for key in ("planner", "builder"))
+        return any(is_marked_generated(path, marker) for path, marker in claude_manifest_paths(home, cfg or {}))
     root = home / HARNESS_SKILL_ROOTS[adapter]
     if not root.is_dir():
         return False
@@ -1159,7 +1233,7 @@ def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
     """
     skipped = []
     install_knowledge(cfg, dry)
-    absent = [a for a in ALL_ADAPTERS if not surface_installed(home, a)]
+    absent = [a for a in ALL_ADAPTERS if not surface_installed(home, a, cfg)]
     for adapter in ALL_ADAPTERS:
         if adapter in absent:
             continue
@@ -1208,9 +1282,9 @@ DOC_FILES = ("README.md", "PRIMITIVE.md", "AGENT-FRAMEWORK.md", "HARNESS-INSTALL
 def harness_surface_table(cfg: dict) -> str:
     rows = [
         ("Claude Code", "`~/.claude/agents/` and `~/.claude/commands/`",
-         "PB subagents, `/pb`, `/pbg`, `/route`, `/agent-catalog`, and a `/<agent>` + `/<agent>-model` pair per profile. The only adapter that writes a `model:` field, and the only one that can dispatch the registry's Anthropic classes."),
+         "Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files."),
         ("Codex", "`~/.codex/skills/agent-*/SKILL.md`",
-         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. No model routing: Codex dispatches OpenAI models, so every profile runs on the session model. `codex review` is the native review path."),
+         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. `codex review` is the native review path."),
         ("dsh", "`~/.dsh/skills/agent-*/SKILL.md`",
          "The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model."),
         ("Pi", "`~/.pi/agent/extensions/pb-primitive/`",
@@ -1229,9 +1303,8 @@ DOC_BLOCKS = {
     "auditor-models": lambda cfg: (
         "The two review roles run on "
         + auditor_models(cfg)
-        + ". Both are Anthropic models chosen to differ from the builder's, which is "
-        "model-level independence, not cross-family independence — say so when an "
-        "artifact ranks or compares AI models."
+        + ". Both use the active OpenAI routing and the configured `xhigh` effort; "
+        "they are distinct from the Terra build/action path."
     ),
     "harness-surfaces": harness_surface_table,
 }
@@ -1327,6 +1400,7 @@ def main() -> None:
     ap.add_argument("--id", dest="pin_id", default=None)
     ap.add_argument("--class", dest="cls", default=None)
     ap.add_argument("--provider", default=None)
+    ap.add_argument("--effort", choices=EFFORT_LEVELS, default=None)
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
     cfg_path, cfg = Path(args.config), load_config(Path(args.config))
@@ -1345,7 +1419,7 @@ def main() -> None:
         # Render every installed adapter against the IN-MEMORY config before the
         # write. `set` used to persist first and guard afterwards, so a rejected
         # change left the source of truth changed and every surface unchanged.
-        present = installed_adapters(home)
+        present = installed_adapters(home, cfg)
         # Say only what was actually established. Rendering every present adapter
         # proves the templates still render; only Claude Code resolves a `model:`
         # field, so only its adapter can reject the model class being set. The
@@ -1407,6 +1481,7 @@ def main() -> None:
             if args.action == "claude":
                 fail(str(exc))
             print(f"WARNING: skipping the Claude Code adapter — {exc}", file=sys.stderr)
+            retire_stale_claude_surface(cfg, home, args.dry_run)
 
 
 if __name__ == "__main__":

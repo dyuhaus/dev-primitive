@@ -37,11 +37,10 @@ Everything is driven by [`roles.config.json`](./roles.config.json):
 Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
 <!-- END GENERATED: roster -->
 
-This shared registry is harness-neutral. Claude Code, Codex, dsh, Pi and generic
-consumers all resolve its Planner/Builder defaults (`fable`/`opus` on Anthropic)
-unless a project-level config exists. Pi resolves the shared registry exactly
-like every other harness; its former OpenRouter overlay was removed on
-2026-07-26.
+This shared registry is harness-neutral. Its active Planner/Builder defaults are
+`gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at `xhigh`, unless a project-level
+config exists. Pi resolves the shared registry exactly like every other harness;
+its former OpenRouter overlay was removed on 2026-07-26.
 
 Each model has a configurable `class`, optional pinned `id`, and `provider`.
 Pinned ids win over classes. Use aliases when automatic provider upgrades are
@@ -49,13 +48,13 @@ wanted. Run `apply.py set <role-or-agent> <class>` to change a model.
 
 The config is checked by [`roles.schema.json`](./roles.schema.json) and
 `apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only review
-at medium thinking after completed Planner → executor work; it checks the plan,
+at `xhigh` effort after completed Planner → executor work; it checks the plan,
 result evidence, omissions, and follow-up without editing or delegating. This is
 separate from the full direct-call Audit specialist, which directly investigates
 and repairs harness/runtime failures without invoking delegated agents.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `sonnet` for the light post-workflow audit and `fable` for the direct-call Audit profile. Both are Anthropic models chosen to differ from the builder's, which is model-level independence, not cross-family independence — say so when an artifact ranks or compares AI models.
+The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
 <!-- END GENERATED: auditor-models -->
 
 `router.py` supplies deterministic, explainable applicability recognition.
@@ -72,12 +71,13 @@ python3 apply.py generic
 python3 apply.py claude --dry-run
 python3 apply.py knowledge
 python3 router.py --explain "Update the Vault index"
-python3 apply.py set l1-programmer sonnet --no-apply
+python3 apply.py set l1-programmer --effort xhigh --no-apply
 ```
 
-`apply.py claude` renders the existing Planner/Builder adapters plus a generic
-Claude Code adapter for each configured specialist. Generated files are not
-hand-edited.
+`apply.py claude` is a manual-only adapter for an Anthropic-compatible registry.
+It refuses the active OpenAI registry rather than creating profiles that would
+silently run on the wrong model. `all` retires only manifest-owned stale
+generated Claude PB/profile files. Generated files are not hand-edited.
 
 ## Looping until a condition holds
 
@@ -91,14 +91,13 @@ belong in that harness's adapter, not in the shared contract.
 
 ## Adapters
 
-- **Claude Code:** `apply.py claude` generates PB commands/subagents and
-  specialist profiles from the registry, with a real `model:` field. It is the
-  only adapter that emits one, and it refuses to render a profile whose model
-  Claude Code cannot dispatch.
-- **Codex and dsh:** `install_harness.py codex|dsh` renders every profile as a
-  native skill (`<root>/agent-<key>/SKILL.md`). Neither harness can dispatch the
-  registry's model classes, so neither emits a model field; each profile states
-  which model actually runs.
+- **Claude Code:** manual-only. It refuses the active OpenAI registry because
+  its `model:` field can dispatch only Anthropic models.
+- **Codex:** `install_harness.py codex` renders every profile as a native skill.
+  Direct adoption uses the current session model; delegation passes explicit
+  `spawn_agent` `model` and `reasoning_effort` values from the registry.
+- **dsh:** `install_harness.py dsh` renders skills but cannot dispatch the
+  active OpenAI registry.
 - **Hermes:** the same skill surface, including `planner` and `builder`.
   Hermes's active model comes from its own harness configuration.
 - **Pi:** the global PB addon resolves this shared registry — there is no Pi

@@ -5,11 +5,13 @@ export const READONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
 
 export interface ChildArgOptions {
 	appendSystemPromptFile?: string;
-	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 /** Build explicit, ephemeral child-pi arguments for one configured role. */
 export function buildChildArgs(view: RoleView, opts: ChildArgOptions = {}): string[] {
+	if (!view.effort) {
+		throw new Error(`${view.role} has no validated registry model.effort; refusing ambient Pi thinking`);
+	}
 	const args = [
 		"--mode",
 		"json",
@@ -20,8 +22,9 @@ export function buildChildArgs(view: RoleView, opts: ChildArgOptions = {}): stri
 		view.provider,
 		"--model",
 		view.model,
+		"--thinking",
+		view.effort,
 	];
-	if (opts.thinking) args.push("--thinking", opts.thinking);
 	if (view.readOnly) args.push("--tools", READONLY_TOOLS.join(","));
 	if (opts.appendSystemPromptFile) args.push("--append-system-prompt", opts.appendSystemPromptFile);
 	return args;
@@ -30,7 +33,7 @@ export function buildChildArgs(view: RoleView, opts: ChildArgOptions = {}): stri
 export function describeInvocation(view: RoleView): string {
 	const tools = view.readOnly ? READONLY_TOOLS.join(",") : "full default tools";
 	const resolution = view.pinned ? "pinned id" : "class/alias";
-	return `${view.role}: ${view.provider}/${view.model} (${resolution}), readOnly=${view.readOnly}, tools=${tools}`;
+	return `${view.role}: ${view.provider}/${view.model} (${resolution}), effort=${view.effort ?? "unset"}, readOnly=${view.readOnly}, tools=${tools}`;
 }
 
 export function plannerSystemPrompt(purpose: string): string {
