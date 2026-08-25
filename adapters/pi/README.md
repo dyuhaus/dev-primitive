@@ -95,10 +95,6 @@ with `python3 /home/dyadmin/dev-primitive/apply.py knowledge`.
 the `create_subsite` tool). It is vendored here so it is version-controlled and
 covered by `repo-backup`; it previously existed only inside `~/.pi`.
 
-Both entry points require David to choose or confirm one of the eight live
-template-library themes before they may plan or write any new site. The
-selected theme is recorded in the portable artifact.
-
 **Its routing output is partly stale — read this before using it.** The
 extension writes Cloudflare ingress into the `dyuhaus.com` repo's
 `tunnel/config.yml`, which is a sanitized Windows-era copy of a *different*
