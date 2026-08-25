@@ -37,11 +37,18 @@
       "description": "A model selection. Schema-valid is not the same as dispatchable: whether a harness can actually run this model is an adapter property, checked at render time. Claude Code resolves Anthropic classes (opus, sonnet, haiku, fable) and claude-* ids and silently discards anything else, so apply.py refuses to render a Claude profile it cannot dispatch.",
       "type": "object",
       "required": ["class", "provider"],
+      "allOf": [
+        {
+          "if": { "properties": { "provider": { "const": "openai" } }, "required": ["provider"] },
+          "then": { "required": ["effort"] }
+        }
+      ],
       "additionalProperties": true,
       "properties": {
         "class": { "description": "Model class or alias; auto-upgrades where the harness supports aliases.", "type": "string", "minLength": 1 },
         "id": { "description": "Optional exact model id. When non-empty it wins over class.", "type": "string" },
-        "provider": { "description": "A key into the providers map. Use a recognised key name; see providers.", "type": "string", "minLength": 1 }
+        "provider": { "description": "A key into the providers map. Use a recognised key name; see providers.", "type": "string", "minLength": 1 },
+        "effort": { "description": "Requested model reasoning effort.", "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] }
       }
     },
     "stringList": { "type": "array", "items": { "type": "string" } },

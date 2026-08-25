@@ -19,10 +19,11 @@ The extension first reads the nearest project `roles.config.json` or
 `.pi/roles.config.json`, then falls back to this repository's shared,
 harness-neutral `roles.config.json`.
 
-**The Pi-only OpenRouter overlay was removed on 2026-07-26** when this machine
-stopped using external models. Pi now resolves the same Anthropic registry as
-every other harness. `config.ts` already treated a missing overlay as a fallback
-condition, so nothing in the extension changed.
+**The Pi-only OpenRouter overlay was removed on 2026-07-26.** Pi now resolves
+the same shared OpenAI/Codex registry as every other automated harness. Every
+OpenAI-backed role carries an explicit required effort; Pi rejects a missing or
+invalid effort rather than falling back to an ambient setting or another
+provider.
 
 The live adapter provides:
 
@@ -33,7 +34,7 @@ The live adapter provides:
   `fe_designer_agent`, and `audit_agent` tools; `team_leader_agent` and
   `audit_agent` reject model-initiated calls because both are direct-call-only;
 - `/pb` for one Planner → Builder pass followed by a lightweight configured
-  audit at medium thinking;
+  audit at the registry's exact thinking effort;
 - `/pbg` for a bounded plan/build/light-audit/verify loop;
 - `/agents` to list every agent command, matching model command, and active
   provider/model assignment (or not-configured status).
@@ -50,8 +51,8 @@ The live adapter provides:
   Team Leader runs only via its explicit `/team-leader` command.
 
 Planner and lightweight-auditor read-only behavior is enforced by the child Pi
-tool allowlist `read,grep,find,ls`. Provider, model, and the audit's medium
-thinking level are passed explicitly. The light reviewer is narrower than the
+tool allowlist `read,grep,find,ls`. Provider, model, and the registry's exact
+thinking level (currently `xhigh`) are passed explicitly to every child. The light reviewer is narrower than the
 full direct-call `/audit` agent and cannot edit or delegate. See the installed extension's `README.md` for operation, validation, and
 security details.
 
@@ -59,7 +60,7 @@ Validate without a model call:
 
 ```bash
 node ~/.pi/agent/extensions/pb-primitive/_selftest.mjs
-pi --no-extensions -e ~/.pi/agent/extensions/pb-primitive/index.ts --list-models opus
+pi --no-extensions -e ~/.pi/agent/extensions/pb-primitive/index.ts --list-models gpt-5.6-terra
 python3 apply.py validate   # from the repository root
 ```
 

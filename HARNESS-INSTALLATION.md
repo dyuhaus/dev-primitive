@@ -19,8 +19,8 @@ Installed surfaces:
 <!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
 | Harness | Surface | Result |
 |---|---|---|
-| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | PB subagents, `/pb`, `/pbg`, `/route`, `/agent-catalog`, and a `/<agent>` + `/<agent>-model` pair per profile. The only adapter that writes a `model:` field, and the only one that can dispatch the registry's Anthropic classes. |
-| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. No model routing: Codex dispatches OpenAI models, so every profile runs on the session model. `codex review` is the native review path. |
+| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files. |
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. `codex review` is the native review path. |
 | dsh | `~/.dsh/skills/agent-*/SKILL.md` | The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model. |
 | Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus a generated `<key>_agent` tool per profile, resolved from this same registry. |
 | Hermes | `~/.hermes/skills/agent-*/SKILL.md` | One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today. |
@@ -35,17 +35,17 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 <!-- BEGIN GENERATED: roster-table (apply.py docs) -->
 | Key | Display name | Model | Provider | Invocation | Auto-select |
 |---|---|---|---|---|---|
-| `planner` | Planner | `fable` | `anthropic` | `default` | `false` |
-| `builder` | Builder | `opus` | `anthropic` | `default` | `false` |
-| `runner` | Runner | `sonnet` | `anthropic` | `default` | `true` |
-| `tech-writer` | Tech Writer | `sonnet` | `anthropic` | `default` | `true` |
-| `prose-writer` | Prose Writer | `sonnet` | `anthropic` | `default` | `true` |
-| `team-leader` | Team Leader | `opus` | `anthropic` | `direct-call-only` | `false` |
-| `l1-programmer` | L1 Programmer | `haiku` | `anthropic` | `default` | `true` |
-| `librarian` | Librarian | `sonnet` | `anthropic` | `default` | `true` |
-| `fe-designer` | FE-Designer | `sonnet` | `anthropic` | `default` | `true` |
-| `audit` | Audit | `fable` | `anthropic` | `direct-call-only` | `false` |
-| `code-reviewer` | Code Reviewer | `fable` | `anthropic` | `default` | `false` |
+| `planner` | Planner | `gpt-5.6-sol` | `openai` | `default` | `false` |
+| `builder` | Builder | `gpt-5.6-terra` | `openai` | `default` | `false` |
+| `runner` | Runner | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `tech-writer` | Tech Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `prose-writer` | Prose Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `team-leader` | Team Leader | `gpt-5.6-terra` | `openai` | `direct-call-only` | `false` |
+| `l1-programmer` | L1 Programmer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `librarian` | Librarian | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `fe-designer` | FE-Designer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `audit` | Audit | `gpt-5.6-sol` | `openai` | `direct-call-only` | `false` |
+| `code-reviewer` | Code Reviewer | `gpt-5.6-sol` | `openai` | `default` | `false` |
 <!-- END GENERATED: roster-table -->
 
 Refresh all supported harnesses:
@@ -83,21 +83,19 @@ files should not be hand-edited; update the source registry and reinstall.
 
 ## Model behavior
 
-Every harness resolves Planner/Builder from the shared harness-neutral registry:
-`fable` and `opus` on Anthropic. Pi, when no project-level roles config is
-present, resolves that same shared registry exactly like the other harnesses —
+Every harness reads Planner/Builder from the shared harness-neutral registry:
+`gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at `xhigh`. Pi, when no
+project-level roles config is present, resolves that same shared registry exactly like the other harnesses —
 its OpenRouter overlay was removed on 2026-07-26 — and Pi project configs still
 win where one exists.
 
-**Resolving a model and dispatching it are different things.** Only the Claude
-Code adapter writes a `model:` field, and it can do so because Claude Code
-resolves Anthropic classes and `claude-*` ids. It also *silently discards*
-anything else and runs the session model, so `apply.py` refuses to render a
-Claude profile it cannot dispatch rather than emitting a file that lies. Codex
-dispatches OpenAI models and dsh dispatches DeepSeek models, so their rendered
-profiles carry no model field at all and state plainly that the profile runs on
-the session model. Hermes skills carry the registry's routing intent as
-metadata, while Hermes's active model comes from its own harness configuration.
+**Resolving a model and dispatching it are different things.** Claude Code
+silently discards a non-Anthropic `model:` value, so its manual adapter refuses
+the active OpenAI registry rather than writing a lie. In Codex, direct profile
+adoption runs the current session model; a delegated child must receive explicit
+`model` and `reasoning_effort` arguments from the registry. dsh cannot dispatch
+the active OpenAI registry. Hermes skills carry routing intent as metadata,
+while Hermes's active model comes from its own harness configuration.
 
 Pi offers explicit `/<agent>` slash commands for every profile and
 `/<agent>-model` commands; `/agents` is its native catalog, listing every
@@ -127,11 +125,11 @@ Note the division of labour between the two entry points: `install_harness.py`
 mirrors the shared `~/skills` roots into each harness, and `apply.py` never does
 that at any action.
 
-Completed Planner → executor workflows also run the configured lightweight audit
-at medium thinking; it is read-only and distinct from `/audit`.
+Completed Planner → executor workflows run the configured lightweight audit at
+`xhigh` effort; it is read-only and distinct from `/audit`.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `sonnet` for the light post-workflow audit and `fable` for the direct-call Audit profile. Both are Anthropic models chosen to differ from the builder's, which is model-level independence, not cross-family independence — say so when an artifact ranks or compares AI models.
+The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
 <!-- END GENERATED: auditor-models -->
 
 ## Routing behavior

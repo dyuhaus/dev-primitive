@@ -10,8 +10,9 @@ description: "Run this machine's plan-then-build development loop on Codex — r
 # Plan → build (Codex)
 
 This machine's stated method is: reason with the **planner**, hand the plan to
-the **builder**, build, verify. On Claude Code that is two subagents on two
-different models. **On Codex it is not.**
+the **builder**, build, verify. On Codex, substantive automated PB work must
+use explicitly routed child agents unless the current session is confirmed to
+match the required model and effort.
 
 ## What Codex actually gives you
 
@@ -19,8 +20,11 @@ different models. **On Codex it is not.**
 
 {{BUILDER_ROUTING_NOTE}}
 
-So on Codex the loop is a **discipline in one session**, not model routing. Run
-it as two clearly separated passes and do not blur them:
+Direct adoption is a **discipline in one session**, not configured routing. For
+substantive automated PB work, call `spawn_agent` for planning with `model: "{{PLANNER_MODEL}}"`
+and `reasoning_effort: "{{PLANNER_EFFORT}}"`, then hand its plan to a Builder
+child with `model: "{{BUILDER_MODEL}}"` and
+`reasoning_effort: "{{BUILDER_EFFORT}}"`. In either form, do not blur passes:
 
 1. **Plan pass.** Adopt `agent-planner`. Investigate read-only — read files,
    grep, inspect git state, run non-mutating checks. Produce: understanding →
@@ -33,16 +37,18 @@ it as two clearly separated passes and do not blur them:
 4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
    report the concrete result. A command that exited 0 has told you it finished,
    not that the work happened — assert on the artifact.
-5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). Re-read the plan against
-   what was built: acceptance criteria met, evidence consistent with the claims,
-   nothing unrelated dragged in, no secrets, no destructive action, no follow-up
-   silently dropped. Report a verdict, not a reassurance.
+5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). When enabled, spawn a
+   separate **read-only** child with `model: "{{WORKFLOW_AUDIT_MODEL}}"` and
+   `reasoning_effort: "{{WORKFLOW_AUDIT_THINKING}}"`; the orchestrator must not
+   perform this audit itself. Give it the plan, changed paths, evidence, and the
+   acceptance criteria. It returns a verdict on coverage, consistency, scope,
+   secrets, destructive action, and dropped follow-up.
 6. **Report.** What changed, how it was verified, the audit verdict, what is left.
 
-`spawn_agent` can run step 1 or step 3 in a child context if the work is large
-enough to warrant it. That buys context isolation, not a different model, and
-the child gets none of the profile unless you paste the mission and boundaries
-into its task.
+Direct adoption is only for trivial/manual work or a session explicitly confirmed
+to match both required values. The explicit `model` and `reasoning_effort` above
+route every substantive automated child; include the profile mission and
+boundaries in its task.
 
 ## Looping until a condition holds
 
