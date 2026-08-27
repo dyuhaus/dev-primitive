@@ -6,6 +6,8 @@ nearest project registry or the shared active OpenAI registry at
 Pi-only overlay remains an optional compatibility layer; none is active by
 default.
 
+{{REVIEW_CERTIFICATE_GATE}}
+
 ## Commands and tools
 
 - `/agents` — list every registered agent command, its matching model command,

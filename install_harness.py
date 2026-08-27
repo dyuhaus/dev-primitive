@@ -40,9 +40,12 @@ def load():
 # Each entry is a directory name under adapters/pi/ that is also the extension
 # name Pi auto-discovers.
 PI_EXTENSIONS = ("pb-primitive", "subsite-scaffold")
+# These files are templates despite living beside Pi extension source; the
+# installer renders them from apply.py rather than duplicating shared policy.
+PI_RENDERED_FILES = {("pb-primitive", "README.md")}
 
 
-def sync_pi_extension(name, home, dry_run):
+def sync_pi_extension(name, cfg, home, dry_run):
     source = ROOT / "adapters" / "pi" / name
     target = home / ".pi" / "agent" / "extensions" / name
     if dry_run:
@@ -56,11 +59,18 @@ def sync_pi_extension(name, home, dry_run):
             continue
         destination = target / item.name
         if item.is_file():
-            shutil.copy2(item, destination)
+            if (name, item.name) in PI_RENDERED_FILES:
+                content = item.read_text(encoding="utf-8")
+                content = primitive.render(content, primitive.harness_mapping(cfg, "pi"))
+                if "{{" in content:
+                    raise SystemExit(f"Unsubstituted Pi adapter placeholder: {item}")
+                destination.write_text(content, encoding="utf-8")
+            else:
+                shutil.copy2(item, destination)
             print(f"wrote {destination}")
 
 
-def install_pi(home, dry_run):
+def install_pi(cfg, home, dry_run):
     # The Pi-only OpenRouter overlay was removed on 2026-07-26. Pi's config.ts
     # already falls back to the shared harness-neutral registry when the overlay
     # file is absent, so its absence is the normal case. An overlay is still
@@ -73,7 +83,7 @@ def install_pi(home, dry_run):
                 "Invalid Pi-only overlay:\n" + "\n".join(f"- {error}" for error in overlay_errors)
             )
     for name in PI_EXTENSIONS:
-        sync_pi_extension(name, home, dry_run)
+        sync_pi_extension(name, cfg, home, dry_run)
     if dry_run:
         if overlay.is_file():
             print(f"Pi will read the live overlay at {overlay}; it is not copied into ~/.pi.")
@@ -107,7 +117,7 @@ def main():
         primitive.link_shared_skills(home, args.dry_run)
 
     if args.target in ("pi", "all"):
-        install_pi(home, args.dry_run)
+        install_pi(cfg, home, args.dry_run)
 
     for adapter in SKILL_ADAPTERS:
         if args.target in (adapter, "all"):

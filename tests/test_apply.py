@@ -542,7 +542,7 @@ class ApplyTests(unittest.TestCase):
                 for key in apply.ALL_AGENT_KEYS:
                     self.assertIn(f"agent-{key}", names, f"{adapter} is missing agent-{key}")
                 # The Hermes installer iterated only the specialists map, so the
-                # PB core could never appear and the mandatory reviewer was absent.
+                # PB core could never appear and the supplementary manual reviewer was absent.
                 self.assertIn("agent-planner", names)
                 self.assertIn("agent-builder", names)
                 self.assertIn("agent-code-reviewer", names)
@@ -571,41 +571,60 @@ class ApplyTests(unittest.TestCase):
                     frontmatter = content.split("---", 2)[1]
                     self.assertNotIn("\nmodel:", frontmatter, f"{path} emits an undispatchable model field")
 
-    def test_codex_framework_requires_a_current_review_certificate(self):
-        rendered = dict(apply.render_harness_skills(
-            self.config, Path("/tmp/agent-framework-test-home"), "codex"))
-        framework = next(c for p, c in rendered.items()
-                         if p.parent.name == "agent-framework")
-        self.assertIn("`~/bin/codex-review ensure --base <base>`", framework)
-        self.assertIn("`~/bin/codex-review verify-current --base <base>`", framework)
-        self.assertRegex(framework, r"current\s+artifact and policy")
-        self.assertNotIn("native `codex review`", framework)
-        self.assertNotIn("`codex exec review`", framework)
+    def _assert_certificate_gate(self, surface):
+        gate = apply.review_certificate_gate().rstrip()
+        self.assertEqual(surface.count(gate), 1, "surface must render the one canonical certificate gate")
+        self.assertIn("`~/bin/codex-review ensure --base <base>`", surface)
+        self.assertIn("`~/bin/codex-review verify-current --base <base>`", surface)
+        self.assertIn("The clean certificate must bind the exact current artifact and\nreview policy.", surface)
+        self.assertIn("manual or harness-native review may add findings, but is\nsupplementary and never substitutes for the certificate", surface)
+        self.assertIn("Bare `codex review`,\n`codex exec review`, and `codex-review-legacy` never substitute for either\ncommand.", surface)
 
-    def test_framework_templates_make_manual_review_supplementary(self):
-        for adapter in ("codex", "dsh", "hermes"):
-            with self.subTest(adapter=adapter):
-                rendered = dict(apply.render_harness_skills(
-                    self.config, Path("/tmp/agent-framework-test-home"), adapter))
-                framework = next(c for p, c in rendered.items()
-                                 if p.parent.name == "agent-framework")
-                self.assertIn("**`code-reviewer`** is a supplementary manual profile", framework)
-                self.assertIn("**Every** harness must run", framework)
-                self.assertIn("`~/bin/codex-review ensure --base <base>`", framework)
-                self.assertIn("`~/bin/codex-review verify-current --base <base>`", framework)
-                self.assertRegex(framework, r"never replaces that\s+certificate")
-                self.assertNotIn("`code-reviewer` runs before every PR", framework)
+    def _framework_surface(self, adapter):
+        rendered = dict(apply.render_harness_skills(
+            self.config, Path("/tmp/agent-framework-test-home"), adapter))
+        return next(content for path, content in rendered.items()
+                    if path.parent.name == "agent-framework")
+
+    def test_codex_framework_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(self._framework_surface("codex"))
+
+    def test_dsh_framework_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(self._framework_surface("dsh"))
+
+    def test_hermes_framework_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(self._framework_surface("hermes"))
+
+    def test_generic_output_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(apply.generic_block(self.config))
+
+    def test_pi_output_requires_the_unconditional_certificate_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "install_harness.py"), "pi", "--home", directory],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            surface = (Path(directory) / ".pi" / "agent" / "extensions" / "pb-primitive" / "README.md").read_text(encoding="utf-8")
+        self._assert_certificate_gate(surface)
+
+    def test_certificate_gate_assertions_reject_substitute_mutations(self):
+        gate = apply.review_certificate_gate().rstrip()
+        for original, replacement in (
+            ("verify-current", "status"),
+            ("exact current artifact and\nreview policy", "current artifact"),
+            ("supplementary and never substitutes", "supplementary only"),
+            ("codex-review-legacy` never substitute", "codex-review-legacy` may substitute"),
+        ):
+            with self.subTest(original=original):
+                with self.assertRaises(AssertionError):
+                    self._assert_certificate_gate(gate.replace(original, replacement, 1))
 
     def test_checked_in_framework_makes_manual_review_supplementary(self):
         framework = (ROOT / "AGENT-FRAMEWORK.md").read_text(encoding="utf-8")
-        self.assertRegex(
-            framework,
-            r"Its manual `code-reviewer` profile is\s+supplementary: "
-            r"\*\*every\*\* harness must run",
-        )
-        self.assertIn("`~/bin/codex-review ensure --base <base>`", framework)
-        self.assertIn("`~/bin/codex-review verify-current --base <base>`", framework)
-        self.assertIn("never replaces that certificate", framework)
+        self.assertIn("Its manual `code-reviewer` profile is\n  supplementary.", framework)
+        self._assert_certificate_gate(framework)
         self.assertNotIn(
             "mandatory on **every** harness, and this is the profile that performs it",
             framework,
@@ -617,7 +636,7 @@ class ApplyTests(unittest.TestCase):
     # Measured, not assumed: with the description interpolated raw, dsh's own
     # filesystem skill provider loaded 10 of the 14 rendered skills and dropped
     # agent-planner, agent-builder, agent-fe-designer and agent-code-reviewer —
-    # both PB roles and the mandatory reviewer — logging a warning and nothing
+    # both PB roles and the supplementary manual reviewer — logging a warning and nothing
     # more. Four of the eleven registry purposes contain a colon-and-space.
 
     # A purpose built to break every naive quoting scheme at once.
@@ -885,12 +904,10 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("gpt-5.6-sol", configured)
         self.assertIn("gpt-5.6-terra", configured)
 
-    def test_generated_codex_docs_require_the_certificate_entrypoint(self):
-        docs = "\n".join((ROOT / name).read_text(encoding="utf-8")
-                         for name in apply.DOC_FILES if (ROOT / name).exists())
-        self.assertIn("`~/bin/codex-review ensure --base <base>`", docs)
-        self.assertIn("`~/bin/codex-review verify-current --base <base>`", docs)
-        self.assertNotIn("`codex review` is the native review path", docs)
+    def test_generated_project_instructions_require_the_certificate_entrypoint(self):
+        instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self._assert_certificate_gate(instructions)
+        self.assertNotIn("Under Codex", instructions)
 
 
 if __name__ == "__main__":

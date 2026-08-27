@@ -45,10 +45,19 @@ active OpenAI routing. The manual Claude adapter refuses this registry because
 Claude discards an unresolvable `model:` value silently; `all` retires only
 manifest-owned stale generated Claude PB/profile files.
 
-Codex routes mandatory pre-PR review through
-`~/bin/codex-review ensure --base <base>`, then
-`~/bin/codex-review verify-current --base <base>` to prove a clean certificate
-for the exact current artifact. Hermes has no delegation mechanism at all.
+<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->
+## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base <base>` and then
+`~/bin/codex-review verify-current --base <base>` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+<!-- END GENERATED: review-certificate-gate -->
+
+Hermes has no delegation mechanism at all.
 
 ## Rules
 
@@ -67,11 +76,8 @@ This repo follows /home/dyadmin/AGENTS.md "Git Workflow Standard".
 - Default branch: main (protected, PR-only, squash merge)
 - Branches: feat/ fix/ chore/ docs/ exp/ (+ agent/<harness>/ optional)
 - Commits: Conventional Commits; hooks must pass; never --no-verify
-- Review: run a pre-PR code review on the branch and address all findings. Under
-  Codex, run `~/bin/codex-review ensure --base <base>` then
-  `~/bin/codex-review verify-current --base <base>`; the certificate, rather
-  than an exit from a bare Codex command, is the evidence. Never write
-  "reviewed" into a PR body unless a review actually ran.
+- Review: run the every-harness certificate gate above before a PR and address
+  all findings. A supplementary manual review never substitutes for it.
 - Deploy coupling: none for the repo itself — but `~/.claude/agents`,
   `~/.claude/commands` and each harness's `~/.<harness>/skills` are generated
   FROM it, so a template change is not landed until the installer has been

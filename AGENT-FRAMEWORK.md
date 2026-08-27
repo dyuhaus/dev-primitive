@@ -49,12 +49,19 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
   product, and brand decisions rather than guessing them.
 - **Code Reviewer** adversarially reviews a branch, diff, or codebase for real
   defects before it reaches main. Its manual `code-reviewer` profile is
-  supplementary: **every** harness must run
-  `~/bin/codex-review ensure --base <base>` followed by
-  `~/bin/codex-review verify-current --base <base>` for the mandatory
-  exact-artifact certificate gate. Manual or harness-native review may add
-  findings but never replaces that certificate. It is read-only and never fixes
-  what it finds.
+  supplementary. It is read-only and never fixes what it finds.
+
+<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->
+## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base <base>` and then
+`~/bin/codex-review verify-current --base <base>` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+<!-- END GENERATED: review-certificate-gate -->
 - **Light workflow audit** is an automatic, read-only post-step after completed
   Planner → Builder or Planner → specialist work. It checks plan adherence,
   evidence, omissions, and follow-up at `xhigh` effort; it is intentionally
