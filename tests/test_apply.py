@@ -572,10 +572,27 @@ class ApplyTests(unittest.TestCase):
                     self.assertNotIn("\nmodel:", frontmatter, f"{path} emits an undispatchable model field")
 
     def _assert_certificate_gate(self, surface):
-        gate = apply.review_certificate_gate().rstrip()
-        self.assertEqual(surface.count(gate), 1, "surface must render the one canonical certificate gate")
-        self.assertIn("`~/bin/codex-review ensure --base <base>`", surface)
-        self.assertIn("`~/bin/codex-review verify-current --base <base>`", surface)
+        # These fixed assertions intentionally do not reuse the generator under
+        # test. They must catch a weakened generator after its output has been
+        # regenerated onto every harness surface.
+        heading = "## Mandatory exact-artifact review certificate"
+        ensure = "`~/bin/codex-review ensure --base <base>`"
+        verify = "`~/bin/codex-review verify-current --base <base>`"
+        required_sequence = (
+            "Every harness must run " + ensure + " and then\n" + verify +
+            " immediately before the\npre-PR gate."
+        )
+        generated_gate = apply.review_certificate_gate().rstrip()
+        self.assertEqual(surface.count(generated_gate), 1, "surface must render the one canonical certificate gate")
+        self.assertEqual(surface.count(heading), 1, "surface must render one certificate gate")
+        self.assertIn(required_sequence, surface)
+        ensure_position = surface.index(ensure)
+        verify_position = surface.index(verify)
+        self.assertLess(ensure_position, verify_position, "ensure must precede verify-current")
+        self.assertTrue(
+            surface[verify_position + len(verify):].startswith(" immediately before the\npre-PR gate."),
+            "verify-current must be immediately before the pre-PR gate",
+        )
         self.assertIn("The clean certificate must bind the exact current artifact and\nreview policy.", surface)
         self.assertIn("manual or harness-native review may add findings, but is\nsupplementary and never substitutes for the certificate", surface)
         self.assertIn("Bare `codex review`,\n`codex exec review`, and `codex-review-legacy` never substitute for either\ncommand.", surface)
@@ -611,15 +628,24 @@ class ApplyTests(unittest.TestCase):
 
     def test_certificate_gate_assertions_reject_substitute_mutations(self):
         gate = apply.review_certificate_gate().rstrip()
-        for original, replacement in (
+        ensure = "`~/bin/codex-review ensure --base <base>`"
+        verify = "`~/bin/codex-review verify-current --base <base>`"
+        swapped_commands = gate.replace(ensure, "__ENSURE__", 1).replace(verify, ensure, 1).replace("__ENSURE__", verify, 1)
+        mutations = (
             ("verify-current", "status"),
             ("exact current artifact and\nreview policy", "current artifact"),
             ("supplementary and never substitutes", "supplementary only"),
             ("codex-review-legacy` never substitute", "codex-review-legacy` may substitute"),
-        ):
+            ("Every harness must run", "A harness may run"),
+            ("immediately before the\npre-PR gate.", "eventually before the\npre-PR gate."),
+        )
+        for original, replacement in mutations:
             with self.subTest(original=original):
                 with self.assertRaises(AssertionError):
                     self._assert_certificate_gate(gate.replace(original, replacement, 1))
+        with self.subTest(original="ensure-before-verify order"):
+            with self.assertRaises(AssertionError):
+                self._assert_certificate_gate(swapped_commands)
 
     def test_checked_in_framework_makes_manual_review_supplementary(self):
         framework = (ROOT / "AGENT-FRAMEWORK.md").read_text(encoding="utf-8")
