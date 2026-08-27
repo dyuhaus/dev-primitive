@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("apply", ROOT / "apply.py")
@@ -934,6 +935,24 @@ class ApplyTests(unittest.TestCase):
         instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self._assert_certificate_gate(instructions)
         self.assertNotIn("Under Codex", instructions)
+
+    def test_primitive_certificate_gate_is_rendered_and_checked_for_drift(self):
+        primitive = (ROOT / "PRIMITIVE.md").read_text(encoding="utf-8")
+        begin = "<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->"
+        end = "<!-- END GENERATED: review-certificate-gate -->"
+        self.assertIn(begin, primitive)
+        self.assertIn(end, primitive)
+        self._assert_certificate_gate(primitive)
+
+        stale = primitive.replace(apply.review_certificate_gate().rstrip(), "stale gate", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "PRIMITIVE.md").write_text(stale, encoding="utf-8")
+            with patch.object(apply, "SCRIPT_DIR", root), patch.object(
+                apply, "DOC_FILES", ("PRIMITIVE.md",)
+            ):
+                self.assertEqual(apply.docs_drift(self.config), ["PRIMITIVE.md"])
+                self.assertEqual(apply.render_doc(self.config, stale), primitive)
 
 
 if __name__ == "__main__":

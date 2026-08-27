@@ -57,6 +57,18 @@ and repairs harness/runtime failures without invoking delegated agents.
 The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
 <!-- END GENERATED: auditor-models -->
 
+<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->
+## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base <base>` and then
+`~/bin/codex-review verify-current --base <base>` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+<!-- END GENERATED: review-certificate-gate -->
+
 `router.py` supplies deterministic, explainable applicability recognition.
 When `routing.automaticSelection.enabled` is true, a supporting harness may
 offer a handoff but must obtain confirmation before delegation; no agent is
