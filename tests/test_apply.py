@@ -571,6 +571,46 @@ class ApplyTests(unittest.TestCase):
                     frontmatter = content.split("---", 2)[1]
                     self.assertNotIn("\nmodel:", frontmatter, f"{path} emits an undispatchable model field")
 
+    def test_codex_framework_requires_a_current_review_certificate(self):
+        rendered = dict(apply.render_harness_skills(
+            self.config, Path("/tmp/agent-framework-test-home"), "codex"))
+        framework = next(c for p, c in rendered.items()
+                         if p.parent.name == "agent-framework")
+        self.assertIn("`~/bin/codex-review ensure --base <base>`", framework)
+        self.assertIn("`~/bin/codex-review verify-current --base <base>`", framework)
+        self.assertRegex(framework, r"current\s+artifact and policy")
+        self.assertNotIn("native `codex review`", framework)
+        self.assertNotIn("`codex exec review`", framework)
+
+    def test_framework_templates_make_manual_review_supplementary(self):
+        for adapter in ("codex", "dsh", "hermes"):
+            with self.subTest(adapter=adapter):
+                rendered = dict(apply.render_harness_skills(
+                    self.config, Path("/tmp/agent-framework-test-home"), adapter))
+                framework = next(c for p, c in rendered.items()
+                                 if p.parent.name == "agent-framework")
+                self.assertIn("**`code-reviewer`** is a supplementary manual profile", framework)
+                self.assertIn("**Every** harness must run", framework)
+                self.assertIn("`~/bin/codex-review ensure --base <base>`", framework)
+                self.assertIn("`~/bin/codex-review verify-current --base <base>`", framework)
+                self.assertRegex(framework, r"never replaces that\s+certificate")
+                self.assertNotIn("`code-reviewer` runs before every PR", framework)
+
+    def test_checked_in_framework_makes_manual_review_supplementary(self):
+        framework = (ROOT / "AGENT-FRAMEWORK.md").read_text(encoding="utf-8")
+        self.assertRegex(
+            framework,
+            r"Its manual `code-reviewer` profile is\s+supplementary: "
+            r"\*\*every\*\* harness must run",
+        )
+        self.assertIn("`~/bin/codex-review ensure --base <base>`", framework)
+        self.assertIn("`~/bin/codex-review verify-current --base <base>`", framework)
+        self.assertIn("never replaces that certificate", framework)
+        self.assertNotIn(
+            "mandatory on **every** harness, and this is the profile that performs it",
+            framework,
+        )
+
     # ----------------------------------------------------------------- #
     # Generated frontmatter must survive a real YAML parse
     # ----------------------------------------------------------------- #
@@ -844,6 +884,13 @@ class ApplyTests(unittest.TestCase):
             self.assertIn("gpt-5.6-terra", text, f"{name} omits the live action model")
         self.assertIn("gpt-5.6-sol", configured)
         self.assertIn("gpt-5.6-terra", configured)
+
+    def test_generated_codex_docs_require_the_certificate_entrypoint(self):
+        docs = "\n".join((ROOT / name).read_text(encoding="utf-8")
+                         for name in apply.DOC_FILES if (ROOT / name).exists())
+        self.assertIn("`~/bin/codex-review ensure --base <base>`", docs)
+        self.assertIn("`~/bin/codex-review verify-current --base <base>`", docs)
+        self.assertNotIn("`codex review` is the native review path", docs)
 
 
 if __name__ == "__main__":

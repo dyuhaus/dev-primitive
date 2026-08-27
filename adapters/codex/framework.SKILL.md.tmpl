@@ -21,7 +21,8 @@ for every agent profile on this machine. Each profile is installed here as an
 
 **Can:** adopt any profile (load its `agent-<key>` skill and work inside it),
 run the deterministic router, delegate with `spawn_agent`, and run a real code
-review with the native `codex review` subcommand.
+review through `~/bin/codex-review ensure --base <base>`, followed by
+`~/bin/codex-review verify-current --base <base>` at the pre-PR gate.
 
 **Direct adoption does not route a model.** A profile you adopt runs on **your
 current session's model**. Substantive automated work must use `spawn_agent`
@@ -40,11 +41,14 @@ sandbox. Keep it anyway.
 
 - **`runner`** is the everyday front door for routine work, maintenance, and triage.
 - **`planner` → `builder`** is the development core for substantive work.
-- **`code-reviewer`** runs before every PR. The Git Workflow Standard makes this
-  mandatory on every harness. On Codex the native path is `codex review`
-  (or `codex exec review`); adopt the `agent-code-reviewer` profile for its
-  boundaries and output contract, and never write "reviewed" into a PR body
-  unless a review actually ran.
+- **`code-reviewer`** is a supplementary manual profile for adversarial review.
+  **Every** harness must run `~/bin/codex-review ensure --base <base>` and then
+  `~/bin/codex-review verify-current --base <base>` for the mandatory pre-PR
+  exact-artifact certificate gate; the clean certificate must match the current
+  artifact and policy. On Codex, adopt `agent-code-reviewer` for its boundaries
+  and output contract. Manual review may add findings but never replaces that
+  certificate, and never write "reviewed" into a PR body unless a review actually
+  ran.
 - Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
   for them by name.
 

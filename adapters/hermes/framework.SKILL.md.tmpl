@@ -34,9 +34,13 @@ enforced here, so a read-only profile's boundary is a discipline. Keep it anyway
 
 - **`runner`** is the everyday front door for routine work, maintenance, and triage.
 - **`planner` → `builder`** is the development core; see `agent-pb`.
-- **`code-reviewer`** runs before every PR — the Git Workflow Standard makes this
-  mandatory on every harness. Never write "reviewed" into a PR body unless a
-  review actually ran.
+- **`code-reviewer`** is a supplementary manual profile for adversarial review.
+  **Every** harness must run `~/bin/codex-review ensure --base <base>` and then
+  `~/bin/codex-review verify-current --base <base>` for the mandatory pre-PR
+  exact-artifact certificate gate; the clean certificate must match the current
+  artifact and policy. Manual review may add findings but never replaces that
+  certificate. Never write "reviewed" into a PR body unless a review actually
+  ran.
 - Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
   for them by name.
 
