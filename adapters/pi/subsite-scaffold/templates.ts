@@ -4,36 +4,6 @@
 // it is trivial to unit test and to reuse from the portable artifact.
 
 export type BrandKey = "ihtc" | "personal" | "none";
-export const SITE_THEME_KEYS = [
-  "literary",
-  "noir",
-  "science-fiction",
-  "high-fantasy",
-  "horror",
-  "poetry",
-  "correspondence",
-  "ihtc",
-] as const;
-export type SiteTheme = (typeof SITE_THEME_KEYS)[number];
-
-const SITE_THEME_LABELS: Record<SiteTheme, string> = {
-  literary: "Literary",
-  noir: "Noir",
-  "science-fiction": "Science Fiction",
-  "high-fantasy": "High Fantasy",
-  horror: "Horror",
-  poetry: "Poetry",
-  correspondence: "Correspondence",
-  ihtc: "IHTC",
-};
-
-export function siteThemeLabel(theme: SiteTheme): string {
-  return SITE_THEME_LABELS[theme];
-}
-
-export function siteThemeReference(theme: SiteTheme): string {
-  return `https://starter.dyuhaus.com/${theme}/`;
-}
 // tunnel  = static files served by ops/static-server.cjs on a port, fronted by
 //           cloudflared (the default; pl400 model), with an .htaccess fallback.
 // static  = Hostinger repo root, routed by .htaccess only (no tunnel).
@@ -47,10 +17,6 @@ export interface SubsiteConfig {
   subdomain: string;
   title: string;
   description: string;
-  /** explicitly selected visual reference from the live template library */
-  theme: SiteTheme;
-  /** true only when the current project was selected in a local interactive UI */
-  themeConfirmedByUser: boolean;
   brand: BrandKey;
   mode: SiteMode;
   /** local origin port for tunnel/service mode (auto-assigned for tunnel if unset) */
@@ -205,48 +171,6 @@ export const THEMES: Record<BrandKey, BrandTheme> = {
 
 export function themeFor(cfg: SubsiteConfig): BrandTheme {
   return THEMES[cfg.brand] ?? THEMES.none;
-}
-
-function portableDesignTheme(cfg: SubsiteConfig): BrandTheme | null {
-  if (cfg.theme === "ihtc") return THEMES.ihtc;
-  return null;
-}
-
-// Exact public variable contract consumed by starter/ihtc/styles.css. Keep this
-// schema aligned with the copied stylesheet so artifact tokens.css is a true
-// drop-in override rather than a second, incompatible naming system.
-export const IHTC_TEMPLATE_CSS_TOKENS: Record<string, string> = {
-  bg: "#171616",
-  "bg-0": "#0d0c0c",
-  panel: "#1F1F1F",
-  "panel-2": "#211f1e",
-  fg: "#f3f4f6",
-  "fg-dim": "#cbc8c5",
-  "fg-muted": "#9c9996",
-  "fg-faint": "rgba(156, 153, 150, 0.5)",
-  green: "#66e891",
-  "green-dim": "#2cac5e",
-  red: "#dd1b27",
-  "red-dim": "#a40c1b",
-  border: "rgba(156, 153, 150, 0.16)",
-  "border-hi": "rgba(156, 153, 150, 0.30)",
-  radius: "8px",
-  "radius-lg": "12px",
-  container: "1180px",
-  shadow: "0 18px 48px rgba(0, 0, 0, 0.45)",
-  mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-  disp: '"Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif',
-  body: '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-};
-
-export function applyCanonicalIhtcTokens(styles: string): string {
-  return styles.replace(
-    /(^\s*--([\w-]+)\s*:\s*)([^;]+)(;)/gm,
-    (declaration, prefix: string, name: string, _value: string, suffix: string) => {
-      const canonical = IHTC_TEMPLATE_CSS_TOKENS[name];
-      return canonical === undefined ? declaration : `${prefix}${canonical}${suffix}`;
-    },
-  );
 }
 
 /** Escape a slug for use inside an Apache/regex host pattern. */
@@ -436,11 +360,7 @@ ${heroBlock}${contentBlock}
  * ------------------------------------------------------------------------ */
 
 export function buildTokensCss(cfg: SubsiteConfig): string {
-  const t = portableDesignTheme(cfg) ?? themeFor(cfg);
-  return renderTokensCss(t);
-}
-
-function renderTokensCss(t: BrandTheme): string {
+  const t = themeFor(cfg);
   const k = t.tokens;
   return `/* ${t.full} — dyuhaus.com sub-site tokens (terminal house style), portable.
  * Palette resolves from the brand theme; type is the shared dyuhaus house style.
@@ -471,28 +391,6 @@ function renderTokensCss(t: BrandTheme): string {
   --font-body: ${t.fontSans};
   --font-mono: ${t.fontMono};
 }
-`;
-}
-
-export function buildArtifactTokensCss(cfg: SubsiteConfig): string {
-  if (cfg.theme === "ihtc") {
-    const declarations = Object.entries(IHTC_TEMPLATE_CSS_TOKENS)
-      .map(([name, value]) => `  --${name}: ${value};`)
-      .join("\n");
-    return `/* Exact drop-in variables for the confirmed IHTC template.
- * This schema matches starter/ihtc/styles.css and remains subordinate to the
- * canonical IHTC brand profile at /home/dyadmin/brand/ihtc/BRAND-PROFILE.md.
- */
-:root {
-${declarations}
-}
-`;
-  }
-  return `/* Theme-specific tokens intentionally omitted.
- * The confirmed ${siteThemeLabel(cfg.theme)} reference is the visual authority:
- * ${siteThemeReference(cfg.theme)}
- * Copy its palette and typography instead of applying a generic fallback.
- */
 `;
 }
 
@@ -690,10 +588,9 @@ Sitemap: https://${cfg.subdomain}/sitemap.xml
 
 export function buildManifest(cfg: SubsiteConfig): Record<string, unknown> {
   const t = themeFor(cfg);
-  const designTheme = portableDesignTheme(cfg);
   const pages = pageList(cfg);
   return {
-    schema: "dyuhaus.subsite-artifact/v2",
+    schema: "dyuhaus.subsite-artifact/v1",
     generatedAt: cfg.createdAt,
     generatedBy: "pi extension: subsite-scaffold",
     site: {
@@ -712,26 +609,10 @@ export function buildManifest(cfg: SubsiteConfig): Record<string, unknown> {
       voice: t.voice,
     },
     design: {
-      style: `dyuhaus-${cfg.theme}-template`,
-      template: {
-        key: cfg.theme,
-        label: siteThemeLabel(cfg.theme),
-        reference: siteThemeReference(cfg.theme),
-        confirmedByUser: cfg.themeConfirmedByUser,
-      },
-      ...(designTheme
-        ? {
-            fonts: {
-              display: designTheme.fontDisplay,
-              body: designTheme.fontSans,
-              mono: designTheme.fontMono,
-            },
-            fontsHref: HOUSE_FONTS_HREF,
-            tokens: IHTC_TEMPLATE_CSS_TOKENS,
-          }
-        : {
-            designData: "Use the confirmed template reference; generic fallback tokens are intentionally omitted.",
-          }),
+      style: "dyuhaus-terminal-house-style",
+      fonts: { display: t.fontDisplay, body: t.fontSans, mono: t.fontMono },
+      fontsHref: HOUSE_FONTS_HREF,
+      tokens: t.tokens,
     },
     pages: pages.map((p) => ({ file: p.file, label: p.label, isIndex: p.isIndex })),
     hosting: {
@@ -772,51 +653,17 @@ export function buildTokensJson(cfg: SubsiteConfig): string {
 
 export function buildBrief(cfg: SubsiteConfig): string {
   const t = themeFor(cfg);
-  const designTheme = portableDesignTheme(cfg);
-  const k = designTheme?.tokens;
+  const k = t.tokens;
   const voiceDo = t.voice.do.length ? t.voice.do.map((s) => `  - ${s}`).join("\n") : "  - (no brand voice constraints)";
   const voiceDont = t.voice.dont.length ? t.voice.dont.map((s) => `  - ${s}`).join("\n") : "  - (none)";
   const pages = pageList(cfg)
     .map((p) => `  - \`${p.file}\` — ${p.label}${p.isIndex ? " (landing page)" : ""}`)
     .join("\n");
-  const paletteSection = k
-    ? `| Token | Value | Use |
-|-------|-------|-----|
-| Background | \`${k.bg}\` | Page background |
-| Panel | \`${k.panel}\` | Cards / elevated surfaces |
-| Text | \`${k.text}\` | Primary text |
-| Muted | \`${k.muted}\` | Secondary text |
-| Accent | \`${k.accent}\` | Primary CTA / highlight |
-| Accent dark | \`${k.accentDark}\` | Hover / depth |
-| Accent 2 | \`${k.accent2}\` | Success / secondary accent |
-| Bright | \`${k.bright}\` | Digital pop / code |
-
-- **Radius:** ${k.radius} standard, ${k.radiusLg} large
-- **Container max width:** ${k.container}
-- **Shadow:** \`${k.shadow}\`
-- **Type:** display \`Space Grotesk\`, body \`Inter\`, mono \`JetBrains Mono\` — loaded via Google Fonts.`
-    : `No generic palette or typography is supplied. Copy both from the confirmed
-**${siteThemeLabel(cfg.theme)}** reference at ${siteThemeReference(cfg.theme)};
-\`tokens.css\` intentionally contains no fallback values.`;
-  const visualDirection =
-    cfg.theme === "ihtc"
-      ? `The IHTC template uses the terminal/developer system: red/silver/green
-window chrome, a fixed live status bar, shell-prompt section headers, mono
-micro-labels, bracketed actions, ghost section numbers, and restrained ambient
-motion that honors \`prefers-reduced-motion\`.`
-      : `Follow the selected template rather than adding the IHTC terminal
-system. Preserve its composition, palette, typography, spacing, and interaction
-character while replacing the sample content with this project's content.${
-          cfg.brand === "ihtc"
-            ? " Keep the canonical IHTC name, logo artwork, and voice, but do not recolor the genre template or replace its type treatment."
-            : ""
-        }`;
 
   return `# Design brief — ${cfg.title}
 
 **Subdomain:** \`${cfg.subdomain}\`${cfg.routeAsPath ? ` (also \`dyuhaus.com/${cfg.slug}/\`)` : ""}
 **Brand:** ${t.full}${t.tagline ? ` — _${cfg.tagline || t.tagline}_` : ""}
-**Theme:** ${siteThemeLabel(cfg.theme)} — ${siteThemeReference(cfg.theme)}
 **Hosting:** ${
     cfg.mode === "tunnel"
       ? `Static files served by \`ops/static-server.cjs\` on \`localhost:${cfg.port}\`, fronted by the Cloudflare tunnel (\`.htaccess\` fallback on Hostinger).`
@@ -833,7 +680,7 @@ character while replacing the sample content with this project's content.${
 
 ## What already exists in the repo
 
-- \`${cfg.slug}/\` folder copied from the confirmed ${siteThemeLabel(cfg.theme)} template (\`index.html\`, \`styles.css\`, \`script.js\`, \`assets/\`).
+- \`${cfg.slug}/\` folder with a working skeleton (\`index.html\`, \`styles.css\`, \`script.js\`, \`assets/\`).
 - Routing wired (${
     cfg.mode === "tunnel"
       ? "Cloudflare tunnel ingress + `.htaccess` fallback"
@@ -841,10 +688,7 @@ character while replacing the sample content with this project's content.${
         ? "Cloudflare tunnel ingress"
         : "`.htaccess` rewrite"
   }) and a row in the repo \`README.md\` Domains table.
-- ${designTheme
-    ? "The authoritative brand/theme tokens are baked into `styles.css` and shipped in `tokens.css`."
-    : "The working site uses the confirmed template's exact styling; `tokens.css` omits duplicate fallback values so it cannot override that source."
-  }
+- These design tokens baked into \`styles.css\` (and shipped standalone as \`tokens.css\`).
 
 ## Purpose
 
@@ -856,23 +700,37 @@ ${pages}
 
 ## Palette
 
-${paletteSection}
+| Token | Value | Use |
+|-------|-------|-----|
+| Background | \`${k.bg}\` | Page background |
+| Panel | \`${k.panel}\` | Cards / elevated surfaces |
+| Text | \`${k.text}\` | Primary text |
+| Muted | \`${k.muted}\` | Secondary text |
+| Accent | \`${k.accent}\` | Primary CTA / highlight |
+| Accent dark | \`${k.accentDark}\` | Hover / depth |
+| Accent 2 | \`${k.accent2}\` | Success / secondary accent |
+| Bright | \`${k.bright}\` | Digital pop / code |
 
-## Selected visual direction
+- **Radius:** ${k.radius} standard, ${k.radiusLg} large
+- **Container max width:** ${k.container}
+- **Shadow:** \`${k.shadow}\`
+- **Type (dyuhaus house style):** display \`Space Grotesk\`, body \`Inter\`, mono \`JetBrains Mono\` — loaded via Google Fonts.
 
-The selected visual authority is the **${siteThemeLabel(cfg.theme)}** template:
-${siteThemeReference(cfg.theme)}. ${
-    cfg.theme === "ihtc"
-      ? "Use its canonical IHTC palette, typography, composition, and interaction character."
-      : "Use its composition, palette, type treatment, and interaction character."
-  } The copied template source is the working starting point; when later edits
-conflict with that visual system, the confirmed template wins.${
-    cfg.brand === "ihtc" && cfg.theme !== "ihtc"
-      ? " Preserve the canonical IHTC name, logo artwork, and voice without recoloring the genre template or replacing its typography."
-      : ""
-  }
+## House style — dyuhaus.com terminal
 
-${visualDirection}
+All \`*.dyuhaus.com\` sub-sites share one **terminal / developer** aesthetic on a
+dark charcoal field (see BRAND-PROFILE.md -> "Website House Style"). Match it:
+
+- **Window chrome**: a red/silver/green three-dot cluster on the header and
+  panels; a fixed bottom **status bar** (\`LIVE · <domain> · live clock\`).
+- **Prompts**: section headers read \`~/path $ command\` (path in the bright
+  accent, \`$\` in red); mono \`//\` micro-labels; \`>\`-prefixed card headers with a
+  pulsing "running" dot; large faint **ghost section numbers**.
+- **Actions** are bracketed: \`[ do the thing ]\`; links underline in the accent.
+- Ambient motion: blinking cursor, a replayable **boot-log typewriter** in the
+  hero, pulsing dots. **Honor \`prefers-reduced-motion\`.**
+- The shipped \`styles.css\` already implements this from \`tokens.css\`; keep those
+  classes and behaviors when you regenerate the UI.
 
 ## Voice & tone
 
@@ -885,11 +743,8 @@ ${voiceDont}
 ## Constraints (keep the static sub-site pattern)
 
 - **Self-contained:** local HTML/CSS/JS + \`assets/\` only. No build step and no
-  CDN **JavaScript**. ${
-    designTheme
-      ? "The authoritative Space Grotesk / Inter / JetBrains Mono fonts load from Google Fonts."
-      : "Use the selected template's existing Google Fonts stylesheet."
-  } Fonts are the only allowed external dependency.
+  CDN **JavaScript**. The house fonts (Space Grotesk / Inter / JetBrains Mono)
+  load from Google Fonts — the only allowed external dependency.
 - Keep the CSP meta (\`default-src 'self'\`, with \`style-src\`/\`font-src\` for Google
   Fonts as in the skeleton); avoid inline \`<script>\`.
 - Reference styles with a relative path (\`styles.css\`), not an absolute one, so
@@ -925,24 +780,11 @@ ${
 
 export function buildPrompt(cfg: SubsiteConfig): string {
   const t = themeFor(cfg);
-  const designTheme = portableDesignTheme(cfg);
-  const designDirection =
-    cfg.theme === "ihtc"
-      ? `Use the IHTC terminal system from the reference: window chrome,
-shell-prompt section headers, mono micro-labels, bracketed actions, ghost
-section numbers, a live status bar, and restrained motion that honors
-prefers-reduced-motion.`
-      : `Do not impose the IHTC terminal system. Reproduce the selected
-portfolio template's visual grammar, then adapt its sample content to this
-project.`;
+  const k = t.tokens;
   return `# Generation prompt — ${cfg.title}
 
 Paste this into your UI/codegen tool on a machine with a browser. Attach
-\`site.manifest.json\`${designTheme ? " and `tokens.css`" : ""} from this artifact folder.${
-    designTheme
-      ? ""
-      : " `tokens.css` intentionally omits generic fallback values; take the visual system directly from the confirmed template reference."
-  }
+\`tokens.css\` and \`site.manifest.json\` from this artifact folder.
 
 ---
 
@@ -950,23 +792,20 @@ Build a self-contained static website for **${cfg.subdomain}**.
 
 Purpose: ${cfg.description}
 
-Selected template theme: **${siteThemeLabel(cfg.theme)}**.
-Visual reference: ${siteThemeReference(cfg.theme)}
-${
-  cfg.theme === "ihtc"
-    ? "Use that reference's canonical IHTC palette, typography, composition, and interaction character."
-    : `Use that reference's composition, palette, typography, and interaction character. It is authoritative over the generic scaffold.${
-        cfg.brand === "ihtc"
-          ? " Preserve the canonical IHTC name, logo artwork, and voice, but do not recolor the genre template or replace its typography."
-          : ""
-      }`
-}
-
 Brand: ${t.full}${t.tagline ? ` (${cfg.tagline || t.tagline})` : ""}. Voice: ${
     t.voice.do.length ? t.voice.do.join(" ") : "clean, direct, practical"
   } Avoid hype words${t.voice.dont.length ? ` such as: ${t.voice.dont.join("; ")}` : ""}.
 
-${designDirection}
+Design system — the dyuhaus.com **terminal house style** (use exactly, from tokens.css):
+- Dark charcoal field ${k.bg}, panels ${k.panel}, text ${k.text}, muted ${k.muted}.
+- Bright terminal accent ${k.bright} (prompts, cursor, links, live status); rules/success ${k.accent2}; attention/red ${k.accent} (hover ${k.accentDark}).
+- Radius ${k.radius}/${k.radiusLg}, container ${k.container}, shadow "${k.shadow}".
+- Type: display "Space Grotesk", body "Inter", mono "JetBrains Mono" (Google Fonts).
+
+Match the house style (the included styles.css already implements it):
+- Terminal window chrome (red/silver/green dots); a fixed bottom status bar with a live clock.
+- Section headers as shell prompts (~/path $ command); mono // labels; >-prefixed cards with a pulsing dot; big faint ghost section numbers; bracketed [ actions ].
+- Ambient motion: blinking cursor, a replayable hero boot-log typewriter, pulsing dots — all honoring prefers-reduced-motion.
 
 Pages: ${pageList(cfg)
     .map((p) => p.file)
@@ -974,11 +813,7 @@ Pages: ${pageList(cfg)
 
 Hard requirements:
 - Output plain HTML/CSS/JS with NO build step and NO external JavaScript/CDN.
-  ${
-    designTheme
-      ? "The authoritative house fonts load from Google Fonts via <link>."
-      : "Load the exact Google Fonts stylesheet already used by the confirmed template reference."
-  } That is the only allowed external dependency.
+  The house fonts load from Google Fonts via <link> — that is the only allowed external.
 - Keep a Content-Security-Policy meta: default-src 'self'; script-src 'self';
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com.
 - Reference CSS/JS with RELATIVE paths so the page works under both
@@ -998,25 +833,24 @@ pi extension. This folder is **blocked from the public web** by the repo
 
 ## Why this exists
 
-This box is headless (no browser / design GUI). The scaffolder copies the
-confirmed ${siteThemeLabel(cfg.theme)} template into \`${cfg.slug}/\` and wires
-up routing. This artifact gives a downstream tool everything needed to replace
-the sample content without losing that visual direction.
+This box is headless (no browser / design GUI). The scaffolder creates a working
+skeleton in \`${cfg.slug}/\` and wires up routing, but the real visual design is
+meant to be generated elsewhere. This artifact is everything a downstream tool
+needs to do that, independent of this machine.
 
 ## Contents
 
 | File | Use |
 |------|-----|
-| \`site.manifest.json\` | Machine-readable spec (routing, brand, confirmed template, pages, hosting${portableDesignTheme(cfg) ? ", and authoritative tokens" : ""}). |
-| \`scaffold.complete.json\` | Completion record bound to the exact manifest; written last by the scaffolder. |
+| \`site.manifest.json\` | Machine-readable spec (routing, brand, tokens, pages, hosting). |
 | \`BRIEF.md\` | Human/LLM design brief + deploy checklist. |
-| \`tokens.css\` | ${portableDesignTheme(cfg) ? "Authoritative portable CSS variables (drop-in)." : "No generic fallback values; directs the generator to the confirmed template reference."} |
+| \`tokens.css\` | Portable CSS variables (drop-in). |
 | \`PROMPT.md\` | Ready-to-paste generation prompt. |
 
 ## Workflow
 
 1. Copy this folder to a machine with a browser.
-2. Generate the UI from \`PROMPT.md\` + \`site.manifest.json\`${portableDesignTheme(cfg) ? " + `tokens.css`" : " + the confirmed template reference"}.
+2. Generate the UI from \`PROMPT.md\` + \`site.manifest.json\` + \`tokens.css\`.
 3. Put the generated files into \`${cfg.slug}/\` in the dyuhaus.com repo.
 4. Commit + push \`main\`. Hostinger auto-pulls.
 `;
