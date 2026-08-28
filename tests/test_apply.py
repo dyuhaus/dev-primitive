@@ -577,8 +577,8 @@ class ApplyTests(unittest.TestCase):
         # test. They must catch a weakened generator after its output has been
         # regenerated onto every harness surface.
         heading = "## Mandatory exact-artifact review certificate"
-        ensure = "`~/bin/codex-review ensure --base <base>`"
-        verify = "`~/bin/codex-review verify-current --base <base>`"
+        ensure = "`~/bin/codex-review ensure --base refs/remotes/origin/main`"
+        verify = "`~/bin/codex-review verify-current --base refs/remotes/origin/main`"
         required_sequence = (
             "Every harness must run " + ensure + " and then\n" + verify +
             " immediately before the\npre-PR gate."
@@ -629,8 +629,8 @@ class ApplyTests(unittest.TestCase):
 
     def test_certificate_gate_assertions_reject_substitute_mutations(self):
         gate = apply.review_certificate_gate().rstrip()
-        ensure = "`~/bin/codex-review ensure --base <base>`"
-        verify = "`~/bin/codex-review verify-current --base <base>`"
+        ensure = "`~/bin/codex-review ensure --base refs/remotes/origin/main`"
+        verify = "`~/bin/codex-review verify-current --base refs/remotes/origin/main`"
         swapped_commands = gate.replace(ensure, "__ENSURE__", 1).replace(verify, ensure, 1).replace("__ENSURE__", verify, 1)
         mutations = (
             ("verify-current", "status"),
@@ -638,6 +638,7 @@ class ApplyTests(unittest.TestCase):
             ("supplementary and never substitutes", "supplementary only"),
             ("codex-review-legacy` never substitute", "codex-review-legacy` may substitute"),
             ("Every harness must run", "A harness may run"),
+            ("refs/remotes/origin/main", "origin/main"),
             ("immediately before the\npre-PR gate.", "eventually before the\npre-PR gate."),
         )
         for original, replacement in mutations:

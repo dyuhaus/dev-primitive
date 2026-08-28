@@ -54,8 +54,8 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 <!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->
 ## Mandatory exact-artifact review certificate
 
-Every harness must run `~/bin/codex-review ensure --base <base>` and then
-`~/bin/codex-review verify-current --base <base>` immediately before the
+Every harness must run `~/bin/codex-review ensure --base refs/remotes/origin/main` and then
+`~/bin/codex-review verify-current --base refs/remotes/origin/main` immediately before the
 pre-PR gate. The clean certificate must bind the exact current artifact and
 review policy. A manual or harness-native review may add findings, but is
 supplementary and never substitutes for the certificate. Bare `codex review`,
