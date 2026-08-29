@@ -312,6 +312,25 @@ def render(text: str, mapping: dict) -> str:
     return text
 
 
+def review_certificate_gate() -> str:
+    """The mandatory pre-PR gate rendered onto every harness surface.
+
+    Keep this policy in one generator-owned block. A harness-specific review
+    profile may add a fresh manual reading, but it cannot turn an advisory
+    review or a bare command exit into the certificate the Git workflow needs.
+    """
+    return """## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base refs/remotes/origin/main` and then
+`~/bin/codex-review verify-current --base refs/remotes/origin/main` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+"""
+
+
 # --------------------------------------------------------------------------- #
 # Claude Code model fields
 # --------------------------------------------------------------------------- #
@@ -496,6 +515,7 @@ def render_claude(cfg: dict, home: Path) -> list:
             "run the harness whose adapter can dispatch them."
         )
     mapping = template_mapping(cfg)
+    mapping["REVIEW_CERTIFICATE_GATE"] = review_certificate_gate().rstrip()
     # Frontmatter values, pre-quoted. Same rule the skill adapters follow: a
     # template may only put a `yaml_scalar()` value, a hand-written quoted
     # literal, or an identifier-shaped bare token into frontmatter. These four
@@ -741,7 +761,7 @@ def generic_block(cfg: dict) -> str:
     for key in cfg.get("agents", {}):
         view = role_view(cfg, key)
         lines.append(f"| `{key}` | `{view['model']}` | `{view['invocation']}` | `{str(view['auto_select']).lower()}` | {view['purpose']} |")
-    lines += ["", "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters."]
+    lines += ["", "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters.", "", review_certificate_gate().rstrip()]
     return "\n".join(lines) + "\n"
 
 
@@ -1021,6 +1041,7 @@ def harness_mapping(cfg: dict, adapter: str) -> dict:
             "ROSTER_SENTENCE": roster_sentence(cfg),
             "SKILL_LIST": skill_list(cfg),
             "AUDITOR_MODELS": auditor_models(cfg),
+            "REVIEW_CERTIFICATE_GATE": review_certificate_gate().rstrip(),
             "PLANNER_ROUTING_NOTE": model_routing_note(role_view(cfg, "planner"), adapter),
             "BUILDER_ROUTING_NOTE": model_routing_note(role_view(cfg, "builder"), adapter),
             "DIRECT_CALL_ONLY": ", ".join(
@@ -1272,8 +1293,8 @@ def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
 # The roster count, the auditors' models and the per-harness surface table were
 # all hand-written and all drifted: the docs named a model the registry does not
 # configure, and the roster said eight specialists while the registry held nine —
-# omitting code-reviewer, the one profile the Git Workflow Standard makes
-# mandatory. These blocks are regenerated from the registry by `apply.py docs`
+# omitting code-reviewer, the supplementary manual reviewer profile. These blocks
+# are regenerated from the registry by `apply.py docs`
 # and a test fails the build when a checked-in doc no longer matches.
 
 DOC_FILES = ("README.md", "PRIMITIVE.md", "AGENT-FRAMEWORK.md", "HARNESS-INSTALLATION.md", "AGENTS.md")
@@ -1284,7 +1305,7 @@ def harness_surface_table(cfg: dict) -> str:
         ("Claude Code", "`~/.claude/agents/` and `~/.claude/commands/`",
          "Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files."),
         ("Codex", "`~/.codex/skills/agent-*/SKILL.md`",
-         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. `codex review` is the native review path."),
+         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly."),
         ("dsh", "`~/.dsh/skills/agent-*/SKILL.md`",
          "The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model."),
         ("Pi", "`~/.pi/agent/extensions/pb-primitive/`",
@@ -1292,7 +1313,7 @@ def harness_surface_table(cfg: dict) -> str:
         ("Hermes", "`~/.hermes/skills/agent-*/SKILL.md`",
          "One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today."),
     ]
-    lines = ["| Harness | Surface | Result |", "|---|---|---|"]
+    lines = [review_certificate_gate().rstrip(), "", "| Harness | Surface | Result |", "|---|---|---|"]
     lines += [f"| {name} | {surface} | {result} |" for name, surface, result in rows]
     return "\n".join(lines)
 
@@ -1306,6 +1327,7 @@ DOC_BLOCKS = {
         + ". Both use the active OpenAI routing and the configured `xhigh` effort; "
         "they are distinct from the Terra build/action path."
     ),
+    "review-certificate-gate": lambda cfg: review_certificate_gate().rstrip(),
     "harness-surfaces": harness_surface_table,
 }
 

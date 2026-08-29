@@ -63,7 +63,12 @@ Steps:
    read-only review, not the full direct-call Audit agent, and must not edit or
    delegate further.
 
-6. **Decide.**
+6. **Certificate gate.** Before opening a PR, apply the mandatory certificate
+   gate below.
+
+{{REVIEW_CERTIFICATE_GATE}}
+
+7. **Decide.**
    - **Condition met:** report what was built, the evidence that the condition
      holds, and stop.
    - **Not met:** summarize the specific gap (which check failed and why), then loop

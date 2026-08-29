@@ -106,10 +106,20 @@ secrets live here — only the names of env vars.**
 An *adapter* turns the config into whatever a harness understands:
 
 <!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
+## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base refs/remotes/origin/main` and then
+`~/bin/codex-review verify-current --base refs/remotes/origin/main` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+
 | Harness | Surface | Result |
 |---|---|---|
 | Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files. |
-| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. `codex review` is the native review path. |
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. |
 | dsh | `~/.dsh/skills/agent-*/SKILL.md` | The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model. |
 | Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus a generated `<key>_agent` tool per profile, resolved from this same registry. |
 | Hermes | `~/.hermes/skills/agent-*/SKILL.md` | One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today. |
@@ -136,7 +146,8 @@ honest sentence saying which model actually runs. The config never changes.
 the eleven `purpose` strings contain a colon-and-space, and interpolated raw
 that reads as a nested mapping. dsh's skill loader then *drops the whole skill*
 and writes one line to its log — measured, four of fourteen gone, including both
-PB roles and the mandatory reviewer, with nothing in the catalog to say so.
+PB roles and the supplementary manual reviewer, with nothing in the catalog to
+say so.
 
 A rendered frontmatter value may only be one of five shapes — verified against
 all 78 files the four adapters currently render, with nothing else present:

@@ -48,11 +48,20 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
   owns complex system integration; FE-Designer escalates backend, architecture,
   product, and brand decisions rather than guessing them.
 - **Code Reviewer** adversarially reviews a branch, diff, or codebase for real
-  defects before it reaches main. The Git Workflow Standard makes a pre-PR review
-  mandatory on **every** harness, and this is the profile that performs it —
-  under Claude Code as `/code-reviewer`, under Codex additionally through the
-  native `codex review` subcommand, elsewhere by adopting the profile. It is
-  read-only and never fixes what it finds.
+  defects before it reaches main. Its manual `code-reviewer` profile is
+  supplementary. It is read-only and never fixes what it finds.
+
+<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->
+## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base refs/remotes/origin/main` and then
+`~/bin/codex-review verify-current --base refs/remotes/origin/main` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+<!-- END GENERATED: review-certificate-gate -->
 - **Light workflow audit** is an automatic, read-only post-step after completed
   Planner → Builder or Planner → specialist work. It checks plan adherence,
   evidence, omissions, and follow-up at `xhigh` effort; it is intentionally
@@ -257,8 +266,8 @@ practices`. See [`agent-knowledge/README.md`](./agent-knowledge/README.md).
     document, `README.md`, `PRIMITIVE.md` and `HARNESS-INSTALLATION.md` pick the
     new profile up. A test fails the build when they are stale, because a
     hand-written roster has already drifted: the docs said eight specialists
-    while the registry held nine, omitting `code-reviewer` — the one profile the
-    Git Workflow Standard makes mandatory.
+    while the registry held nine, omitting `code-reviewer`, the supplementary
+    manual reviewer profile.
 15. Update this document's Architecture section with the agent's purpose,
     boundaries, invocation rule, and examples. Review for least privilege,
     escalation loops, and secret leakage before merging.

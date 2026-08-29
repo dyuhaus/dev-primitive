@@ -45,8 +45,19 @@ active OpenAI routing. The manual Claude adapter refuses this registry because
 Claude discards an unresolvable `model:` value silently; `all` retires only
 manifest-owned stale generated Claude PB/profile files.
 
-Codex additionally has a native `codex review` subcommand, which is its path
-for the mandatory pre-PR review. Hermes has no delegation mechanism at all.
+<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->
+## Mandatory exact-artifact review certificate
+
+Every harness must run `~/bin/codex-review ensure --base refs/remotes/origin/main` and then
+`~/bin/codex-review verify-current --base refs/remotes/origin/main` immediately before the
+pre-PR gate. The clean certificate must bind the exact current artifact and
+review policy. A manual or harness-native review may add findings, but is
+supplementary and never substitutes for the certificate. Bare `codex review`,
+`codex exec review`, and `codex-review-legacy` never substitute for either
+command. Never write "reviewed" into a PR body unless a review actually ran.
+<!-- END GENERATED: review-certificate-gate -->
+
+Hermes has no delegation mechanism at all.
 
 ## Rules
 
@@ -65,10 +76,8 @@ This repo follows /home/dyadmin/AGENTS.md "Git Workflow Standard".
 - Default branch: main (protected, PR-only, squash merge)
 - Branches: feat/ fix/ chore/ docs/ exp/ (+ agent/<harness>/ optional)
 - Commits: Conventional Commits; hooks must pass; never --no-verify
-- Review: run a pre-PR code review on the branch and address all findings. The
-  mechanism is per harness, the requirement is not: `/code-reviewer` under Claude
-  Code, `codex review` under Codex, the `agent-code-reviewer` skill elsewhere.
-  Never write "reviewed" into a PR body unless a review actually ran.
+- Review: run the every-harness certificate gate above before a PR and address
+  all findings. A supplementary manual review never substitutes for it.
 - Deploy coupling: none for the repo itself — but `~/.claude/agents`,
   `~/.claude/commands` and each harness's `~/.<harness>/skills` are generated
   FROM it, so a template change is not landed until the installer has been

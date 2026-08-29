@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("apply", ROOT / "apply.py")
@@ -542,7 +543,7 @@ class ApplyTests(unittest.TestCase):
                 for key in apply.ALL_AGENT_KEYS:
                     self.assertIn(f"agent-{key}", names, f"{adapter} is missing agent-{key}")
                 # The Hermes installer iterated only the specialists map, so the
-                # PB core could never appear and the mandatory reviewer was absent.
+                # PB core could never appear and the supplementary manual reviewer was absent.
                 self.assertIn("agent-planner", names)
                 self.assertIn("agent-builder", names)
                 self.assertIn("agent-code-reviewer", names)
@@ -571,13 +572,107 @@ class ApplyTests(unittest.TestCase):
                     frontmatter = content.split("---", 2)[1]
                     self.assertNotIn("\nmodel:", frontmatter, f"{path} emits an undispatchable model field")
 
+    def _assert_certificate_gate(self, surface):
+        # These fixed assertions intentionally do not reuse the generator under
+        # test. They must catch a weakened generator after its output has been
+        # regenerated onto every supported local surface.
+        heading = "## Mandatory exact-artifact review certificate"
+        ensure = "`~/bin/codex-review ensure --base refs/remotes/origin/main`"
+        verify = "`~/bin/codex-review verify-current --base refs/remotes/origin/main`"
+        required_sequence = (
+            "Every harness must run " + ensure + " and then\n" + verify +
+            " immediately before the\npre-PR gate."
+        )
+        generated_gate = apply.review_certificate_gate().rstrip()
+        self.assertEqual(surface.count(generated_gate), 1, "surface must render the one canonical certificate gate")
+        self.assertEqual(surface.count(heading), 1, "surface must render one certificate gate")
+        self.assertIn(required_sequence, surface)
+        ensure_position = surface.index(ensure)
+        verify_position = surface.index(verify)
+        self.assertLess(ensure_position, verify_position, "ensure must precede verify-current")
+        self.assertTrue(
+            surface[verify_position + len(verify):].startswith(" immediately before the\npre-PR gate."),
+            "verify-current must be immediately before the pre-PR gate",
+        )
+        self.assertIn("The clean certificate must bind the exact current artifact and\nreview policy.", surface)
+        self.assertIn("manual or harness-native review may add findings, but is\nsupplementary and never substitutes for the certificate", surface)
+        self.assertIn("Bare `codex review`,\n`codex exec review`, and `codex-review-legacy` never substitute for either\ncommand.", surface)
+
+    def _framework_surface(self, adapter):
+        rendered = dict(apply.render_harness_skills(
+            self.config, Path("/tmp/agent-framework-test-home"), adapter))
+        return next(content for path, content in rendered.items()
+                    if path.parent.name == "agent-framework")
+
+    def test_codex_framework_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(self._framework_surface("codex"))
+
+    def test_dsh_framework_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(self._framework_surface("dsh"))
+
+    def test_hermes_framework_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(self._framework_surface("hermes"))
+
+    def test_generic_output_requires_the_unconditional_certificate_gate(self):
+        self._assert_certificate_gate(apply.generic_block(self.config))
+
+    def test_claude_workflow_commands_require_the_unconditional_certificate_gate(self):
+        rendered = dict(apply.render_claude(
+            self.claude_config, Path("/tmp/agent-framework-test-home")))
+        for command in ("pb.md", "pbg.md"):
+            with self.subTest(command=command):
+                self._assert_certificate_gate(
+                    rendered[Path("/tmp/agent-framework-test-home") / ".claude" / "commands" / command])
+
+    def test_pi_output_requires_the_unconditional_certificate_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "install_harness.py"), "pi", "--home", directory],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            surface = (Path(directory) / ".pi" / "agent" / "extensions" / "pb-primitive" / "README.md").read_text(encoding="utf-8")
+        self._assert_certificate_gate(surface)
+
+    def test_certificate_gate_assertions_reject_substitute_mutations(self):
+        gate = apply.review_certificate_gate().rstrip()
+        ensure = "`~/bin/codex-review ensure --base refs/remotes/origin/main`"
+        verify = "`~/bin/codex-review verify-current --base refs/remotes/origin/main`"
+        swapped_commands = gate.replace(ensure, "__ENSURE__", 1).replace(verify, ensure, 1).replace("__ENSURE__", verify, 1)
+        mutations = (
+            ("verify-current", "status"),
+            ("exact current artifact and\nreview policy", "current artifact"),
+            ("supplementary and never substitutes", "supplementary only"),
+            ("codex-review-legacy` never substitute", "codex-review-legacy` may substitute"),
+            ("Every harness must run", "A harness may run"),
+            ("refs/remotes/origin/main", "origin/main"),
+            ("immediately before the\npre-PR gate.", "eventually before the\npre-PR gate."),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original):
+                with self.assertRaises(AssertionError):
+                    self._assert_certificate_gate(gate.replace(original, replacement, 1))
+        with self.subTest(original="ensure-before-verify order"):
+            with self.assertRaises(AssertionError):
+                self._assert_certificate_gate(swapped_commands)
+
+    def test_checked_in_framework_makes_manual_review_supplementary(self):
+        framework = (ROOT / "AGENT-FRAMEWORK.md").read_text(encoding="utf-8")
+        self.assertIn("Its manual `code-reviewer` profile is\n  supplementary.", framework)
+        self._assert_certificate_gate(framework)
+        self.assertNotIn(
+            "mandatory on **every** harness, and this is the profile that performs it",
+            framework,
+        )
+
     # ----------------------------------------------------------------- #
     # Generated frontmatter must survive a real YAML parse
     # ----------------------------------------------------------------- #
     # Measured, not assumed: with the description interpolated raw, dsh's own
     # filesystem skill provider loaded 10 of the 14 rendered skills and dropped
     # agent-planner, agent-builder, agent-fe-designer and agent-code-reviewer —
-    # both PB roles and the mandatory reviewer — logging a warning and nothing
+    # both PB roles and the supplementary manual reviewer — logging a warning and nothing
     # more. Four of the eleven registry purposes contain a colon-and-space.
 
     # A purpose built to break every naive quoting scheme at once.
@@ -844,6 +939,29 @@ class ApplyTests(unittest.TestCase):
             self.assertIn("gpt-5.6-terra", text, f"{name} omits the live action model")
         self.assertIn("gpt-5.6-sol", configured)
         self.assertIn("gpt-5.6-terra", configured)
+
+    def test_generated_project_instructions_require_the_certificate_entrypoint(self):
+        instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self._assert_certificate_gate(instructions)
+        self.assertNotIn("Under Codex", instructions)
+
+    def test_primitive_certificate_gate_is_rendered_and_checked_for_drift(self):
+        primitive = (ROOT / "PRIMITIVE.md").read_text(encoding="utf-8")
+        begin = "<!-- BEGIN GENERATED: review-certificate-gate (apply.py docs) -->"
+        end = "<!-- END GENERATED: review-certificate-gate -->"
+        self.assertIn(begin, primitive)
+        self.assertIn(end, primitive)
+        self._assert_certificate_gate(primitive)
+
+        stale = primitive.replace(apply.review_certificate_gate().rstrip(), "stale gate", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "PRIMITIVE.md").write_text(stale, encoding="utf-8")
+            with patch.object(apply, "SCRIPT_DIR", root), patch.object(
+                apply, "DOC_FILES", ("PRIMITIVE.md",)
+            ):
+                self.assertEqual(apply.docs_drift(self.config), ["PRIMITIVE.md"])
+                self.assertEqual(apply.render_doc(self.config, stale), primitive)
 
 
 if __name__ == "__main__":

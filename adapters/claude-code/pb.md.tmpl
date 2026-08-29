@@ -35,7 +35,12 @@ Steps:
    concise read-only review, not the full direct-call Audit agent. It must not
    edit, delegate, or restart the workflow.
 
-5. **Report.** Relay what was built, how it was verified, the light-audit verdict,
+5. **Certificate gate.** Before opening a PR, apply the mandatory certificate
+   gate below.
+
+{{REVIEW_CERTIFICATE_GATE}}
+
+6. **Report.** Relay what was built, how it was verified, the light-audit verdict,
    and anything left open. If the build or audit surfaced something that
    invalidates the plan, report the follow-up clearly rather than hiding it.
 

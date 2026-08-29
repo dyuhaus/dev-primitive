@@ -20,8 +20,8 @@ for every agent profile on this machine. Each profile is installed here as an
 ## What Codex can and cannot do with this framework
 
 **Can:** adopt any profile (load its `agent-<key>` skill and work inside it),
-run the deterministic router, delegate with `spawn_agent`, and run a real code
-review with the native `codex review` subcommand.
+run the deterministic router, delegate with `spawn_agent`, and run the mandatory
+review certificate gate.
 
 **Direct adoption does not route a model.** A profile you adopt runs on **your
 current session's model**. Substantive automated work must use `spawn_agent`
@@ -36,15 +36,14 @@ The `tools:` list in each profile is Claude Code's tool vocabulary. Codex does
 not enforce it, so a read-only profile's boundary is a discipline here, not a
 sandbox. Keep it anyway.
 
+{{REVIEW_CERTIFICATE_GATE}}
+
 ## Picking a profile
 
 - **`runner`** is the everyday front door for routine work, maintenance, and triage.
 - **`planner` → `builder`** is the development core for substantive work.
-- **`code-reviewer`** runs before every PR. The Git Workflow Standard makes this
-  mandatory on every harness. On Codex the native path is `codex review`
-  (or `codex exec review`); adopt the `agent-code-reviewer` profile for its
-  boundaries and output contract, and never write "reviewed" into a PR body
-  unless a review actually ran.
+- **`code-reviewer`** is the supplementary manual profile for adversarial review.
+  On Codex, adopt `agent-code-reviewer` for its boundaries and output contract.
 - Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
   for them by name.
 

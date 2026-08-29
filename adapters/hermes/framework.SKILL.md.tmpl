@@ -30,13 +30,13 @@ plainly if asked.
 The `tools:` list in each profile is Claude Code's tool vocabulary and is not
 enforced here, so a read-only profile's boundary is a discipline. Keep it anyway.
 
+{{REVIEW_CERTIFICATE_GATE}}
+
 ## Picking a profile
 
 - **`runner`** is the everyday front door for routine work, maintenance, and triage.
 - **`planner` → `builder`** is the development core; see `agent-pb`.
-- **`code-reviewer`** runs before every PR — the Git Workflow Standard makes this
-  mandatory on every harness. Never write "reviewed" into a PR body unless a
-  review actually ran.
+- **`code-reviewer`** is the supplementary manual profile for adversarial review.
 - Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
   for them by name.
 
