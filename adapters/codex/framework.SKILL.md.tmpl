@@ -40,11 +40,9 @@ sandbox. Keep it anyway.
 
 - **`runner`** is the everyday front door for routine work, maintenance, and triage.
 - **`planner` → `builder`** is the development core for substantive work.
-- **`code-reviewer`** runs before every PR. The Git Workflow Standard makes this
-  mandatory on every harness. On Codex the native path is `codex review`
-  (or `codex exec review`); adopt the `agent-code-reviewer` profile for its
-  boundaries and output contract, and never write "reviewed" into a PR body
-  unless a review actually ran.
+- **`code-reviewer`** is optional and runs only when David explicitly requests
+  an automated review. It is never a PR gate; David reviews and merges PRs in
+  GitHub.
 - Direct-call-only profiles ({{DIRECT_CALL_ONLY}}) run only when the user asks
   for them by name.
 

@@ -45,8 +45,9 @@ active OpenAI routing. The manual Claude adapter refuses this registry because
 Claude discards an unresolvable `model:` value silently; `all` retires only
 manifest-owned stale generated Claude PB/profile files.
 
-Codex additionally has a native `codex review` subcommand, which is its path
-for the mandatory pre-PR review. Hermes has no delegation mechanism at all.
+Codex additionally has a native `codex review` subcommand, but automated review
+is currently on-demand only. David reviews and merges pull requests in GitHub.
+Hermes has no delegation mechanism at all.
 
 ## Rules
 
@@ -65,10 +66,10 @@ This repo follows /home/dyadmin/AGENTS.md "Git Workflow Standard".
 - Default branch: main (protected, PR-only, squash merge)
 - Branches: feat/ fix/ chore/ docs/ exp/ (+ agent/<harness>/ optional)
 - Commits: Conventional Commits; hooks must pass; never --no-verify
-- Review: run a pre-PR code review on the branch and address all findings. The
-  mechanism is per harness, the requirement is not: `/code-reviewer` under Claude
-  Code, `codex review` under Codex, the `agent-code-reviewer` skill elsewhere.
-  Never write "reviewed" into a PR body unless a review actually ran.
+- Review: open the PR for David to review in GitHub. No automated review or
+  certificate is required.
+- Merge: David approves and squash-merges every PR. Agents never approve,
+  merge, enable auto-merge, or use a relay.
 - Deploy coupling: none for the repo itself — but `~/.claude/agents`,
   `~/.claude/commands` and each harness's `~/.<harness>/skills` are generated
   FROM it, so a template change is not landed until the installer has been

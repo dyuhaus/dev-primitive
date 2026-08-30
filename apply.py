@@ -1272,8 +1272,8 @@ def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
 # The roster count, the auditors' models and the per-harness surface table were
 # all hand-written and all drifted: the docs named a model the registry does not
 # configure, and the roster said eight specialists while the registry held nine —
-# omitting code-reviewer, the one profile the Git Workflow Standard makes
-# mandatory. These blocks are regenerated from the registry by `apply.py docs`
+# omitting code-reviewer. These blocks are regenerated from the registry by
+# `apply.py docs`
 # and a test fails the build when a checked-in doc no longer matches.
 
 DOC_FILES = ("README.md", "PRIMITIVE.md", "AGENT-FRAMEWORK.md", "HARNESS-INSTALLATION.md", "AGENTS.md")
@@ -1284,7 +1284,7 @@ def harness_surface_table(cfg: dict) -> str:
         ("Claude Code", "`~/.claude/agents/` and `~/.claude/commands/`",
          "Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files."),
         ("Codex", "`~/.codex/skills/agent-*/SKILL.md`",
-         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. `codex review` is the native review path."),
+         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. The code-reviewer remains available only when explicitly requested."),
         ("dsh", "`~/.dsh/skills/agent-*/SKILL.md`",
          "The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model."),
         ("Pi", "`~/.pi/agent/extensions/pb-primitive/`",
