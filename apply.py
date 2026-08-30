@@ -1108,10 +1108,9 @@ def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> No
 def link_shared_skills(home: Path, dry: bool, adapters=("claude", "codex", "dsh", "hermes")) -> list:
     """Mirror the neutral ~/skills roots into every harness's skill directory.
 
-    Additive only: an existing entry is left exactly as it is, and nothing is
-    ever removed. Without this a Codex session has five of the eighteen shared
-    skills — no git-workflow, no subsite-scaffold, no decommission-checklist,
-    no harden-service — while its instructions assume it has all of them.
+    Existing symlinks are reconciled to the current neutral source; real files
+    and directories are left exactly as they are. Without this a Codex session
+    can keep loading a stale git-workflow skill after the neutral source moves.
     """
     source = home / NEUTRAL_SKILL_ROOT
     actions = []
@@ -1123,7 +1122,19 @@ def link_shared_skills(home: Path, dry: bool, adapters=("claude", "codex", "dsh"
         root = home / HARNESS_SKILL_ROOTS[adapter]
         for name in names:
             target, origin = root / name, (source / name).resolve()
-            if target.exists() or target.is_symlink():
+            if target.is_symlink():
+                current = target.resolve(strict=False)
+                if current == origin:
+                    continue
+                actions.append((target, origin))
+                if dry:
+                    print(f"--- would reset {target} -> {origin} (was {current}) ---")
+                    continue
+                target.unlink()
+                target.symlink_to(origin)
+                print(f"  reset {target} -> {origin} (was {current})")
+                continue
+            if target.exists():
                 continue
             actions.append((target, origin))
             if dry:

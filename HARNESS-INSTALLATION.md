@@ -72,11 +72,11 @@ adapter cannot render makes `all` warn and skip **that one adapter** while
 everything else still installs. `install_harness.py claude` on its own still
 fails hard, because there the refusal is the answer.
 
-The shared-skills step is additive: an existing entry is left exactly as it is
-and nothing is ever removed. Without it a Codex session carries a handful of the
-shared skills and none of `git-workflow`, `subsite-scaffold`,
-`decommission-checklist` or `harden-service`, while its instructions assume it
-has them.
+The shared-skills step safely reconciles symlinks to the current `~/skills`
+source while leaving real files and directories untouched. Without it a Codex
+session can retain a stale `git-workflow` link after that source moves, or carry
+none of `git-workflow`, `subsite-scaffold`, `decommission-checklist` and
+`harden-service` while its instructions assume they are installed.
 
 The installer contains no credentials and never prints secret values. Generated
 files should not be hand-edited; update the source registry and reinstall.
