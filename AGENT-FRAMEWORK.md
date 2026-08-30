@@ -47,12 +47,9 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
   components, layouts, interactions, and design-system refinements. Builder
   owns complex system integration; FE-Designer escalates backend, architecture,
   product, and brand decisions rather than guessing them.
-- **Code Reviewer** adversarially reviews a branch, diff, or codebase for real
-  defects before it reaches main. The Git Workflow Standard makes a pre-PR review
-  mandatory on **every** harness, and this is the profile that performs it —
-  under Claude Code as `/code-reviewer`, under Codex additionally through the
-  native `codex review` subcommand, elsewhere by adopting the profile. It is
-  read-only and never fixes what it finds.
+- **Code Reviewer** adversarially reviews a branch, diff, or codebase when David
+  explicitly requests an automated review. It is an optional, read-only
+  specialist and never a PR gate; it reports findings and never fixes them.
 - **Light workflow audit** is an automatic, read-only post-step after completed
   Planner → Builder or Planner → specialist work. It checks plan adherence,
   evidence, omissions, and follow-up at `xhigh` effort; it is intentionally
@@ -257,8 +254,7 @@ practices`. See [`agent-knowledge/README.md`](./agent-knowledge/README.md).
     document, `README.md`, `PRIMITIVE.md` and `HARNESS-INSTALLATION.md` pick the
     new profile up. A test fails the build when they are stale, because a
     hand-written roster has already drifted: the docs said eight specialists
-    while the registry held nine, omitting `code-reviewer` — the one profile the
-    Git Workflow Standard makes mandatory.
+    while the registry held nine, omitting `code-reviewer`.
 15. Update this document's Architecture section with the agent's purpose,
     boundaries, invocation rule, and examples. Review for least privilege,
     escalation loops, and secret leakage before merging.

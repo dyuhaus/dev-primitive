@@ -809,6 +809,33 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual(installer.returncode, 0, installer.stderr)
             self.assertIn("would link", installer.stdout)
 
+    def test_shared_skill_installer_repoints_stale_symlinks_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            current = home / "skills" / "git-workflow"
+            current.mkdir(parents=True)
+            (current / "SKILL.md").write_text("---\nname: git-workflow\ndescription: x\n---\n", encoding="utf-8")
+            stale = home / "old-skills" / "git-workflow"
+            stale.mkdir(parents=True)
+            target = home / apply.HARNESS_SKILL_ROOTS["codex"] / "git-workflow"
+            target.parent.mkdir(parents=True)
+            target.symlink_to(stale)
+
+            actions = apply.link_shared_skills(home, False, adapters=("codex",))
+
+            self.assertEqual(actions, [(target, current.resolve())])
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.resolve(), current.resolve())
+
+            protected = home / "skills" / "local-owned"
+            protected.mkdir()
+            (protected / "SKILL.md").write_text("---\nname: local-owned\ndescription: x\n---\n", encoding="utf-8")
+            installed = target.parent / "local-owned"
+            installed.mkdir()
+            actions = apply.link_shared_skills(home, False, adapters=("codex",))
+            self.assertNotIn((installed, protected.resolve()), actions)
+            self.assertTrue(installed.is_dir())
+
     def test_framework_skill_list_is_generated_from_the_registry(self):
         rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "hermes"))
         framework = next(c for p, c in rendered.items() if p.parent.name == "agent-framework")

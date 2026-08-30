@@ -20,7 +20,7 @@ Installed surfaces:
 | Harness | Surface | Result |
 |---|---|---|
 | Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files. |
-| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. `codex review` is the native review path. |
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. The code-reviewer remains available only when explicitly requested. |
 | dsh | `~/.dsh/skills/agent-*/SKILL.md` | The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model. |
 | Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus a generated `<key>_agent` tool per profile, resolved from this same registry. |
 | Hermes | `~/.hermes/skills/agent-*/SKILL.md` | One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today. |
@@ -72,11 +72,11 @@ adapter cannot render makes `all` warn and skip **that one adapter** while
 everything else still installs. `install_harness.py claude` on its own still
 fails hard, because there the refusal is the answer.
 
-The shared-skills step is additive: an existing entry is left exactly as it is
-and nothing is ever removed. Without it a Codex session carries a handful of the
-shared skills and none of `git-workflow`, `subsite-scaffold`,
-`decommission-checklist` or `harden-service`, while its instructions assume it
-has them.
+The shared-skills step safely reconciles symlinks to the current `~/skills`
+source while leaving real files and directories untouched. Without it a Codex
+session can retain a stale `git-workflow` link after that source moves, or carry
+none of `git-workflow`, `subsite-scaffold`, `decommission-checklist` and
+`harden-service` while its instructions assume they are installed.
 
 The installer contains no credentials and never prints secret values. Generated
 files should not be hand-edited; update the source registry and reinstall.
