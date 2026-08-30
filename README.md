@@ -114,7 +114,10 @@ pre-PR gate. The clean certificate must bind the exact current artifact and
 review policy. A manual or harness-native review may add findings, but is
 supplementary and never substitutes for the certificate. Bare `codex review`,
 `codex exec review`, and `codex-review-legacy` never substitute for either
-command. Never write "reviewed" into a PR body unless a review actually ran.
+command. Foreground `~/bin/codex-review work --once` must run from the exact committed repository
+under review. It serves only that repository and may retire at most one stale
+FIFO predecessor; after a `stale` outcome, run it again before expecting
+dispatch. Never write "reviewed" into a PR body unless a review actually ran.
 
 | Harness | Surface | Result |
 |---|---|---|

@@ -583,6 +583,12 @@ class ApplyTests(unittest.TestCase):
             "Every harness must run " + ensure + " and then\n" + verify +
             " immediately before the\npre-PR gate."
         )
+        foreground_work = (
+            "Foreground `~/bin/codex-review work --once` must run from the exact committed repository\n"
+            "under review. It serves only that repository and may retire at most one stale\n"
+            "FIFO predecessor; after a `stale` outcome, run it again before expecting\n"
+            "dispatch."
+        )
         generated_gate = apply.review_certificate_gate().rstrip()
         self.assertEqual(surface.count(generated_gate), 1, "surface must render the one canonical certificate gate")
         self.assertEqual(surface.count(heading), 1, "surface must render one certificate gate")
@@ -597,6 +603,7 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("The clean certificate must bind the exact current artifact and\nreview policy.", surface)
         self.assertIn("manual or harness-native review may add findings, but is\nsupplementary and never substitutes for the certificate", surface)
         self.assertIn("Bare `codex review`,\n`codex exec review`, and `codex-review-legacy` never substitute for either\ncommand.", surface)
+        self.assertIn(foreground_work, surface)
 
     def _framework_surface(self, adapter):
         rendered = dict(apply.render_harness_skills(
@@ -648,6 +655,7 @@ class ApplyTests(unittest.TestCase):
             ("Every harness must run", "A harness may run"),
             ("refs/remotes/origin/main", "origin/main"),
             ("immediately before the\npre-PR gate.", "eventually before the\npre-PR gate."),
+            ("exact committed repository", "any repository"),
         )
         for original, replacement in mutations:
             with self.subTest(original=original):
