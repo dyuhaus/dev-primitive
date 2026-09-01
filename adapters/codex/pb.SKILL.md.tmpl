@@ -14,6 +14,11 @@ the **builder**, build, verify. On Codex, substantive automated PB work must
 use explicitly routed child agents unless the current session is confirmed to
 match the required model and effort.
 
+Await the Planner's terminal output before starting Builder; never pre-spawn
+Builder. Use one Planner and one Builder per round. At most one plan-authorized
+L1/FE delegation is allowed; multi-workstream work requires an explicit Team
+Leader call.
+
 ## What Codex actually gives you
 
 {{PLANNER_ROUTING_NOTE}}
@@ -27,13 +32,18 @@ child with `model: "{{BUILDER_MODEL}}"` and
 `reasoning_effort: "{{BUILDER_EFFORT}}"`. In either form, do not blur passes:
 
 1. **Plan pass.** Adopt `agent-planner`. Investigate read-only — read files,
-   grep, inspect git state, run non-mutating checks. Produce: understanding →
-   approach (with rejected alternatives) → ordered concrete steps → risks and
-   the checks that will prove success. Write **no** production code in this pass.
+   grep, inspect git state, run non-mutating checks. Produce a completed reviewed
+   plan with verified current state and a done-condition; the smallest real
+   end-to-end slice; explicit non-goals/deferred work; a simpler rejected
+   alternative; exact affected surfaces and ordered step → verification actions;
+   the earliest behavioral/live proof; and stop/replan plus install/rollback
+   risks. Write **no** production code in this pass.
 2. **Review the plan.** If it has a real gap, or a decision only the user can
-   make, raise it before building.
+   make, reject or revise it before building.
 3. **Build pass.** Adopt `agent-builder`. Execute the plan's steps in order. If
-   a step is wrong or blocked, say so and adapt — do not silently skip it.
+   a step is wrong or blocked, say so and adapt — do not silently skip it. On the
+   first failed or inconclusive real proof, stop scope expansion and only
+   diagnose or retry the same slice.
 4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
    report the concrete result. A command that exited 0 has told you it finished,
    not that the work happened — assert on the artifact.
@@ -52,12 +62,12 @@ boundaries in its task.
 
 ## Looping until a condition holds
 
+`/pb is exactly one pass` and reports incomplete evidence rather than retrying.
 The portable form is **`/pbg <task> until: <condition>`** — plan → build →
-verify, repeated until the condition actually holds. Here, run that loop
-yourself, and keep it bounded: stop and hand back after about three full rounds
-without meeting the condition, after two consecutive rounds with no measurable
-progress, when the condition turns out to be unverifiable or ambiguous, or when
-a material decision needs the user. Report where it stands and the remaining gap
-rather than churning.
+verify, repeated until the condition actually holds. `/pbg is capped at exactly
+three rounds`. A second inconclusive proof or two rounds without measurable
+progress is BLOCKED even if artifact labels change. Persistence language cannot
+override ambiguity, safety, failed proof, no-progress, or round bounds. Report
+where it stands and the remaining gap rather than churning.
 
 Honor the nearest project `AGENTS.md` throughout.

@@ -12,21 +12,31 @@ yourself.
 
 **Task:** $ARGUMENTS
 
+Await the Planner's terminal output before starting Builder; never pre-spawn
+Builder. Use one Planner and one Builder in this pass. At most one
+plan-authorized L1/FE delegation is allowed; multi-workstream work requires an
+explicit Team Leader call.
+
 Steps:
 
 1. **Plan ({{PLANNER_MODEL}}).** Delegate to the `planner` subagent. Give it the
    task and any relevant context you already have. It runs on the configured
-   planner model class and returns a concrete, buildable plan (understanding →
-   approach → ordered steps → risks/checks). Do not start writing code yourself.
+   planner model class and returns a completed reviewed plan: verified current
+   state and done-condition; the smallest real end-to-end slice; non-goals or
+   deferred work; a simpler rejected alternative; exact surfaces and step →
+   verification actions; earliest behavioral/live proof; and stop/replan plus
+   install/rollback risks. Do not start writing code yourself.
 
 2. **Review.** Read the plan. If it's sound, briefly summarize it for the user
    and continue. If it has a real gap or a decision only the user can make, raise
-   that before building — otherwise proceed.
+   that before building — otherwise reject or revise the plan before proceeding.
 
 3. **Build ({{BUILDER_MODEL}}).** Delegate to the `builder` subagent, handing it
    the planner's plan verbatim plus any decisions from step 2. It runs on the
    configured builder model class, implements the plan end to end, runs the
-   relevant build/tests, and reports what changed and how it verified it.
+   relevant build/tests, and reports what changed and how it verified it. On the
+   first failed or inconclusive real proof, it stops scope expansion and only
+   diagnoses or retries the same slice.
 
 4. **Light audit (enabled={{WORKFLOW_AUDIT_ENABLED}}; {{WORKFLOW_AUDIT_MODEL}}, {{WORKFLOW_AUDIT_THINKING}} thinking).**
    If enabled, delegate once to `workflow-audit` with the original task, planner
@@ -45,8 +55,12 @@ Honor the local project `AGENTS.md`/`CLAUDE.md` conventions throughout.
 
 *To keep going until a done-condition holds:* use
 `/pbg <task> until: <condition>`. That is the **portable** path — every harness
-this registry installs into renders the same bounded plan → build → verify loop,
-so the instruction is the same wherever you are working.
+this registry installs into renders the same bounded plan → build → verify loop.
+`/pb is exactly one pass` and reports incomplete evidence rather than retrying;
+`/pbg is capped at exactly three rounds`. A second inconclusive proof or two
+rounds without measurable progress is BLOCKED even if artifact labels change.
+Persistence language cannot override ambiguity, safety, failed proof,
+no-progress, or round bounds.
 
 <!-- Claude Code only — not part of the shared PB contract. -->
 *Claude Code additionally has a harness-enforced loop:* run the built-in

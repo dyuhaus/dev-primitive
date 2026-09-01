@@ -393,7 +393,7 @@ async function plannerThenBuilder(task: string, ctx: ExtensionContext): Promise<
 	const audit = await runPostWorkflowAudit(task, plan, "Builder", builderOutput, ctx);
 	if (audit.result) results.push(audit.result);
 	return {
-		text: `## Plan\n\n${capOutput(plan)}\n\n## Builder result\n\n${outcomeText(built.result)}${audit.text ? `\n\n${audit.text}` : ""}`,
+		text: `## Plan\n\n${capOutput(plan)}\n\n## Builder result\n\n${outcomeText(built.result)}${audit.text ? `\n\n${audit.text}` : ""}\n\n## One-pass boundary\n\n/pb is exactly one pass. Incomplete or inconclusive evidence is reported here; it does not start another round.`,
 		results,
 	};
 }
@@ -403,6 +403,11 @@ function parseVerification(text: string): "pass" | "continue" | "blocked" {
 	return line === "pass" || line === "blocked" ? line : "continue";
 }
 
+function parseProofProgress(text: string): "measurable" | "none" {
+	const line = text.match(/^PB_PROGRESS:\s*(MEASURABLE|NONE)\b/im)?.[1]?.toLowerCase();
+	return line === "measurable" ? "measurable" : "none";
+}
+
 async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: string; results: RunResult[] }> {
 	const { task, until } = parseTaskAndUntil(raw);
 	if (!task) return { text: "Usage: /pbg <task> [until: <done-condition>]", results: [] };
@@ -410,11 +415,16 @@ async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: str
 	let condition = until;
 	let previousEvidence = "";
 	let priorContinuation = "";
+	let inconclusiveProofs = 0;
+	let noProgressRounds = 0;
 	const sections: string[] = [];
 
 	for (let round = 1; round <= MAX_GOAL_ROUNDS; round++) {
+		const plannerScopeLock = priorContinuation
+			? "A prior real proof did not pass. Diagnose or replan only the same smallest slice. Do not expand scope, generalize, rename the target, or add infrastructure."
+			: "";
 		const planningTask = condition
-			? `Plan round ${round} for this task:\n${task}\n\nDone-condition:\n${condition}\n\nPrior evidence:\n${previousEvidence || "none"}\n\nPrior verifier guidance:\n${priorContinuation || "none"}`
+			? `Plan round ${round} for this task:\n${task}\n\nDone-condition:\n${condition}\n\nPrior evidence:\n${previousEvidence || "none"}\n\nPrior verifier guidance:\n${priorContinuation || "none"}${plannerScopeLock ? `\n\n${plannerScopeLock}` : ""}`
 			: `Plan round ${round} for this task and first derive explicit, testable acceptance criteria:\n${task}\n\nPrior evidence:\n${previousEvidence || "none"}`;
 		const planned = await runConfiguredRole("planner", planningTask, ctx, undefined, `planner round ${round}`);
 		if (planned.error || !planned.result) {
@@ -440,7 +450,10 @@ async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: str
 			}
 		}
 
-		const buildPrompt = `Original task:\n${task}\n\nDone-condition:\n${condition}\n\nRound: ${round}/${MAX_GOAL_ROUNDS}\n\nVerbatim plan:\n---\n${plan}\n---\n\nPrior evidence:\n${previousEvidence || "none"}\n\nImplement only the remaining work. Validate and report concrete evidence.`;
+		const scopeLock = priorContinuation
+			? "A prior real proof did not pass. Do not expand scope, generalize, or rename the target; only diagnose or retry the same smallest slice."
+			: "Implement the smallest planned slice only.";
+		const buildPrompt = `Original task:\n${task}\n\nDone-condition:\n${condition}\n\nRound: ${round}/${MAX_GOAL_ROUNDS}\n\nVerbatim plan:\n---\n${plan}\n---\n\nPrior evidence:\n${previousEvidence || "none"}\n\n${scopeLock}\nValidate and report concrete evidence.`;
 		const built = await runConfiguredRole("builder", buildPrompt, ctx, undefined, `builder round ${round}`);
 		if (built.error || !built.result) {
 			sections.push(`## Round ${round}\n\nBuilder did not start: ${built.error}`);
@@ -449,7 +462,10 @@ async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: str
 		results.push(built.result);
 		const buildOutput = getResultOutput(built.result);
 		sections.push(`## Round ${round}\n\n### Plan\n\n${capOutput(plan)}\n\n### Builder\n\n${outcomeText(built.result)}`);
-		if (isFailed(built.result)) break;
+		if (isFailed(built.result)) {
+			sections.push("\nStopped: Builder proof failed; no scope expansion or additional round was started.");
+			break;
+		}
 
 		const audit = await runPostWorkflowAudit(task, plan, "Builder", buildOutput, ctx, `light workflow audit round ${round}`);
 		if (audit.result) results.push(audit.result);
@@ -472,11 +488,25 @@ async function goalLoop(raw: string, ctx: ExtensionContext): Promise<{ text: str
 		results.push(verified);
 		const verification = getResultOutput(verified);
 		sections.push(`\n### Verification\n\n${outcomeText(verified)}`);
-		if (isFailed(verified)) break;
+		if (isFailed(verified)) {
+			sections.push("\n## BLOCKED\n\nVerification was inconclusive because the proof process failed. No scope expansion or additional round was started.");
+			break;
+		}
 		const state = parseVerification(verification);
 		if (state === "pass" || state === "blocked") break;
-		if (buildOutput.trim() === previousEvidence.trim()) {
-			sections.push("\nStopped: no progress was evidenced between rounds.");
+		const progress = parseProofProgress(verification);
+		if (progress === "measurable") {
+			noProgressRounds = 0;
+		} else {
+			inconclusiveProofs++;
+			noProgressRounds++;
+		}
+		if (inconclusiveProofs >= 2 || noProgressRounds >= 2) {
+			sections.push("\n## BLOCKED\n\nA second inconclusive proof or two rounds without measurable progress was reached. Artifact or task-label changes do not reset this bound; no additional round was started.");
+			break;
+		}
+		if (round === MAX_GOAL_ROUNDS) {
+			sections.push("\n## BLOCKED\n\n/pbg hard limit reached after exactly three CONTINUE rounds; no fourth round was started.");
 			break;
 		}
 		previousEvidence = buildOutput;

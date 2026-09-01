@@ -19,11 +19,12 @@ default.
 - `/pb-show` — show the selected config and resolved provider/model table.
 - `/pb <task>` — one read-only planner pass followed by a builder pass and a
   compact read-only post-workflow audit. The builder receives the original task
-  and planner output verbatim; every child uses its configured model and exact
-  registry effort (`xhigh` in the active registry).
+  and completed reviewed planner output verbatim; every child uses its configured
+  model and exact registry effort (`xhigh` in the active registry). It is exactly
+  one pass and reports incomplete evidence rather than starting another round.
 - `/pbg <task> [until: <done-condition>]` — bounded planner/build/light-audit/
-  verification loop, at most three rounds. If `until:` is omitted, the first
-  planner derives explicit acceptance criteria.
+  verification loop, capped at exactly three rounds. If `until:` is omitted, the
+  first planner derives explicit acceptance criteria.
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
 - `workflow_audit` — internal post-workflow tool the parent invokes exactly once
@@ -69,9 +70,24 @@ work may route to L1 Programmer. Generic substantive implementation is normalize
 to the complete Planner → Builder path when `routing.planBeforeBuild` is enabled.
 Planner does not invoke specialists from its isolated read-only child; it names
 the recommended next role for the parent orchestrator. Builder may delegate only
-to L1 Programmer or FE-Designer, and child Pi currently loads with
+once per round to a plan-authorized L1 Programmer or FE-Designer; multi-workstream
+work needs an explicit Team Leader call. Child Pi currently loads with
 `--no-extensions`, so its safe fallback is direct implementation or a handoff
 recommendation to the parent.
+
+### PB scope and proof bounds
+
+`/pb` and `/pbg` await the Planner's terminal output before starting Builder;
+Builder is never pre-spawned. The Planner must return a reviewed plan containing
+verified current state and done-condition, smallest real end-to-end slice,
+non-goals/deferred work, a simpler rejected alternative, exact step →
+verification actions, earliest behavioral/live proof, and stop/replan plus
+install/rollback risk. On the first failed or inconclusive real proof, Pi locks
+the work to diagnosis or retry of that same slice. A second inconclusive proof
+or two rounds without measurable progress is BLOCKED even if artifact labels
+change. Three CONTINUE rounds end with an explicit hard-limit result; no fourth
+round starts. Terminal persistence language never overrides ambiguity, safety,
+failed-proof, no-progress, or round bounds.
 
 ## Config precedence
 
@@ -114,9 +130,11 @@ class/alias for the configured provider.
   one hour that were left behind by a hard-killed process.
 - Model-visible child output is capped at 50 KiB. Full parsed child messages
   remain in tool-result details for the current session.
-- `/pbg` stops after acceptance, a verifier block, a failed child, repeated
-  evidence/no progress, or three rounds. It is bounded assistance, not an
-  autonomous approval mechanism.
+- `/pbg` stops after acceptance, a verifier block, a failed child, a second
+  inconclusive proof, two no-progress rounds, or exactly three rounds. Verifiers
+  must separately mark `PB_PROGRESS: MEASURABLE|NONE`; renamed artifacts or task
+  labels are not progress. It is bounded assistance, not an autonomous approval
+  mechanism.
 
 Project-local pi resources are executable. The machine currently sets
 `defaultProjectTrust` to `always`; consider changing it to `ask` for stronger

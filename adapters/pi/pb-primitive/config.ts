@@ -317,7 +317,11 @@ export function validateConfig(cfg: RolesConfig | null | undefined): string[] {
 				errs.push(`${pathName}.model.effort is required for OpenAI automation`);
 			}
 		if (entry.canDelegate !== undefined && typeof entry.canDelegate !== "boolean") errs.push(`${pathName}.canDelegate must be boolean`);
-		if (entry.delegateTo !== undefined && (!Array.isArray(entry.delegateTo) || !entry.delegateTo.every((x) => typeof x === "string"))) errs.push(`${pathName}.delegateTo must be a list of strings`);
+		for (const field of ["delegateTo", "capabilities", "boundaries", "outputContract"] as const) {
+			if (entry[field] !== undefined && (!Array.isArray(entry[field]) || !entry[field].every((x) => typeof x === "string"))) {
+				errs.push(`${pathName}.${field} must be a list of strings`);
+			}
+		}
 		if (!specialist) return;
 		const agent = entry as AgentSpec;
 		if (typeof agent.displayName !== "string" || !agent.displayName) errs.push(`${pathName}.displayName must be a non-empty string`);

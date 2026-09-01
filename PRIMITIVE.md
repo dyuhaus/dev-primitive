@@ -22,6 +22,24 @@ L1. Planner does not call specialists itself; it recommends the next role and
 the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
 FE-Designer when its harness exposes those tools.
 
+### Portable PB contract
+
+- Await the Planner's terminal output before starting Builder; never pre-spawn
+  Builder. A reviewed plan must establish verified current state and a
+  done-condition, the smallest real end-to-end slice, non-goals/deferred work,
+  a simpler rejected alternative, exact surfaces and step → verification actions,
+  the earliest behavioral/live proof, and stop/replan plus install/rollback risks.
+- One Planner and one Builder work each round. At most one plan-authorized L1 or
+  FE delegation is allowed; multi-workstream work requires an explicit Team
+  Leader call.
+- On a first failed or inconclusive real proof, stop scope expansion and only
+  diagnose or retry the same slice. A second inconclusive proof or two rounds
+  without measurable progress is BLOCKED; changing artifact or task labels does
+  not reset that state.
+- `/pb` is exactly one pass and reports incomplete evidence. `/pbg` is capped at
+  exactly three rounds. Terminal persistence language never overrides ambiguity,
+  safety, failed-proof, no-progress, or round bounds.
+
 ## Single source of truth
 
 Everything is driven by [`roles.config.json`](./roles.config.json):
@@ -81,9 +99,10 @@ generated Claude PB/profile files. Generated files are not hand-edited.
 
 ## Looping until a condition holds
 
-The plain loop (`/pb`) runs one plan→build pass. **`/pbg <task> until:
+The plain loop (`/pb`) runs one plan→build pass and reports incomplete evidence;
+it does not retry. **`/pbg <task> until:
 <condition>` is the portable bounded loop** — plan → build → verify, repeated
-until the condition holds — and it is the form to name in any harness-neutral
+until the condition holds, capped at exactly three rounds — and it is the form to name in any harness-neutral
 instruction, because it needs nothing from the harness. Some harnesses also have
 a native, harness-enforced goal loop (Claude Code's `/goal` + Stop-hook, dsh's
 `/goal`); those are stronger where they exist and absent everywhere else, so they
