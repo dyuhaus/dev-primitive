@@ -143,7 +143,7 @@ def validate(cfg: dict) -> list:
         validate_model(entry.get("model"), f"{path}.model")
         if "canDelegate" in entry and not isinstance(entry["canDelegate"], bool):
             errs.append(f"{path}.canDelegate must be boolean")
-        for field in ("escalateTo", "delegateTo", "infoSources"):
+        for field in ("escalateTo", "delegateTo", "infoSources", "capabilities", "boundaries", "outputContract"):
             if field in entry and (not isinstance(entry[field], list) or not all(isinstance(x, str) for x in entry[field])):
                 errs.append(f"{path}.{field} must be a list of strings")
         if specialist:
@@ -737,11 +737,26 @@ def generic_block(cfg: dict) -> str:
         view = role_view(cfg, key)
         mode = "read-only" if view["read_only"] else "write-capable"
         lines.append(f"- **{key}** — `{view['model']}` ({view['provider']}); {mode}. {view['purpose']}")
+    lines += ["", "### PB role contracts"]
+    for key in ROLE_KEYS:
+        view = role_view(cfg, key)
+        lines += [f"", f"#### {key.title()}", "", "Boundaries:", list_text(view["boundaries"]), "", "Output contract:", list_text(view["output_contract"])]
     lines += ["", "### Specialist registry", "", "| Key | Model | Invocation | Auto-select | Purpose |", "|---|---|---|---|---|"]
     for key in cfg.get("agents", {}):
         view = role_view(cfg, key)
         lines.append(f"| `{key}` | `{view['model']}` | `{view['invocation']}` | `{str(view['auto_select']).lower()}` | {view['purpose']} |")
-    lines += ["", "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters."]
+    lines += [
+        "",
+        "### Portable PB contract",
+        "",
+        "- Await the Planner's terminal output before starting Builder; never pre-spawn Builder.",
+        "- Review the plan before building: it must identify verified current state and a done-condition; the smallest real end-to-end slice; explicit non-goals or deferred work; a simpler rejected alternative; exact affected surfaces and step → verification actions; earliest behavioral/live proof; and stop/replan plus install/rollback risks.",
+        "- Use one Planner and one Builder per round. At most one plan-authorized L1/FE delegation is allowed; multi-workstream work needs an explicit Team Leader call.",
+        "- On the first failed or inconclusive real proof, stop scope expansion and only diagnose or retry the same slice. A second inconclusive proof or two rounds without measurable progress is BLOCKED even if artifact labels change.",
+        "- /pb is exactly one pass and reports incomplete evidence. /pbg is capped at exactly three rounds. Persistence language cannot override ambiguity, safety, failed proof, no-progress, or round bounds.",
+        "",
+        "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters.",
+    ]
     return "\n".join(lines) + "\n"
 
 

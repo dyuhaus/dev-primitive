@@ -126,12 +126,13 @@ const tools = new Map();
 const commands = new Map();
 const renderers = new Map();
 const events = new Map();
+const sentMessages = [];
 const pi = {
 	registerTool: (def) => tools.set(def.name, def),
 	registerCommand: (name, def) => commands.set(name, def),
 	registerMessageRenderer: (name, renderer) => renderers.set(name, renderer),
 	on: (name, handler) => events.set(name, handler),
-	sendMessage: () => {},
+	sendMessage: (message) => sentMessages.push(message),
 };
 const factory = indexModule.default ?? indexModule;
 await factory(pi);
@@ -239,9 +240,12 @@ const argsFile = path.join(fakeDir, "args.json");
 const argsLog = path.join(fakeDir, "args.jsonl");
 const promptCopy = path.join(fakeDir, "prompt-copy.txt");
 const taskCopy = path.join(fakeDir, "task-copy.txt");
+const eventLog = path.join(fakeDir, "events.jsonl");
+const taskLog = path.join(fakeDir, "tasks.jsonl");
+const releaseFile = path.join(fakeDir, "planner-release");
 await fs.writeFile(
 	fakePi,
-		`#!/usr/bin/env node\nconst fs=require("node:fs");\nconst args=process.argv.slice(2);\nfs.writeFileSync(process.env.PB_ARGS_FILE, JSON.stringify(args));\nfs.appendFileSync(process.env.PB_ARGS_LOG, JSON.stringify(args)+"\\n");\nconst i=args.indexOf("--append-system-prompt");\nif(i>=0) fs.writeFileSync(process.env.PB_PROMPT_COPY, fs.readFileSync(args[i+1], "utf8"));\nconst taskArg=args.find((arg)=>arg.startsWith("@"));\nif(taskArg) fs.writeFileSync(process.env.PB_TASK_COPY, fs.readFileSync(taskArg.slice(1), "utf8"));\nconst message={role:"assistant",content:[{type:"text",text:"PB_VERIFY: PASS — FAKE CHILD OK"}],api:"test",provider:"test",model:"test-model",usage:{input:3,output:2,cacheRead:0,cacheWrite:0,totalTokens:5,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()};\nconsole.log(JSON.stringify({type:"message_end",message}));\n`,
+	`#!/usr/bin/env node\nconst fs=require("node:fs");\nconst args=process.argv.slice(2);\nfs.writeFileSync(process.env.PB_ARGS_FILE, JSON.stringify(args));\nfs.appendFileSync(process.env.PB_ARGS_LOG, JSON.stringify(args)+"\\n");\nconst i=args.indexOf("--append-system-prompt");\nconst system=i>=0?fs.readFileSync(args[i+1],"utf8"):"";\nif(i>=0) fs.writeFileSync(process.env.PB_PROMPT_COPY, system);\nconst taskArg=args.find((arg)=>arg.startsWith("@"));\nconst task=taskArg?fs.readFileSync(taskArg.slice(1),"utf8"):"";\nif(taskArg) fs.writeFileSync(process.env.PB_TASK_COPY, task);\nconst role=system.includes("acting as verifier")?"verifier":system.includes("lightweight post-workflow auditor")?"audit":system.includes("You are the builder")?"builder":"planner";\nconst scenario=process.env.PB_FAKE_SCENARIO||"pass";\nconst emit=(kind)=>fs.appendFileSync(process.env.PB_EVENT_LOG,JSON.stringify({kind,role})+"\\n");\nemit("start");\nfs.appendFileSync(process.env.PB_TASK_LOG,JSON.stringify({role,task})+"\\n");\nlet text="PB_VERIFY: PASS — FAKE CHILD OK";\nif(role==="planner"&&scenario==="ordering") text="COMPLETED PLAN TOKEN: smallest slice verified";\nif(role==="builder"&&scenario==="inconclusive") text=task.includes("Round: 2")?"Builder evidence: artifact-beta":"Builder evidence: artifact-alpha";\nif(role==="verifier"&&scenario==="inconclusive") text="PB_VERIFY: CONTINUE — proof remains inconclusive\\nPB_PROGRESS: NONE";\nif(role==="verifier"&&scenario==="hard-limit") text="PB_VERIFY: CONTINUE — same slice progressed\\nPB_PROGRESS: MEASURABLE";\nconst finish=()=>{const message={role:"assistant",content:[{type:"text",text}],api:"test",provider:"test",model:"test-model",usage:{input:3,output:2,cacheRead:0,cacheWrite:0,totalTokens:5,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()};emit("end");console.log(JSON.stringify({type:"message_end",message}));};\nconst waitForRelease=()=>fs.existsSync(process.env.PB_RELEASE_FILE)?finish():setTimeout(waitForRelease,5);\nif(role==="planner"&&scenario==="ordering") waitForRelease(); else finish();\n`,
 	{ mode: 0o755 },
 );
 const oldPath = process.env.PATH;
@@ -250,6 +254,9 @@ process.env.PB_ARGS_FILE = argsFile;
 process.env.PB_ARGS_LOG = argsLog;
 process.env.PB_PROMPT_COPY = promptCopy;
 process.env.PB_TASK_COPY = taskCopy;
+process.env.PB_EVENT_LOG = eventLog;
+process.env.PB_TASK_LOG = taskLog;
+process.env.PB_RELEASE_FILE = releaseFile;
 const savedArgv1 = process.argv[1];
 process.argv[1] = "/nonexistent/pi-entry.js";
 const fakeResult = await subagent.runRole({
@@ -308,6 +315,84 @@ for (const argv of allChildArgs) {
 }
 assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-sol"), "planner/reviewer Sol child was not exercised");
 assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-terra"), "builder/specialist Terra child was not exercised");
+
+// Incident regressions use the same fake child and JSONL result transport as
+// the smoke test above. Event/task logs establish process ordering and prompt
+// handoff; result text still arrives only through the child JSONL message.
+async function resetWorkflowTranscript() {
+	await fs.writeFile(eventLog, "");
+	await fs.writeFile(taskLog, "");
+	await fs.rm(releaseFile, { force: true });
+	sentMessages.length = 0;
+}
+async function readJsonLines(file) {
+	const raw = await fs.readFile(file, "utf8");
+	return raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+function reportText() {
+	return sentMessages.at(-1)?.content ?? "";
+}
+async function waitForEventCount(count) {
+	for (let attempt = 0; attempt < 100; attempt++) {
+		const events = await readJsonLines(eventLog);
+		if (events.length >= count) return events;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	assert.fail(`fake child did not record ${count} events`);
+}
+
+// A delayed planner must finish before Builder begins, and Builder must get the
+// completed Planner output rather than a reconstructed or partial substitute.
+await resetWorkflowTranscript();
+process.env.PB_FAKE_SCENARIO = "ordering";
+const orderingRun = commands.get("pb").handler("implement the smallest verified slice", childCtx);
+assert.deepEqual(await waitForEventCount(1), [{ kind: "start", role: "planner" }], "Builder started while delayed Planner was still running");
+await fs.writeFile(releaseFile, "release");
+await orderingRun;
+const orderingEvents = await readJsonLines(eventLog);
+assert.deepEqual(orderingEvents, [
+	{ kind: "start", role: "planner" },
+	{ kind: "end", role: "planner" },
+	{ kind: "start", role: "builder" },
+	{ kind: "end", role: "builder" },
+	{ kind: "start", role: "audit" },
+	{ kind: "end", role: "audit" },
+]);
+const orderingTasks = await readJsonLines(taskLog);
+const builderTask = orderingTasks.find((entry) => entry.role === "builder")?.task ?? "";
+assert.match(builderTask, /COMPLETED PLAN TOKEN: smallest slice verified/);
+
+// Two inconclusive proofs must block even when the Builder's artifact label
+// changes; the second result cannot reset progress or start a third round.
+await resetWorkflowTranscript();
+process.env.PB_FAKE_SCENARIO = "inconclusive";
+await commands.get("pbg").handler("repair the same artifact until: proof is complete", childCtx);
+const inconclusiveStarts = (await readJsonLines(eventLog)).filter((event) => event.kind === "start").map((event) => event.role);
+assert.deepEqual(inconclusiveStarts, ["planner", "builder", "audit", "verifier", "planner", "builder", "audit", "verifier"]);
+const inconclusiveTasks = await readJsonLines(taskLog);
+const secondPlannerTask = inconclusiveTasks.filter((entry) => entry.role === "planner")[1]?.task ?? "";
+assert.match(secondPlannerTask, /Diagnose or replan only the same smallest slice/);
+assert.match(secondPlannerTask, /Do not expand scope, generalize, rename the target, or add infrastructure/);
+assert.match(reportText(), /artifact-alpha/);
+assert.match(reportText(), /artifact-beta/);
+assert.match(reportText(), /## BLOCKED/);
+assert.match(reportText(), /second inconclusive proof|two rounds without measurable progress/i);
+
+// Three measurable CONTINUE results are allowed only up to the hard bound. The
+// terminal user's wording cannot authorize a fourth planner/builder round.
+await resetWorkflowTranscript();
+process.env.PB_FAKE_SCENARIO = "hard-limit";
+await commands.get("pbg").handler("only stop when ready; repair the same slice until: real proof passes", childCtx);
+const hardLimitStarts = (await readJsonLines(eventLog)).filter((event) => event.kind === "start").map((event) => event.role);
+assert.deepEqual(hardLimitStarts, [
+	"planner", "builder", "audit", "verifier",
+	"planner", "builder", "audit", "verifier",
+	"planner", "builder", "audit", "verifier",
+]);
+assert.match(reportText(), /## BLOCKED/);
+assert.match(reportText(), /hard limit reached after exactly three CONTINUE rounds; no fourth round was started/);
+process.env.PB_FAKE_SCENARIO = "pass";
+
 const savedPathForFailure = process.env.PATH;
 process.env.PATH = "/nonexistent";
 const failedAudit = await indexModule.runPostWorkflowAudit(

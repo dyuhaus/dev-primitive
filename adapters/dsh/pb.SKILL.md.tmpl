@@ -13,6 +13,11 @@ This machine's stated method is: reason with the **planner**, hand the plan to
 the **builder**, build, verify. On Claude Code that is two subagents on two
 different models. **On dsh it is not.**
 
+Await the Planner's terminal output before starting Builder; never pre-spawn
+Builder. Use one Planner and one Builder per round. At most one plan-authorized
+L1/FE delegation is allowed; multi-workstream work requires an explicit Team
+Leader call.
+
 ## What dsh actually gives you
 
 {{PLANNER_ROUTING_NOTE}}
@@ -25,14 +30,19 @@ is real structural support: plan mode holds the planning phase read-only until
 isolated child context.
 
 1. **Plan pass.** Adopt `agent-planner`; plan mode is the natural fit. Investigate
-   read-only — read, search, inspect git state, run non-mutating checks. Produce:
-   understanding → approach (with rejected alternatives) → ordered concrete steps
-   → risks and the checks that will prove success. Write **no** production code.
+   read-only — read, search, inspect git state, run non-mutating checks. Produce
+   verified current state and a done-condition; the smallest real end-to-end
+   slice; explicit non-goals/deferred work; a simpler rejected alternative; exact
+   affected surfaces and ordered step → verification actions; earliest
+   behavioral/live proof; and stop/replan plus install/rollback risks. Write
+   **no** production code.
 2. **Review the plan.** If it has a real gap, or a decision only the user can
-   make, raise it before building. A conversational "sounds good" approves
+   make, reject or revise it before building. A conversational "sounds good" approves
    nothing — the plan leaves plan mode through `exit_plan_mode`.
 3. **Build pass.** Adopt `agent-builder`. Execute the plan's steps in order. If a
-   step is wrong or blocked, say so and adapt — do not silently skip it.
+   step is wrong or blocked, say so and adapt — do not silently skip it. On the
+   first failed or inconclusive real proof, stop scope expansion and only
+   diagnose or retry the same slice.
 4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
    report the concrete result. A command that exited 0 has told you it finished,
    not that the work happened — assert on the artifact.
@@ -48,17 +58,14 @@ boundaries into its task.
 
 ## Looping until a condition holds
 
+`/pb is exactly one pass` and reports incomplete evidence rather than retrying.
 The portable form is **`/pbg <task> until: <condition>`** — plan → build →
-verify, repeated until the condition actually holds. dsh also has a harness-side
-goal loop (`/goal`, and the `ralph` tool's bounded rounds); either is fine, as
-long as the done-condition is concrete and verifiable — a suite that passes, a
-command that exits 0, an observable behaviour — and never vague.
-
-Keep it bounded: stop and hand back after about three full rounds without
-meeting the condition, after two consecutive rounds with no measurable progress,
-when the condition turns out to be unverifiable or ambiguous, or when a material
-decision needs the user. Report where it stands and the remaining gap rather
-than churning.
+verify, repeated until the condition actually holds. `/pbg is capped at exactly
+three rounds`. A second inconclusive proof or two rounds without measurable
+progress is BLOCKED even if artifact labels change. Persistence language cannot
+override ambiguity, safety, failed proof, no-progress, or round bounds. dsh also
+has a harness-side goal loop, but its terminal language cannot override these
+portable bounds.
 
 Honor `$DSH_HOME/AGENTS.md` (the machine contract) and the nearest project
 `AGENTS.md` throughout.

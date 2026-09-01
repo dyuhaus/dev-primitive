@@ -78,6 +78,28 @@ class ApplyTests(unittest.TestCase):
         self.assertFalse(audit["canDelegate"])
         self.assertEqual(audit["delegateTo"], [])
 
+    def test_pb_roles_carry_optional_contract_metadata_without_breaking_legacy_configs(self):
+        for key in ("planner", "builder"):
+            with self.subTest(role=key):
+                role = self.config["roles"][key]
+                self.assertTrue(role["capabilities"])
+                self.assertTrue(role["boundaries"])
+                self.assertTrue(role["outputContract"])
+                view = apply.role_view(self.config, key)
+                self.assertEqual(view["capabilities"], role["capabilities"])
+                self.assertEqual(view["boundaries"], role["boundaries"])
+                self.assertEqual(view["output_contract"], role["outputContract"])
+
+        legacy = copy.deepcopy(self.config)
+        for role in legacy["roles"].values():
+            for field in ("capabilities", "boundaries", "outputContract"):
+                role.pop(field, None)
+        self.assertEqual(apply.validate(legacy), [])
+
+        invalid = copy.deepcopy(self.config)
+        invalid["roles"]["planner"]["boundaries"] = "read-only"
+        self.assertTrue(any("roles.planner.boundaries must be a list of strings" in error for error in apply.validate(invalid)))
+
     def test_every_model_declares_a_provider_that_exists(self):
         """Portability, not an Anthropic-only policy.
 
@@ -279,6 +301,11 @@ class ApplyTests(unittest.TestCase):
         output = apply.generic_block(self.config)
         for key in apply.SPECIALIST_KEYS:
             self.assertIn(f"`{key}`", output)
+        for key in apply.ROLE_KEYS:
+            for item in self.config["roles"][key]["boundaries"]:
+                self.assertIn(item, output)
+            for item in self.config["roles"][key]["outputContract"]:
+                self.assertIn(item, output)
         self.assertIn("applicability recognition", output)
         self.assertIn("direct-call-only", output)
 
@@ -783,6 +810,39 @@ class ApplyTests(unittest.TestCase):
         self.assertIn('model: "gpt-5.6-sol"', pb)
         self.assertIn('reasoning_effort: "xhigh"', pb)
         self.assertIn('orchestrator must not', pb)
+
+    def test_portable_pb_contract_survives_every_rendered_surface(self):
+        invariant = (
+            "Await the Planner's terminal output before starting Builder",
+            "first failed or inconclusive real proof",
+            "A second inconclusive proof",
+            "/pb is exactly one pass",
+            "/pbg is capped at exactly three rounds",
+        )
+        for adapter in ("codex", "dsh", "hermes"):
+            with self.subTest(adapter=adapter):
+                rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), adapter))
+                pb = next(text for path, text in rendered.items() if path.parent.name == "agent-pb")
+                for phrase in invariant:
+                    self.assertIn(phrase, " ".join(pb.split()))
+                planner = next(text for path, text in rendered.items() if path.parent.name == "agent-planner")
+                builder = next(text for path, text in rendered.items() if path.parent.name == "agent-builder")
+                self.assertIn("smallest real end-to-end slice", planner)
+                self.assertIn("completed reviewed plan", builder)
+
+        claude = dict(apply.render_claude(self.claude_config, Path("/tmp/agent-framework-test-home")))
+        for name in ("pb.md", "pbg.md"):
+            surface = next(text for path, text in claude.items() if path.name == name)
+            for phrase in invariant:
+                self.assertIn(phrase, " ".join(surface.split()))
+        planner = next(text for path, text in claude.items() if path.name == "planner.md")
+        builder = next(text for path, text in claude.items() if path.name == "builder.md")
+        self.assertIn("smallest real end-to-end slice", planner)
+        self.assertIn("completed reviewed plan", builder)
+
+        generic = apply.generic_block(self.config)
+        self.assertIn("Await the Planner's terminal output before starting Builder", generic)
+        self.assertIn("/pbg is capped at exactly three rounds", generic)
 
     def test_apply_py_does_not_mirror_the_shared_skill_roots(self):
         """The two entry points differ, and the difference is deliberate.

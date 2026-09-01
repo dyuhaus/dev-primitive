@@ -61,7 +61,10 @@
         "model": { "$ref": "#/$defs/model" },
         "readOnly": { "type": "boolean" },
         "canDelegate": { "type": "boolean" },
-        "delegateTo": { "$ref": "#/$defs/stringList" }
+        "delegateTo": { "$ref": "#/$defs/stringList" },
+        "capabilities": { "$ref": "#/$defs/stringList" },
+        "boundaries": { "$ref": "#/$defs/stringList" },
+        "outputContract": { "$ref": "#/$defs/stringList" }
       }
     },
     "agentProfile": {
