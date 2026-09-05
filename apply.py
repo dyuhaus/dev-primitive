@@ -671,8 +671,10 @@ def profile_markdown(cfg: dict, key: str) -> str:
 
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
-material above. After substantive work, append at most one generalized,
-evidence-backed lesson in the documented format if it will improve future work.
+material above. A useful lesson is a suggestion unless the current task grants
+specific write authority to `LESSONS.md`. In a read-only task, report the
+suggestion to the parent or user and do not write it. When that authority exists,
+append at most one generalized, evidence-backed lesson in the documented format.
 Never include secrets, personal data, credentials, raw task logs, or private
 content. At 50 dated entries, consolidate the oldest reusable points into
 `## Durable practices` before adding more. Do not modify this profile; regenerate
@@ -693,7 +695,9 @@ personal data, private task content, or chronological task logs.
 
 ## Dated lessons
 
-<!-- Append at most one evidence-backed, generalized entry after substantive work:
+<!-- A useful lesson is report-only unless the current task specifically grants
+write authority to this file. Do not append during a read-only task.
+When authorized, append at most one evidence-backed, generalized entry:
 - YYYY-MM-DD | task type | reusable lesson | evidence/path or validation command
 When this section reaches 50 entries, fold the oldest reusable items into Durable
 practices and remove the consolidated dated entries. -->
@@ -712,11 +716,13 @@ source configuration, not generated profiles. `LESSONS.md` is intentionally
 created once and then preserved across regenerations.
 
 Before substantive work, an agent reads its profile, lessons, project
-instructions, and the profile's information sources. After work it may append
-**at most one** reusable, evidence-backed lesson in the documented dated format.
-Lessons are not task logs and must never contain secrets, credentials, personal
-data, raw private content, or unverified claims. At 50 dated entries, consolidate
-the oldest reusable entries into `## Durable practices`.
+instructions, and the profile's information sources. A useful lesson is a
+reportable suggestion unless the task specifically grants write authority to
+`LESSONS.md`; read-only work never writes it. With that authority, an agent may
+append **at most one** reusable, evidence-backed lesson in the documented dated
+format. Lessons are not task logs and must never contain secrets, credentials,
+personal data, raw private content, or unverified claims. At 50 dated entries,
+consolidate the oldest reusable entries into `## Durable practices`.
 '''
     if not readme.exists():
         write_out(readme, readme_content, dry)

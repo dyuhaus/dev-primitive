@@ -290,6 +290,22 @@ class ApplyTests(unittest.TestCase):
             finally:
                 apply.SCRIPT_DIR = original
 
+    def test_generated_profile_requires_task_specific_lesson_write_authority(self):
+        """A profile must not turn a useful lesson into a write authorization.
+
+        This is a generated-text regression only. It does not prove a model will
+        obey the instruction; that requires the separately bounded behavioral
+        evaluation.
+        """
+        profile = apply.profile_markdown(self.config, "planner")
+        self.assertIn("suggestion unless the current task grants", profile)
+        self.assertIn("specific write authority to `LESSONS.md`", profile)
+        self.assertIn("In a read-only task, report the", profile)
+        self.assertIn("do not write it", profile)
+        lessons = apply.lessons_markdown("planner")
+        self.assertIn("report-only unless the current task specifically grants", lessons)
+        self.assertIn("Do not append during a read-only task", lessons)
+
     def test_old_two_role_config_remains_valid(self):
         old = {key: copy.deepcopy(self.config[key]) for key in ("version", "roles", "providers")}
         old["version"] = 1
@@ -810,6 +826,31 @@ class ApplyTests(unittest.TestCase):
         self.assertIn('model: "gpt-5.6-sol"', pb)
         self.assertIn('reasoning_effort: "xhigh"', pb)
         self.assertIn('orchestrator must not', pb)
+
+    def test_codex_rendered_authority_policy_separates_parent_dispatch_and_nested_handoffs(self):
+        """Render the policy in the installed Codex surface, not just templates.
+
+        This checks artifact text only. It is not evidence that a model obeys the
+        policy or that the host tool boundary enforces it.
+        """
+        rendered = dict(apply.render_harness_skills(
+            self.config, Path("/tmp/agent-framework-test-home"), "codex"))
+        planner = next(text for path, text in rendered.items() if path.parent.name == "agent-planner")
+        builder = next(text for path, text in rendered.items() if path.parent.name == "agent-builder")
+        framework = next(text for path, text in rendered.items() if path.parent.name == "agent-framework")
+        framework_policy = " ".join(framework.split())
+        pb = next(text for path, text in rendered.items() if path.parent.name == "agent-pb")
+        route = next(text for path, text in rendered.items() if path.parent.name == "agent-route")
+        self.assertIn("unless the current session is explicitly confirmed to match", planner)
+        self.assertIn("already-authorized parent dispatch", planner)
+        self.assertIn("Can delegate: **false**", planner)
+        self.assertIn("`canDelegate` and `delegateTo` govern this worker's nested handoffs", planner)
+        self.assertIn("install, save a lesson, or run a mutating check", planner)
+        self.assertIn("Can delegate: **true**", builder)
+        self.assertIn("Allowed targets: l1-programmer, fe-designer", builder)
+        self.assertIn("parent dispatch is not a worker's delegation right", framework_policy)
+        self.assertIn("does not authorize either worker to create a nested handoff", pb)
+        self.assertIn("new profile selection or new authority", route)
 
     def test_portable_pb_contract_survives_every_rendered_surface(self):
         invariant = (

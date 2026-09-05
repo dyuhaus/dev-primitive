@@ -98,7 +98,7 @@ Each specialist profile has:
 | `capabilities` | Positive signals describing suitable work |
 | `boundaries` | Non-goals and stop/escalation conditions |
 | `escalateTo` | Agent keys that can receive escalation/recommendations |
-| `canDelegate` / `delegateTo` | Whether and where this profile may delegate |
+| `canDelegate` / `delegateTo` | Whether and where this worker may make a nested handoff; they do not limit an already-authorized parent dispatch |
 | `outputContract` | Required report/result behaviors |
 | `infoSources` | Required evidence sources and native inspection/validation guidance |
 
@@ -151,6 +151,19 @@ the active registry is intentionally refused. `install_harness.py codex|dsh|herm
 renders native skills. The generated files are not hand-edited.
 
 ## Explainable routing
+
+After a user authorizes the parent to run a task, the parent may dispatch the
+already-selected configured worker with its model, effort, mission, boundaries,
+and output contract without asking the same question again. That parent dispatch
+does not give the worker nested-delegation authority. A worker may make a nested
+handoff only when its `canDelegate`, `delegateTo`, and the task authority all
+permit it. A router recommendation, new profile selection, or new authority
+still requires user confirmation. Team Leader and Audit remain explicit-only.
+Read-only is a behavioral boundary rather than a sandbox: a read-only worker
+does not edit, write, commit, install, save lessons, or run mutating checks.
+Useful lessons remain reportable suggestions unless the task specifically grants
+a `LESSONS.md` write. Render and unit tests prove generated text, not model
+behavior or host permission enforcement.
 
 `router.py` is a stdlib-only, deterministic applicability classifier. It extracts
 artifact, action, complexity, outline, Vault, documentation, prose, frontend,
@@ -214,10 +227,11 @@ Examples:
 boundaries, information sources, and output expectations. `apply.py knowledge`
 regenerates profiles from the registry but intentionally preserves each
 `LESSONS.md`. Before substantive work an agent reads its profile, lessons, and
-source material. It may append one generalized evidence-backed lesson afterward;
-lessons never contain secrets, personal data, private task content, or task logs.
-At 50 dated entries the oldest reusable lessons are consolidated into `## Durable
-practices`. See [`agent-knowledge/README.md`](./agent-knowledge/README.md).
+source material. A useful lesson is report-only unless the task specifically
+grants a `LESSONS.md` write, and read-only work never writes it. Lessons never
+contain secrets, personal data, private task content, or task logs. At 50 dated
+entries the oldest reusable lessons are consolidated into `## Durable practices`.
+See [`agent-knowledge/README.md`](./agent-knowledge/README.md).
 
 ## Creating a future agent
 

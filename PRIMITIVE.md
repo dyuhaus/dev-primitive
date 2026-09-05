@@ -20,7 +20,10 @@ domain-specific work may route directly to a confirmed specialist, ambiguous or
 routine work uses Runner, and a small explicitly outlined implementation may use
 L1. Planner does not call specialists itself; it recommends the next role and
 the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
-FE-Designer when its harness exposes those tools.
+FE-Designer when its harness exposes those tools. A parent may dispatch an
+already-user-authorized worker without a repeat question; that is not a worker's
+nested-delegation authority. A new profile selection or new authority still needs
+user confirmation.
 
 ### Portable PB contract
 
@@ -134,8 +137,10 @@ belong in that harness's adapter, not in the shared contract.
 the registry; it documents each agent's specialty, information gathering, and
 boundaries. Each neighboring `LESSONS.md` is deliberately preserved and stores
 only generalized, evidence-backed practices—never secrets, personal data, or
-task logs. Agents read these files before substantive work and may add one
-lesson afterward when the project permits the mutation.
+task logs. Agents read these files before substantive work. A useful lesson is
+report-only unless the task specifically grants a `LESSONS.md` write; read-only
+work never writes it. When authorized, an agent may add one lesson afterward in
+the documented format.
 
 ## Portability rules
 

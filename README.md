@@ -45,8 +45,9 @@ No third-party dependencies (Python 3.8+ stdlib only).
 profiles live under the optional `agents` registry and each has its own model,
 capabilities, boundaries, invocation policy, and escalation/delegation rules.
 `router.py` deterministically recognizes applicable agents and supplies an
-explainable handoff. Pi can offer that handoff automatically, but it always
-requires the user's confirmation before delegation. Completed Planner →
+explainable handoff. A parent may dispatch an already-user-authorized worker
+without repeating that question; a new profile selection or new authority still
+requires user confirmation. Completed Planner →
 Builder/specialist workflows receive a small read-only audit at xhigh effort
 before the final report; it is separate from the full Audit agent, which is
 explicitly invoked for AI-harness/runtime bug audits and does not call delegated
