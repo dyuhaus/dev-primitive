@@ -140,9 +140,10 @@ evidence, then appends a concise advisory verdict without editing or delegation.
 
 `router.py` classifies a task deterministically and returns an explainable
 applicability result. Pi automatically offers an eligible handoff when
-`enabled: true`, while Claude and Pi `/route` show it on demand. Every path
-requires confirmation and never silently invokes any profile; the portable
-alternative is:
+`enabled: true`, while Claude and Pi `/route` show it on demand. A new profile
+selection or new authority requires confirmation and never silently invokes a
+profile; an already-authorized parent dispatch does not repeat that question.
+The portable alternative is:
 
 ```bash
 python3 /home/dyadmin/dev-primitive/router.py --explain 'task'

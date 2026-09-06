@@ -14,6 +14,13 @@ the **builder**, build, verify. On Codex, substantive automated PB work must
 use explicitly routed child agents unless the current session is confirmed to
 match the required model and effort.
 
+Once the user has authorized the parent to run this PB task, the parent may
+dispatch the selected Planner or Builder with the configured model, effort,
+mission, boundaries, and output contract without asking the same question again.
+That does not authorize either worker to create a nested handoff: a worker must
+follow its own `canDelegate` and `delegateTo`, and a router-selected new profile
+or new authority still requires user confirmation.
+
 Await the Planner's terminal output before starting Builder; never pre-spawn
 Builder. Use one Planner and one Builder per round. At most one plan-authorized
 L1/FE delegation is allowed; multi-workstream work requires an explicit Team

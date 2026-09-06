@@ -20,7 +20,10 @@ domain-specific work may route directly to a confirmed specialist, ambiguous or
 routine work uses Runner, and a small explicitly outlined implementation may use
 L1. Planner does not call specialists itself; it recommends the next role and
 the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
-FE-Designer when its harness exposes those tools.
+FE-Designer when its harness exposes those tools. A parent may dispatch an
+already-user-authorized worker without a repeat question; that is not a worker's
+nested-delegation authority. A new profile selection or new authority still needs
+user confirmation.
 
 ### Portable PB contract
 
@@ -68,8 +71,11 @@ The config is checked by [`roles.schema.json`](./roles.schema.json) and
 `apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only review
 at `xhigh` effort after completed Planner → executor work; it checks the plan,
 result evidence, omissions, and follow-up without editing or delegating. This is
-separate from the full direct-call Audit specialist, which directly investigates
-and repairs harness/runtime failures without invoking delegated agents.
+separate from the full direct-call Audit specialist. Its ordinary mode directly
+investigates and repairs harness/runtime failures without invoking delegated
+agents. When explicitly selected for an instruction-only skills or `AGENTS.md`
+audit, it reads authorized instruction surfaces and reports findings without
+mutation; its ordinary repair obligations remain conditional outside that mode.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
 The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
@@ -134,8 +140,10 @@ belong in that harness's adapter, not in the shared contract.
 the registry; it documents each agent's specialty, information gathering, and
 boundaries. Each neighboring `LESSONS.md` is deliberately preserved and stores
 only generalized, evidence-backed practices—never secrets, personal data, or
-task logs. Agents read these files before substantive work and may add one
-lesson afterward when the project permits the mutation.
+task logs. Agents read these files before substantive work. A useful lesson is
+report-only unless the task specifically grants a `LESSONS.md` write; read-only
+work never writes it. When authorized, an agent may add one lesson afterward in
+the documented format.
 
 ## Portability rules
 

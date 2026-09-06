@@ -29,12 +29,22 @@ with the profile's configured OpenAI `model` and `reasoning_effort`, unless the
 current session is explicitly confirmed to match both. Direct adoption is for
 trivial/manual work and must say which session model ran.
 
-`spawn_agent` gives a child a fresh context, not a profile. Paste the profile's
-mission and boundaries into its task; nothing carries them automatically.
+In an already-user-authorized task, the parent orchestrator may dispatch the
+selected configured child with its model, effort, mission, boundaries, and output
+contract without another confirmation. That parent dispatch is not a worker's
+delegation right. `spawn_agent` gives a child a fresh context, not a profile, so
+the parent must include those instructions in its task.
+
+A worker's `canDelegate` and `delegateTo` govern only that worker's nested
+handoffs. A router recommendation, a new profile selection, or new authority
+still requires user confirmation; an existing authorized parent dispatch does
+not.
 
 The `tools:` list in each profile is Claude Code's tool vocabulary. Codex does
 not enforce it, so a read-only profile's boundary is a discipline here, not a
-sandbox. Keep it anyway.
+sandbox. A read-only worker must not edit, write, commit, install, save lessons,
+or run mutating checks; it reports useful lesson suggestions unless the task
+specifically authorizes a `LESSONS.md` write.
 
 ## Picking a profile
 
@@ -60,5 +70,6 @@ Plus `agent-pb` (the plan → build loop) and `agent-route` (explainable routing
 - The registry is the only place a model assignment changes:
   `python3 {{REPO_DIR}}/apply.py set <role-or-agent> <class>`. Never hand-edit a
   generated skill file — the next install overwrites it.
-- Every handoff is confirmation-required. The router recommends; the user decides.
+- The router recommends; a new profile selection or new authority needs user
+  confirmation. Do not repeat that question for an already-authorized parent dispatch.
 - Direct-call-only profiles are never automatic routing destinations.

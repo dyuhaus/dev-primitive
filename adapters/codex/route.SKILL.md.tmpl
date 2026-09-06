@@ -17,12 +17,17 @@ python3 {{REPO_DIR}}/router.py --explain "<the task>"
 ```
 
 Present the selected profile, its confidence, the reasons, the alternatives, and
-any clarifying questions the router returned. Then **ask the user before acting
-on it** — recognition is always confirmation-required here.
+any clarifying questions the router returned. Ask the user before acting on a
+new profile selection or new authority — recognition alone never grants either.
+Do not use the router to repeat a question for a profile the user has already
+authorized the parent to dispatch for the current task.
 
 Once confirmed, load that profile's `agent-<key>` skill and adopt it. Never
 auto-select a direct-call-only profile ({{DIRECT_CALL_ONLY}}); those run only on
 an explicit request from the user.
+
+The router never gives a worker authority to make a nested handoff. That remains
+subject to the worker's `canDelegate`, `delegateTo`, and the task's authority.
 
 Report what the router actually said. Do not infer a recommendation it did not
 print, and do not substitute your own judgement for its output without saying
