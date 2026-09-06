@@ -71,8 +71,11 @@ The config is checked by [`roles.schema.json`](./roles.schema.json) and
 `apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only review
 at `xhigh` effort after completed Planner → executor work; it checks the plan,
 result evidence, omissions, and follow-up without editing or delegating. This is
-separate from the full direct-call Audit specialist, which directly investigates
-and repairs harness/runtime failures without invoking delegated agents.
+separate from the full direct-call Audit specialist. Its ordinary mode directly
+investigates and repairs harness/runtime failures without invoking delegated
+agents. When explicitly selected for an instruction-only skills or `AGENTS.md`
+audit, it reads authorized instruction surfaces and reports findings without
+mutation; its ordinary repair obligations remain conditional outside that mode.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
 The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
