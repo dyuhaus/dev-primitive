@@ -17,13 +17,11 @@ planner  →  reasoning-tier model  →  architecture, design, root-cause, seque
 builder  →  coding-tier model     →  writing/editing code, running builds & tests, applying the plan
 ```
 
-**Loop:** reason with the planner → hand its plan to the builder → build → verify.
-The session's main loop is an *orchestrator* that routes each kind of work to the
-right model instead of doing both itself. Trivial lookups and one-line edits stay
-inline. Planner is the entry point for substantive generic engineering, not for
-every prompt: confirmed domain specialists, Runner, and explicitly outlined L1
-work can be direct destinations. Planner recommends handoffs; it does not spawn
-other specialists itself.
+Ordinary work stays in the active session: plan, perform, and verify it there.
+Use Planner → Builder only when David explicitly asks for PB or confirms the
+router recommendation. The explicit Codex route uses Sol to plan and Terra to
+build; dsh cannot dispatch that configured OpenAI route and must fail closed.
+Planner recommends handoffs; it does not spawn other specialists itself.
 
 ## Quickstart
 
@@ -47,16 +45,16 @@ capabilities, boundaries, invocation policy, and escalation/delegation rules.
 `router.py` deterministically recognizes applicable agents and supplies an
 explainable handoff. A parent may dispatch an already-user-authorized worker
 without repeating that question; a new profile selection or new authority still
-requires user confirmation. Completed Planner →
-Builder/specialist workflows receive a small read-only audit at xhigh effort
-before the final report; it is separate from the full direct-call Audit agent.
+requires user confirmation. Automatic post-workflow audit is disabled. Code
+Reviewer and the full direct-call Audit agent remain available only when David
+explicitly requests them; neither is a pull-request gate.
 An explicitly requested instruction-only Audit of skills or `AGENTS.md` files
 reports authorized findings without mutation; ordinary Audit repair remains
 separate. Team Leader and Audit are direct-call-only and cannot be selected by
 the router.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
+The automatic post-workflow audit is disabled. Code Reviewer remains on-demand, and the direct-call Audit profile runs on `gpt-5.6-sol` on `openai` at `xhigh` when explicitly requested.
 <!-- END GENERATED: auditor-models -->
 
 Everything is driven by [`roles.config.json`](./roles.config.json) — the single
@@ -81,7 +79,8 @@ source of truth. Each role has a **customizable model class**:
 
 This shared file is harness-neutral: its active Planner/Builder assignments are
 `gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at `xhigh`, unless a project-level
-config overrides them. `routing.postWorkflowAudit` uses Sol at `xhigh`.
+config overrides them. `routing.postWorkflowAudit.enabled` is false, so it
+does not launch an automatic audit child or require an audit verdict.
 
 **A model class is only useful on a harness that can dispatch it.** Claude Code
 resolves a subagent's `model:` against Anthropic classes and `claude-*` ids and

@@ -30,10 +30,12 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 
 - **Runner** is the everyday front door for maintenance, routine work, triage,
   and escalation. It identifies whether a task belongs with another specialist.
-- **Planner** and **Builder** are the PB development core. Planner is the
-  read-only reasoning specialist. Builder is the senior engineer for complex
-  systems and may delegate a clearly outlined, well-scoped subtask to L1 or a
-  separable frontend implementation to FE-Designer.
+- **Planner** and **Builder** are the explicit PB development core. David must
+  ask for PB or confirm a router recommendation before using the configured
+  Sol Planner → Terra Builder route. Planner is the read-only reasoning
+  specialist. Builder is the senior engineer for complex systems and may
+  delegate a clearly outlined, well-scoped subtask to L1 or a separable frontend
+  implementation to FE-Designer.
 - **L1 Programmer** is the junior/intern implementation specialist for basic
   scripts, tests, small fixes, and explicitly outlined work. It must escalate
   architecture or unclear scope to Builder/Planner.
@@ -50,10 +52,9 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 - **Code Reviewer** adversarially reviews a branch, diff, or codebase when David
   explicitly requests an automated review. It is an optional, read-only
   specialist and never a PR gate; it reports findings and never fixes them.
-- **Light workflow audit** is an automatic, read-only post-step after completed
-  Planner → Builder or Planner → specialist work. It checks plan adherence,
-  evidence, omissions, and follow-up at `xhigh` effort; it is intentionally
-  smaller than the direct-call Audit specialist and never edits or delegates.
+- **Post-workflow audit** is disabled in the active registry. Completed work
+  does not launch an audit child or require a verdict. Code Reviewer and the
+  direct-call Audit specialist remain on-demand, never a pull-request gate.
 - **Audit** is **direct-call-only**. Its ordinary mode reproduces and repairs
   failures in AI harnesses, routing, extensions, runtime processes, and
   developer-tool integrations without delegated agents, then updates durable
@@ -62,7 +63,7 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
   inspects authorized instruction surfaces and reports findings without mutation.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
+The automatic post-workflow audit is disabled. Code Reviewer remains on-demand, and the direct-call Audit profile runs on `gpt-5.6-sol` on `openai` at `xhigh` when explicitly requested.
 <!-- END GENERATED: auditor-models -->
 - **Team Leader** coordinates genuinely large tasks that require multiple
   workstreams. It is **direct-call-only** and must never be automatically
@@ -81,8 +82,8 @@ change, not a prompt edit.
 - `agents`: specialist profiles keyed by stable machine names.
 - `providers`: provider protocol and environment-variable *names*. Secrets never
   belong in this file.
-- `routing.postWorkflowAudit`: configures the lightweight model and thinking
-  level used after completed Planner → executor workflows.
+- `routing.postWorkflowAudit`: retains the optional audit model and thinking
+  settings; `enabled: false` disables automatic audit dispatch and verdicts.
 - `routing.automaticSelection`: configures the deterministic `router.py`.
   `enabled` permits a supporting harness to offer automatic applicability
   recognition; every harness must still obtain confirmation before delegation.
@@ -197,32 +198,31 @@ python3 router.py --explain "Update the Vault index and fix broken wikilinks"
 python3 router.py --json "Refactor the broker service architecture"
 ```
 
-After each successfully completed Planner → executor workflow—including every
-completed `/pbg` round—supporting adapters run one small post-workflow audit
-using `routing.postWorkflowAudit` at the registry's `xhigh` effort.
-The reviewer receives the task, plan, executor identity, and executor evidence;
-it is read-only, does not delegate, and appends an advisory verdict. It does not
-replace the full explicit `/audit` specialist.
+The active `routing.postWorkflowAudit.enabled: false` setting means completed
+Planner → executor work, including `/pbg` rounds, launches no audit child and
+requires no audit verdict. Code Reviewer and direct-call Audit remain explicit,
+on-demand options; neither is a pull-request gate.
 
 Claude and Pi expose the same deliberate flow through `/route <task>`: show the
 applicability result, ask for confirmation, then invoke the selected profile only
 if approved. With `enabled: true`, Pi also offers this confirmation gate for
 eligible ordinary interactive tasks. In noninteractive contexts Pi reports the
 result but does not invoke. When `planBeforeBuild` is true, a generic substantive
-implementation score is converted to Planner so the confirmed Pi handoff runs
-the complete Planner → Builder workflow; an explicit specialist match or a small,
-clearly outlined L1 task bypasses PB. Planner itself does not spawn specialists:
-it names the recommended next role, and the parent orchestrator performs the
-approved handoff. Builder is the only PB child permitted to delegate, narrowly to
-L1 Programmer or FE-Designer when the harness exposes those delegation tools.
+implementation score can recommend Planner, but PB starts only after David asks
+for it or confirms that recommendation. An explicit specialist match or a small,
+clearly outlined L1 task stays outside PB. Planner itself does not spawn
+specialists: it names the recommended next role, and the parent orchestrator
+performs the approved handoff. Builder is the only PB child permitted to delegate,
+narrowly to L1 Programmer or FE-Designer when the harness exposes those
+delegation tools.
 Low confidence and material ambiguity fall back to Runner. The router hard
 excludes `direct-call-only` profiles and `team-leader` regardless of malformed
 metadata. Multi-workstream language is reported as a cue to explicitly call Team
 Leader, never as a selection. Optional audit records are JSONL with a SHA-256
 hash and decision metadata only—never raw task text—and are disabled by default.
 
-Use Runner for ordinary work and ask it to recommend escalation. Use `/pb` for a
-substantive plan → build pass. Call Team Leader directly only when the task needs
+Use the active session for ordinary work and ask Runner to recommend escalation.
+Use `/pb` only for an explicit plan → build pass. Call Team Leader directly only when the task needs
 multiple agents, for example a product launch requiring software changes,
 technical docs, user-facing prose, and Vault updates with dependencies between
 them.
@@ -233,7 +233,8 @@ Examples:
   maintenance and escalate the runbook portion to Tech Writer.
 - “Add a small parser from this exact outline and write tests” → L1 Programmer.
 - “Design and implement a new service with an API, deployment, and migration”
-  → Planner then Builder; Builder may delegate isolated scripts to L1.
+  → with David's explicit PB request, Planner then Builder; Builder may delegate
+  isolated scripts to L1.
 - “Implement the supplied component spec as a responsive, keyboard-accessible
   interface using this project’s design system” → FE-Designer.
 - “Audit this stalled Pi handoff, fix feedback/cancellation, reinstall the

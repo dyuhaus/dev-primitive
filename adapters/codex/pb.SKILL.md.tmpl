@@ -1,6 +1,6 @@
 ---
 name: agent-pb
-description: "Run this machine's plan-then-build development loop on Codex — reason first as the planner profile, then implement as the builder profile, then verify against an explicit done-condition. Use for any substantive implementation work, and read it before assuming the two roles run on different models here."
+description: "Run this machine's explicit plan-then-build loop on Codex when David requests it or confirms the router recommendation; it uses the Planner profile, Builder profile, and an explicit done-condition."
 ---
 
 <!-- Generated from dev-primitive/roles.config.json by apply.py codex.
@@ -9,10 +9,11 @@ description: "Run this machine's plan-then-build development loop on Codex — r
 
 # Plan → build (Codex)
 
-This machine's stated method is: reason with the **planner**, hand the plan to
-the **builder**, build, verify. On Codex, substantive automated PB work must
-use explicitly routed child agents unless the current session is confirmed to
-match the required model and effort.
+Ordinary authorized work stays in the current session: plan, perform, and
+verify it there. Run PB only when David explicitly asks for it or confirms a
+router recommendation. On Codex, that explicit PB work uses the configured
+Planner → Builder route unless the current session is confirmed to match the
+required model and effort.
 
 Once the user has authorized the parent to run this PB task, the parent may
 dispatch the selected Planner or Builder with the configured model, effort,
@@ -54,13 +55,8 @@ child with `model: "{{BUILDER_MODEL}}"` and
 4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
    report the concrete result. A command that exited 0 has told you it finished,
    not that the work happened — assert on the artifact.
-5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). When enabled, spawn a
-   separate **read-only** child with `model: "{{WORKFLOW_AUDIT_MODEL}}"` and
-   `reasoning_effort: "{{WORKFLOW_AUDIT_THINKING}}"`; the orchestrator must not
-   perform this audit itself. Give it the plan, changed paths, evidence, and the
-   acceptance criteria. It returns a verdict on coverage, consistency, scope,
-   secrets, destructive action, and dropped follow-up.
-6. **Report.** What changed, how it was verified, the audit verdict, what is left.
+{{CODEX_WORKFLOW_AUDIT_STEP}}
+6. **Report.** What changed, how it was verified, {{WORKFLOW_AUDIT_REPORT}}, what is left.
 
 Direct adoption is only for trivial/manual work or a session explicitly confirmed
 to match both required values. The explicit `model` and `reasoning_effort` above
