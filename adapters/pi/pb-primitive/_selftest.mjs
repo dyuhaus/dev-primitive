@@ -316,6 +316,7 @@ assert.equal(auditCallsAfterDisabledConfig, auditCallsBeforeDisabledConfig, "the
 // the registry's OpenAI model and xhigh effort; none may inherit Pi ambient
 // thinking or substitute an Anthropic fallback.
 const childCtx = { cwd: root, signal: undefined, hasUI: false, mode: "rpc" };
+const enabledAuditChildCtx = { cwd: auditCwd, signal: undefined, hasUI: false, mode: "rpc" };
 await tools.get("planner_agent").execute("test", { task: "plan safely" }, new AbortController().signal, () => {}, childCtx);
 await tools.get("builder_agent").execute("test", { task: "build safely" }, new AbortController().signal, () => {}, childCtx);
 await tools.get("runner_agent").execute("test", { task: "run safely" }, new AbortController().signal, () => {}, childCtx);
@@ -359,7 +360,7 @@ async function waitForEventCount(count) {
 // completed Planner output rather than a reconstructed or partial substitute.
 await resetWorkflowTranscript();
 process.env.PB_FAKE_SCENARIO = "ordering";
-const orderingRun = commands.get("pb").handler("implement the smallest verified slice", childCtx);
+const orderingRun = commands.get("pb").handler("implement the smallest verified slice", enabledAuditChildCtx);
 assert.deepEqual(await waitForEventCount(1), [{ kind: "start", role: "planner" }], "Builder started while delayed Planner was still running");
 await fs.writeFile(releaseFile, "release");
 await orderingRun;
@@ -369,6 +370,8 @@ assert.deepEqual(orderingEvents, [
 	{ kind: "end", role: "planner" },
 	{ kind: "start", role: "builder" },
 	{ kind: "end", role: "builder" },
+	{ kind: "start", role: "audit" },
+	{ kind: "end", role: "audit" },
 ]);
 const orderingTasks = await readJsonLines(taskLog);
 const builderTask = orderingTasks.find((entry) => entry.role === "builder")?.task ?? "";
@@ -378,9 +381,9 @@ assert.match(builderTask, /COMPLETED PLAN TOKEN: smallest slice verified/);
 // changes; the second result cannot reset progress or start a third round.
 await resetWorkflowTranscript();
 process.env.PB_FAKE_SCENARIO = "inconclusive";
-await commands.get("pbg").handler("repair the same artifact until: proof is complete", childCtx);
+await commands.get("pbg").handler("repair the same artifact until: proof is complete", enabledAuditChildCtx);
 const inconclusiveStarts = (await readJsonLines(eventLog)).filter((event) => event.kind === "start").map((event) => event.role);
-assert.deepEqual(inconclusiveStarts, ["planner", "builder", "verifier", "planner", "builder", "verifier"]);
+assert.deepEqual(inconclusiveStarts, ["planner", "builder", "audit", "verifier", "planner", "builder", "audit", "verifier"]);
 const inconclusiveTasks = await readJsonLines(taskLog);
 const secondPlannerTask = inconclusiveTasks.filter((entry) => entry.role === "planner")[1]?.task ?? "";
 assert.match(secondPlannerTask, /Diagnose or replan only the same smallest slice/);
@@ -394,12 +397,12 @@ assert.match(reportText(), /second inconclusive proof|two rounds without measura
 // terminal user's wording cannot authorize a fourth planner/builder round.
 await resetWorkflowTranscript();
 process.env.PB_FAKE_SCENARIO = "hard-limit";
-await commands.get("pbg").handler("only stop when ready; repair the same slice until: real proof passes", childCtx);
+await commands.get("pbg").handler("only stop when ready; repair the same slice until: real proof passes", enabledAuditChildCtx);
 const hardLimitStarts = (await readJsonLines(eventLog)).filter((event) => event.kind === "start").map((event) => event.role);
 assert.deepEqual(hardLimitStarts, [
-	"planner", "builder", "verifier",
-	"planner", "builder", "verifier",
-	"planner", "builder", "verifier",
+	"planner", "builder", "audit", "verifier",
+	"planner", "builder", "audit", "verifier",
+	"planner", "builder", "audit", "verifier",
 ]);
 assert.match(reportText(), /## BLOCKED/);
 assert.match(reportText(), /hard limit reached after exactly three CONTINUE rounds; no fourth round was started/);
