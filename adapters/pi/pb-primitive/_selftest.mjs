@@ -26,6 +26,8 @@ const indexModule = await jiti.import(path.join(here, "index.ts"));
 // Exercise the active OpenAI registry, not a historical Anthropic fixture: Pi
 // must carry each role's registered effort instead of inheriting ambient state.
 const valid = JSON.parse(await fs.readFile(path.resolve(here, "../../../roles.config.json"), "utf8"));
+const enabledAuditConfig = structuredClone(valid);
+enabledAuditConfig.routing.postWorkflowAudit.enabled = true;
 
 assert.deepEqual(config.validateConfig(valid), []);
 assert.ok(config.validateConfig({ version: 0, roles: {}, providers: {} }).length >= 3);
@@ -282,7 +284,7 @@ assert.equal(subagent.liveChildCount(), 0);
 
 const auditCwd = path.join(fakeDir, "audit-work");
 await fs.mkdir(auditCwd, { recursive: true });
-await fs.writeFile(path.join(auditCwd, "roles.config.json"), JSON.stringify(valid));
+await fs.writeFile(path.join(auditCwd, "roles.config.json"), JSON.stringify(enabledAuditConfig));
 const auditReport = await indexModule.runPostWorkflowAudit(
 	"Implement feature",
 	"Plan with acceptance criteria",
@@ -296,9 +298,21 @@ assert.equal(auditRunArgs[auditRunArgs.indexOf("--model") + 1], "gpt-5.6-sol");
 assert.equal(auditRunArgs[auditRunArgs.indexOf("--thinking") + 1], "xhigh");
 assert.equal(auditRunArgs[auditRunArgs.indexOf("--tools") + 1], "read,grep,find,ls");
 
+const auditCallsBeforeDisabledConfig = (await fs.readFile(argsLog, "utf8")).trim().split("\n").filter(Boolean).length;
+const disabledAuditReport = await indexModule.runPostWorkflowAudit(
+	"Implement feature",
+	"Plan with acceptance criteria",
+	"Builder",
+	"Changed files and tests pass",
+	{ cwd: root, signal: undefined },
+);
+assert.equal(disabledAuditReport.text, "");
+const auditCallsAfterDisabledConfig = (await fs.readFile(argsLog, "utf8")).trim().split("\n").filter(Boolean).length;
+assert.equal(auditCallsAfterDisabledConfig, auditCallsBeforeDisabledConfig, "the active disabled registry must not launch an audit child");
+
 // Exercise every automated entrypoint through the fake binary. This includes
 // direct planner/builder/specialist tools and the pbg continuation path
-// (planner, builder, post-workflow reviewer, verifier). Every child must carry
+// (planner, builder, verifier). Every child must carry
 // the registry's OpenAI model and xhigh effort; none may inherit Pi ambient
 // thinking or substitute an Anthropic fallback.
 const childCtx = { cwd: root, signal: undefined, hasUI: false, mode: "rpc" };
@@ -307,13 +321,13 @@ await tools.get("builder_agent").execute("test", { task: "build safely" }, new A
 await tools.get("runner_agent").execute("test", { task: "run safely" }, new AbortController().signal, () => {}, childCtx);
 await commands.get("pbg").handler("complete the test until: child routing is evidenced", childCtx);
 const allChildArgs = (await fs.readFile(argsLog, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-assert.equal(allChildArgs.length, 9, "planner, builder, specialist, reviewer, and pbg continuation children must all spawn exactly once");
+assert.equal(allChildArgs.length, 8, "the active disabled registry must omit the audit child from the pbg continuation");
 for (const argv of allChildArgs) {
 	assert.equal(argv[argv.indexOf("--provider") + 1], "openai", `child provider drifted: ${JSON.stringify(argv)}`);
 	assert.ok(["gpt-5.6-sol", "gpt-5.6-terra"].includes(argv[argv.indexOf("--model") + 1]), `child model drifted: ${JSON.stringify(argv)}`);
 	assert.equal(argv[argv.indexOf("--thinking") + 1], "xhigh", `child omitted registry xhigh: ${JSON.stringify(argv)}`);
 }
-assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-sol"), "planner/reviewer Sol child was not exercised");
+assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-sol"), "the Planner Sol child was not exercised");
 assert.ok(allChildArgs.some((argv) => argv[argv.indexOf("--model") + 1] === "gpt-5.6-terra"), "builder/specialist Terra child was not exercised");
 
 // Incident regressions use the same fake child and JSONL result transport as
@@ -355,8 +369,6 @@ assert.deepEqual(orderingEvents, [
 	{ kind: "end", role: "planner" },
 	{ kind: "start", role: "builder" },
 	{ kind: "end", role: "builder" },
-	{ kind: "start", role: "audit" },
-	{ kind: "end", role: "audit" },
 ]);
 const orderingTasks = await readJsonLines(taskLog);
 const builderTask = orderingTasks.find((entry) => entry.role === "builder")?.task ?? "";
@@ -368,7 +380,7 @@ await resetWorkflowTranscript();
 process.env.PB_FAKE_SCENARIO = "inconclusive";
 await commands.get("pbg").handler("repair the same artifact until: proof is complete", childCtx);
 const inconclusiveStarts = (await readJsonLines(eventLog)).filter((event) => event.kind === "start").map((event) => event.role);
-assert.deepEqual(inconclusiveStarts, ["planner", "builder", "audit", "verifier", "planner", "builder", "audit", "verifier"]);
+assert.deepEqual(inconclusiveStarts, ["planner", "builder", "verifier", "planner", "builder", "verifier"]);
 const inconclusiveTasks = await readJsonLines(taskLog);
 const secondPlannerTask = inconclusiveTasks.filter((entry) => entry.role === "planner")[1]?.task ?? "";
 assert.match(secondPlannerTask, /Diagnose or replan only the same smallest slice/);
@@ -385,9 +397,9 @@ process.env.PB_FAKE_SCENARIO = "hard-limit";
 await commands.get("pbg").handler("only stop when ready; repair the same slice until: real proof passes", childCtx);
 const hardLimitStarts = (await readJsonLines(eventLog)).filter((event) => event.kind === "start").map((event) => event.role);
 assert.deepEqual(hardLimitStarts, [
-	"planner", "builder", "audit", "verifier",
-	"planner", "builder", "audit", "verifier",
-	"planner", "builder", "audit", "verifier",
+	"planner", "builder", "verifier",
+	"planner", "builder", "verifier",
+	"planner", "builder", "verifier",
 ]);
 assert.match(reportText(), /## BLOCKED/);
 assert.match(reportText(), /hard limit reached after exactly three CONTINUE rounds; no fourth round was started/);

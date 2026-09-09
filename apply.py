@@ -415,6 +415,26 @@ def template_mapping(cfg: dict, adapter: str = "claude-code") -> dict:
     # field is only checked when one is actually configured. This matches
     # claude_dispatch_report(), which already skips the same case.
     audit_field = field(audit_model, audit_provider_type) if post_audit.get("model") is not None else audit_model
+    audit_enabled = post_audit.get("enabled", False)
+    if audit_enabled:
+        codex_audit_step = ("5. **Light audit.** Spawn a separate **read-only** child with `model: \""
+                            f"{audit_model}\"` and `reasoning_effort: \"{post_audit.get('thinking', 'medium')}\"`; "
+                            "the orchestrator must not perform this audit itself. Give it the plan, changed paths, evidence, "
+                            "and acceptance criteria. It returns a verdict on coverage, consistency, scope, secrets, destructive action, and dropped follow-up.")
+        dsh_audit_step = ("5. **Light audit.** Re-read the plan against what was built: acceptance criteria met, evidence consistent "
+                          "with the claims, nothing unrelated dragged in, no secrets, no destructive action, no follow-up silently dropped. "
+                          "Report a verdict, not a reassurance.")
+        audit_report = "the audit verdict"
+        reviewing_auditing_policy = ("The configured light post-workflow audit follows the registry. Code Reviewer and "
+                                    "direct-call Audit remain on demand and do not gate a pull request.")
+    else:
+        codex_audit_step = ("5. **Optional review.** Automatic post-workflow audit is disabled. Run Code Reviewer or direct-call Audit "
+                            "only when David explicitly requests it; otherwise do not spawn a review child or require a verdict before reporting.")
+        dsh_audit_step = ("5. **Optional review.** Automatic post-workflow audit is disabled. An explicitly requested review remains "
+                          "available, but dsh cannot dispatch the configured OpenAI routes; do not spawn a child or require a verdict before reporting.")
+        audit_report = "any explicitly requested review findings"
+        reviewing_auditing_policy = ("Automatic post-workflow audit is disabled. Code Reviewer and direct-call Audit run "
+                                    "only on demand and do not gate a pull request.")
     return {
         "PLANNER_MODEL": p["model"],
         "BUILDER_MODEL": b["model"],
@@ -430,6 +450,10 @@ def template_mapping(cfg: dict, adapter: str = "claude-code") -> dict:
         "WORKFLOW_AUDIT_MODEL": audit_model,
         "WORKFLOW_AUDIT_MODEL_FIELD": audit_field,
         "WORKFLOW_AUDIT_THINKING": post_audit.get("thinking", "medium"),
+        "CODEX_WORKFLOW_AUDIT_STEP": codex_audit_step,
+        "DSH_WORKFLOW_AUDIT_STEP": dsh_audit_step,
+        "WORKFLOW_AUDIT_REPORT": audit_report,
+        "REVIEWING_AUDITING_POLICY": reviewing_auditing_policy,
         "ANTHROPIC_CLASSES": ", ".join(f"`{name}`" for name in ANTHROPIC_MODEL_CLASSES),
     }
 
@@ -738,7 +762,13 @@ consolidate the oldest reusable entries into `## Durable practices`.
 
 
 def generic_block(cfg: dict) -> str:
-    lines = ["## Configurable Agent Framework", "", "Planner and Builder are the PB core. router.py provides deterministic, explainable applicability recognition; every handoff requires confirmation before delegation. Team Leader is never automatically selected.", "", "### PB core"]
+    audit_enabled = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {}).get("enabled", False)
+    audit_policy = (
+        "The configured light post-workflow audit follows the registry; Code Reviewer and direct-call Audit remain on demand."
+        if audit_enabled else
+        "Review is on demand; no post-workflow audit is automatic or a gate."
+    )
+    lines = ["## Configurable Agent Framework", "", f"Ordinary work stays in the current session: plan, perform, and verify it there. Planner and Builder remain the explicit PB core, used only when David asks or confirms a router recommendation. router.py provides deterministic, explainable applicability recognition; new handoffs require confirmation before delegation, while an already-authorized parent dispatch does not reopen that approval. Team Leader is never automatically selected. {audit_policy}", "", "### Explicit PB core"]
     for key in ROLE_KEYS:
         view = role_view(cfg, key)
         mode = "read-only" if view["read_only"] else "write-capable"
@@ -761,7 +791,7 @@ def generic_block(cfg: dict) -> str:
         "- On the first failed or inconclusive real proof, stop scope expansion and only diagnose or retry the same slice. A second inconclusive proof or two rounds without measurable progress is BLOCKED even if artifact labels change.",
         "- /pb is exactly one pass and reports incomplete evidence. /pbg is capped at exactly three rounds. Persistence language cannot override ambiguity, safety, failed proof, no-progress, or round bounds.",
         "",
-        "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters.",
+        "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder only for explicit PB work. Change models only in roles.config.json and regenerate adapters.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1017,6 +1047,10 @@ def auditor_models(cfg: dict) -> str:
     full = role_view(cfg, "audit")["model"] if "audit" in cfg.get("agents", {}) else "(unset)"
     light_cfg = post_audit.get("model") or {}
     audit_cfg = (cfg.get("agents", {}).get("audit", {}).get("model") or {})
+    if not post_audit.get("enabled", False):
+        return ("The automatic post-workflow audit is disabled. Code Reviewer remains on-demand, and the direct-call "
+                f"Audit profile runs on `{full}` on `{audit_cfg.get('provider', '(unset)')}` at "
+                f"`{audit_cfg.get('effort', '(unset)')}` when explicitly requested.")
     return (f"`{light}` on `{light_cfg.get('provider', '(unset)')}` at "
             f"`{light_cfg.get('effort', post_audit.get('thinking', '(unset)'))}` for the light post-workflow audit and "
             f"`{full}` on `{audit_cfg.get('provider', '(unset)')}` at "
@@ -1333,7 +1367,9 @@ DOC_BLOCKS = {
     "roster": roster_sentence,
     "roster-table": roster_table,
     "auditor-models": lambda cfg: (
-        "The two review roles run on "
+        auditor_models(cfg)
+        if not ((cfg.get("routing") or {}).get("postWorkflowAudit") or {}).get("enabled", False)
+        else "The two review roles run on "
         + auditor_models(cfg)
         + ". Both use the active OpenAI routing and the configured `xhigh` effort; "
         "they are distinct from the Terra build/action path."

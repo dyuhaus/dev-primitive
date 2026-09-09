@@ -1,6 +1,6 @@
 ---
 name: agent-pb
-description: "Run this machine's plan-then-build development loop on the DeepSeek Harness — reason first as the planner profile, then implement as the builder profile, then verify against an explicit done-condition. Use for any substantive implementation work, and read it before assuming the two roles run on different models here."
+description: "Reference this machine's explicit plan-then-build loop on dsh only when David requests it or confirms the router recommendation; dsh cannot dispatch the configured OpenAI route and fails closed."
 ---
 
 <!-- Generated from dev-primitive/roles.config.json by apply.py dsh.
@@ -9,9 +9,11 @@ description: "Run this machine's plan-then-build development loop on the DeepSee
 
 # Plan → build (dsh)
 
-This machine's stated method is: reason with the **planner**, hand the plan to
-the **builder**, build, verify. On Claude Code that is two subagents on two
-different models. **On dsh it is not.**
+Ordinary authorized work stays in the current session: plan, perform, and
+verify it there. Run PB only when David explicitly asks for it or confirms a
+router recommendation. That explicit PB request needs the configured OpenAI
+Planner → Builder route; dsh cannot dispatch it, so it must fail closed rather
+than claim a disciplined current-session pass used the configured models.
 
 Await the Planner's terminal output before starting Builder; never pre-spawn
 Builder. Use one Planner and one Builder per round. At most one plan-authorized
@@ -24,48 +26,43 @@ Leader call.
 
 {{BUILDER_ROUTING_NOTE}}
 
-So on dsh the loop is a **role discipline**, not model routing. What dsh does add
-is real structural support: plan mode holds the planning phase read-only until
-`exit_plan_mode` is approved, and the `subagent` tool can run either phase in an
-isolated child context.
+## Reference: configured PB sequence
 
-1. **Plan pass.** Adopt `agent-planner`; plan mode is the natural fit. Investigate
-   read-only — read, search, inspect git state, run non-mutating checks. Produce
+This reference describes the configured sequence for a capable dispatcher.
+dsh must not execute it in-session or create a dsh child as a substitute for
+the configured OpenAI route. Direct the explicit PB request to Codex, where the
+Sol Planner and Terra Builder can be dispatched.
+
+1. **Plan pass.** The configured Planner investigates read-only — read, search,
+   inspect git state, run non-mutating checks. It produces
    verified current state and a done-condition; the smallest real end-to-end
    slice; explicit non-goals/deferred work; a simpler rejected alternative; exact
    affected surfaces and ordered step → verification actions; earliest
    behavioral/live proof; and stop/replan plus install/rollback risks. Write
    **no** production code.
 2. **Review the plan.** If it has a real gap, or a decision only the user can
-   make, reject or revise it before building. A conversational "sounds good" approves
-   nothing — the plan leaves plan mode through `exit_plan_mode`.
-3. **Build pass.** Adopt `agent-builder`. Execute the plan's steps in order. If a
+   make, reject or revise it before building.
+3. **Build pass.** The configured Builder executes the plan's steps in order. If a
    step is wrong or blocked, say so and adapt — do not silently skip it. On the
    first failed or inconclusive real proof, stop scope expansion and only
    diagnose or retry the same slice.
 4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
    report the concrete result. A command that exited 0 has told you it finished,
    not that the work happened — assert on the artifact.
-5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). Re-read the plan against
-   what was built: acceptance criteria met, evidence consistent with the claims,
-   nothing unrelated dragged in, no secrets, no destructive action, no follow-up
-   silently dropped. Report a verdict, not a reassurance.
-6. **Report.** What changed, how it was verified, the audit verdict, what is left.
+{{DSH_WORKFLOW_AUDIT_STEP}}
+6. **Report.** What changed, how it was verified, {{WORKFLOW_AUDIT_REPORT}}, what is left.
 
-Running a phase in a `subagent` child gives it clean context, not a different
-model, and the child gets none of the profile unless you paste the mission and
-boundaries into its task.
+Do not use a dsh `subagent` child as an explicit PB substitute: it supplies
+clean context, not the configured model route.
 
 ## Looping until a condition holds
 
-`/pb is exactly one pass` and reports incomplete evidence rather than retrying.
-The portable form is **`/pbg <task> until: <condition>`** — plan → build →
-verify, repeated until the condition actually holds. `/pbg is capped at exactly
-three rounds`. A second inconclusive proof or two rounds without measurable
-progress is BLOCKED even if artifact labels change. Persistence language cannot
-override ambiguity, safety, failed proof, no-progress, or round bounds. dsh also
-has a harness-side goal loop, but its terminal language cannot override these
-portable bounds.
+The configured /pb is exactly one pass and reports incomplete evidence rather
+than retrying. The configured portable form is /pbg `<task> until: <condition>`;
+/pbg is capped at exactly three rounds. A second inconclusive proof or
+two rounds without measurable progress is BLOCKED even if artifact labels change.
+dsh must not run either command as an in-session substitute; use a dispatcher
+that can route the configured OpenAI roles.
 
 Honor `$DSH_HOME/AGENTS.md` (the machine contract) and the nearest project
 `AGENTS.md` throughout.
