@@ -12,6 +12,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -849,9 +850,12 @@ class Roots(unittest.TestCase):
 
     def test_default_root_is_outside_this_repository(self):
         os.environ.pop("AGENT_KNOWLEDGE_INBOX_ROOT", None)
-        root = lessons.state_root()
-        self.assertFalse(str(root).startswith(str(ROOT) + os.sep), f"{root} is inside {ROOT}")
-        self.assertIsNone(lessons.branch_mutable_ancestor(root))
+        with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
+            (Path(directory) / "appdata").mkdir()
+            root = lessons.state_root()
+            self.assertEqual(root, Path(directory) / "appdata" / "agent-knowledge")
+            self.assertFalse(str(root).startswith(str(ROOT) + os.sep), f"{root} is inside {ROOT}")
+            self.assertIsNone(lessons.branch_mutable_ancestor(root))
 
     def test_session_token_is_eight_lowercase_alphanumerics(self):
         os.environ["AGENT_SESSION_ID"] = "6163B36C-1a5b-4995-b6b3-ab4970603f94"

@@ -148,7 +148,7 @@ LOGIC_MUTANTS = [
 # --------------------------------------------------- generated instructions
 INSTRUCTION_MUTANTS = [
     ("D01-profile-reverts-to-hand-append", "apply.py",
-     "material above. After substantive work, record at most one generalized,\n"
+     "record at most one generalized, "
      "evidence-backed lesson — **never by editing `LESSONS.md` yourself**:",
      "material above. After substantive work, append at most one generalized,\n"
      "evidence-backed lesson in the documented format if it will improve future work."),
@@ -158,21 +158,19 @@ INSTRUCTION_MUTANTS = [
     ("D03-a-committed-lessons-file-drifts", "agent-knowledge/runner/LESSONS.md",
      "**Do not hand-edit this file to record a lesson.**", "Lessons may be appended here."),
     ("D04-readme-drops-the-durability-note", "apply.py",
-     "`~/appdata` is **not under git and has no automatic off-box copy**.",
+     "The default inbox is **not under git and has no automatic off-box copy provided\nby this tool**.",
      "`~/appdata` holds the inbox."),
     ("D05-readme-drops-the-queue-framing", "apply.py",
      "inbox is a **queue, not an archive**", "inbox is where lessons live"),
-    ("D06-claude-template-reverts", "adapters/claude-code/agent.md.tmpl",
-     "- After substantive work, record at most one generalized, evidence-backed lesson\n"
-     "  when it will help future work. **Never edit `LESSONS.md` to do this**",
-     "- After substantive work, append at most one generalized, evidence-backed lesson\n"
-     "  to `LESSONS.md` when it will help future work. **Never edit `LESSONS.md` to do this**"),
-    ("D07-claude-template-drops-lessons_py", "adapters/claude-code/agent.md.tmpl",
+    ("D06-codex-template-reverts", "adapters/codex/agent.SKILL.md.tmpl",
+     "When authorized, record at most one generalized, evidence-backed lesson with",
+     "After substantive work, append at most one generalized, evidence-backed lesson to `LESSONS.md` with"),
+    ("D07-codex-template-drops-lessons_py", "adapters/codex/agent.SKILL.md.tmpl",
      "`python3 {{LESSONS_SCRIPT}} add --key {{AGENT_KEY}}",
      "`python3 nothing.py add --key {{AGENT_KEY}}"),
     ("D08-lessons-script-path-not-substituted", "apply.py",
-     '            "LESSONS_SCRIPT": str(SCRIPT_DIR / "lessons.py"),',
-     '            "LESSONS_SCRIPT": "",'),
+     '    shared["LESSONS_SCRIPT"] = lessons_script_path()',
+     '    shared["LESSONS_SCRIPT"] = ""'),
     ("D09-committed-docs-give-a-bare-lessons_py", "apply.py",
      "LESSONS_SCRIPT_REF = '\"$DEV_PRIMITIVE/lessons.py\"'",
      "LESSONS_SCRIPT_REF = 'lessons.py'"),
@@ -182,9 +180,9 @@ INSTRUCTION_MUTANTS = [
      "Fold them in later with `promote --key {key} --apply`.\n"
      "`lessons.py promote` is run by a person who reviews the diff and commits it"),
     ("D11-install-path-guard-not-wired-in", "apply.py",
-     "def install_claude(cfg: dict, home: Path, dry: bool) -> None:\n"
+     "def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> None:\n"
      "    assert_generated_paths_are_installable(dry)",
-     "def install_claude(cfg: dict, home: Path, dry: bool) -> None:"),
+     "def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> None:"),
     ("D12-worktree-refusal-disabled", "apply.py",
      '    marker = SCRIPT_DIR / ".git"\n    if marker.is_file():',
      '    marker = SCRIPT_DIR / ".git"\n    if False:'),

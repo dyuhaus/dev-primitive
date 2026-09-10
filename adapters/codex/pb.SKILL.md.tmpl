@@ -1,0 +1,54 @@
+---
+name: agent-pb
+description: "Run Planner -> Builder only when David explicitly invokes PB or asks for this workflow. Both roles use the configured Astra model in Codex. Never trigger from task size, task classification, or an automatic recommendation."
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py codex.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py codex -->
+
+# Explicit Planner -> Builder (Codex)
+
+Ordinary authorized work stays in the current Codex session: plan, perform,
+and verify it there. This workflow starts only when David explicitly invokes
+`$agent-pb`, `/pb`, `/pbg`, or asks for Planner -> Builder. Never start it
+because work is substantive, a router recommends it, or another skill suggests
+it. Do not automatically invoke its component roles or a post-workflow audit.
+
+The two roles remain separate passes even though both currently use Astra.
+Use only Codex. An unavailable configured model is a reported blocker; do not
+substitute another model, provider, or harness.
+
+1. **Plan.** Dispatch one read-only Planner with `spawn_agent`,
+   `model: "{{PLANNER_MODEL}}"`, `reasoning_effort: "{{PLANNER_EFFORT}}"`.
+   Include its profile mission and boundaries. It inspects current state and
+   returns a terminal plan: done-condition, smallest scope, non-goals, exact
+   steps and verification, early behavioral proof, and recovery/stop conditions.
+   It writes no production code and does not delegate or pre-spawn Builder.
+2. **Review the plan.** Resolve concrete gaps before building. Existing task
+   authority covers routine implementation decisions; ask only for a material
+   decision, missing resource, or unmet authority boundary.
+3. **Build.** After the Planner finishes, dispatch one Builder with
+   `model: "{{BUILDER_MODEL}}"`, `reasoning_effort: "{{BUILDER_EFFORT}}"`.
+   Include the reviewed plan and Builder mission/boundaries. Do not expand scope
+   after the first failed or inconclusive real proof; diagnose that same slice.
+4. **Verify.** Run the agreed native checks and inspect the actual artifact.
+   Report failures and limitations. Do not replace verification with a label
+   or a command's exit status alone.
+5. **Report.** State what changed, evidence, and remaining work. There is no
+   automatic audit child or required audit verdict. Review and Audit are
+   separate explicit requests; David reviews and merges GitHub PRs.
+
+An explicit PB request authorizes the parent to dispatch these two roles
+without another confirmation. It grants neither child permission to create
+additional handoffs; current role boundaries and the task's authority still
+apply. Team Leader remains a separate explicit request.
+
+`/pb is exactly one pass`. Only an explicit `/pbg` request permits repetition;
+`/pbg is capped at exactly three rounds`. A second inconclusive proof or two
+rounds without measurable progress is BLOCKED. Persistence language does not
+override those bounds. No background loop or automatic next round is started
+by an ordinary task.
+
+Honor the machine contract and nearest project `AGENTS.md`. A plan or skill
+never grants additional write, provider, service, or publication authority.

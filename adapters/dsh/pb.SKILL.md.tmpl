@@ -1,0 +1,71 @@
+---
+name: agent-pb
+description: "Run this machine's plan-then-build development loop on the DeepSeek Harness — reason first as the planner profile, then implement as the builder profile, then verify against an explicit done-condition. Use for any substantive implementation work, and read it before assuming the two roles run on different models here."
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py dsh.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py dsh -->
+
+# Plan → build (dsh)
+
+This machine's stated method is: reason with the **planner**, hand the plan to
+the **builder**, build, verify. On Claude Code that is two subagents on two
+different models. **On dsh it is not.**
+
+Await the Planner's terminal output before starting Builder; never pre-spawn
+Builder. Use one Planner and one Builder per round. At most one plan-authorized
+L1/FE delegation is allowed; multi-workstream work requires an explicit Team
+Leader call.
+
+## What dsh actually gives you
+
+{{PLANNER_ROUTING_NOTE}}
+
+{{BUILDER_ROUTING_NOTE}}
+
+So on dsh the loop is a **role discipline**, not model routing. What dsh does add
+is real structural support: plan mode holds the planning phase read-only until
+`exit_plan_mode` is approved, and the `subagent` tool can run either phase in an
+isolated child context.
+
+1. **Plan pass.** Adopt `agent-planner`; plan mode is the natural fit. Investigate
+   read-only — read, search, inspect git state, run non-mutating checks. Produce
+   verified current state and a done-condition; the smallest real end-to-end
+   slice; explicit non-goals/deferred work; a simpler rejected alternative; exact
+   affected surfaces and ordered step → verification actions; earliest
+   behavioral/live proof; and stop/replan plus install/rollback risks. Write
+   **no** production code.
+2. **Review the plan.** If it has a real gap, or a decision only the user can
+   make, reject or revise it before building. A conversational "sounds good" approves
+   nothing — the plan leaves plan mode through `exit_plan_mode`.
+3. **Build pass.** Adopt `agent-builder`. Execute the plan's steps in order. If a
+   step is wrong or blocked, say so and adapt — do not silently skip it. On the
+   first failed or inconclusive real proof, stop scope expansion and only
+   diagnose or retry the same slice.
+4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
+   report the concrete result. A command that exited 0 has told you it finished,
+   not that the work happened — assert on the artifact.
+5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). Re-read the plan against
+   what was built: acceptance criteria met, evidence consistent with the claims,
+   nothing unrelated dragged in, no secrets, no destructive action, no follow-up
+   silently dropped. Report a verdict, not a reassurance.
+6. **Report.** What changed, how it was verified, the audit verdict, what is left.
+
+Running a phase in a `subagent` child gives it clean context, not a different
+model, and the child gets none of the profile unless you paste the mission and
+boundaries into its task.
+
+## Looping until a condition holds
+
+`/pb is exactly one pass` and reports incomplete evidence rather than retrying.
+The portable form is **`/pbg <task> until: <condition>`** — plan → build →
+verify, repeated until the condition actually holds. `/pbg is capped at exactly
+three rounds`. A second inconclusive proof or two rounds without measurable
+progress is BLOCKED even if artifact labels change. Persistence language cannot
+override ambiguity, safety, failed proof, no-progress, or round bounds. dsh also
+has a harness-side goal loop, but its terminal language cannot override these
+portable bounds.
+
+Honor `$DSH_HOME/AGENTS.md` (the machine contract) and the nearest project
+`AGENTS.md` throughout.

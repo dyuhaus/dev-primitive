@@ -1,10 +1,10 @@
 # pb-primitive — native pi plan/build adapter
 
-A global Pi extension for the machine's portable agent framework. It reads a
-**Pi-only runtime overlay** live from
-`/home/dyadmin/dev-primitive/adapters/pi/roles.config.pi.json` when no project
-configuration is present. The portable, harness-neutral registry remains
-`/home/dyadmin/dev-primitive/roles.config.json`.
+A global Pi extension for the machine's portable agent framework. It reads the
+nearest project registry or the shared active OpenAI registry at
+`/home/dyadmin/dev-primitive/roles.config.json`. A deliberately installed
+Pi-only overlay remains an optional compatibility layer; none is active by
+default.
 
 ## Commands and tools
 
@@ -19,20 +19,22 @@ configuration is present. The portable, harness-neutral registry remains
 - `/pb-show` — show the selected config and resolved provider/model table.
 - `/pb <task>` — one read-only planner pass followed by a builder pass and a
   compact read-only post-workflow audit. The builder receives the original task
-  and planner output verbatim; the audit uses GPT-5.6 Sol at medium thinking.
+  and completed reviewed planner output verbatim; every child uses its configured
+  model and exact registry effort (`xhigh` in the active registry). It is exactly
+  one pass and reports incomplete evidence rather than starting another round.
 - `/pbg <task> [until: <done-condition>]` — bounded planner/build/light-audit/
-  verification loop, at most three rounds. If `until:` is omitted, the first
-  planner derives explicit acceptance criteria.
+  verification loop, capped at exactly three rounds. If `until:` is omitted, the
+  first planner derives explicit acceptance criteria.
 - `planner_agent` — isolated read-only planning tool for the parent model.
 - `builder_agent` — isolated implementation tool for the parent model.
 - `workflow_audit` — internal post-workflow tool the parent invokes exactly once
-  after Planner → Builder/specialist work; it is read-only Sol/medium review,
+  after Planner → Builder/specialist work; it is a read-only review at the configured model and registry effort,
   not the full direct-call Audit agent.
 - `/planner`, `/builder`, `/runner`, `/tech-writer`, `/prose-writer`,
   `/team-leader`, `/l1-programmer`, `/librarian`, `/fe-designer`, and `/audit` —
   explicitly run the corresponding configured agent. Team Leader and Audit are
   direct-call-only: they run only through their explicit slash commands, and
-  their tool surfaces reject model-initiated calls. Audit uses GPT-5.6 Sol and
+  their tool surfaces reject model-initiated calls. Audit uses its configured model (deliberately not the builder's) and
   performs harness/runtime audits directly without delegated agents.
 - `/<agent>-model` for every agent above — show or change that agent's **Pi-only**
   model in the Pi overlay.
@@ -47,8 +49,8 @@ configuration is present. The portable, harness-neutral registry remains
 Examples:
 
 ```text
-/planner-model moonshotai/kimi-k3 --provider openrouter --id moonshotai/kimi-k3
-/librarian-model openai/gpt-5.6-terra --provider openrouter
+/planner-model gpt-5.6-sol --provider openai --id gpt-5.6-sol
+/librarian-model gpt-5.6-terra --provider openai
 ```
 
 No arguments displays the configured Pi-only model and usage. A bare model sets
@@ -68,9 +70,24 @@ work may route to L1 Programmer. Generic substantive implementation is normalize
 to the complete Planner → Builder path when `routing.planBeforeBuild` is enabled.
 Planner does not invoke specialists from its isolated read-only child; it names
 the recommended next role for the parent orchestrator. Builder may delegate only
-to L1 Programmer or FE-Designer, and child Pi currently loads with
+once per round to a plan-authorized L1 Programmer or FE-Designer; multi-workstream
+work needs an explicit Team Leader call. Child Pi currently loads with
 `--no-extensions`, so its safe fallback is direct implementation or a handoff
 recommendation to the parent.
+
+### PB scope and proof bounds
+
+`/pb` and `/pbg` await the Planner's terminal output before starting Builder;
+Builder is never pre-spawned. The Planner must return a reviewed plan containing
+verified current state and done-condition, smallest real end-to-end slice,
+non-goals/deferred work, a simpler rejected alternative, exact step →
+verification actions, earliest behavioral/live proof, and stop/replan plus
+install/rollback risk. On the first failed or inconclusive real proof, Pi locks
+the work to diagnosis or retry of that same slice. A second inconclusive proof
+or two rounds without measurable progress is BLOCKED even if artifact labels
+change. Three CONTINUE rounds end with an explicit hard-limit result; no fourth
+round starts. Terminal persistence language never overrides ambiguity, safety,
+failed-proof, no-progress, or round bounds.
 
 ## Config precedence
 
@@ -83,12 +100,11 @@ this order:
 4. Shared harness-neutral registry: `/home/dyadmin/dev-primitive/roles.config.json`.
 
 Project configuration always wins and is never merged with the Pi overlay. The
-Pi overlay is a complete schema-valid config that sets Planner to
-`moonshotai/kimi-k3` and Builder to `openai/gpt-5.6-terra` through OpenRouter.
-Claude Code, Codex, generic adapters, and other harnesses do not read it; they
-use the shared registry (`fable`/`opus` on Anthropic) unless separately
-configured. If the overlay is absent or invalid, Pi warns and safely falls back
-to the shared registry. `/pb-show` reports both source layer and path.
+Pi overlay is an optional complete schema-valid config. The active shared
+registry maps Planner/review to `gpt-5.6-sol` and Builder/action roles to
+`gpt-5.6-terra`, all through OpenAI at `xhigh`. If an optional overlay is absent
+or invalid, Pi warns and safely uses that shared registry. `/pb-show` reports
+both source layer and path.
 
 Pinned `model.id` wins over `model.class`; otherwise Pi resolves the configured
 class/alias for the configured provider.
@@ -98,8 +114,9 @@ class/alias for the configured provider.
 - Each role and the lightweight reviewer run in separate
   `pi --mode json -p --no-session --no-extensions`
   process. Child roles cannot recursively load the global routing extension.
-- Provider and model are always passed explicitly; child processes cannot
-  silently inherit the parent's model.
+- Provider, model, and validated `model.effort` are always passed explicitly;
+  child processes cannot silently inherit the parent's model or thinking level.
+  OpenAI children fail closed when the registry omits or invalidates effort.
 - A read-only role is structurally restricted to `read,grep,find,ls`. It has no
   bash, edit, or write tool.
 - The builder receives normal pi tools and therefore has the same host access as
@@ -113,9 +130,11 @@ class/alias for the configured provider.
   one hour that were left behind by a hard-killed process.
 - Model-visible child output is capped at 50 KiB. Full parsed child messages
   remain in tool-result details for the current session.
-- `/pbg` stops after acceptance, a verifier block, a failed child, repeated
-  evidence/no progress, or three rounds. It is bounded assistance, not an
-  autonomous approval mechanism.
+- `/pbg` stops after acceptance, a verifier block, a failed child, a second
+  inconclusive proof, two no-progress rounds, or exactly three rounds. Verifiers
+  must separately mark `PB_PROGRESS: MEASURABLE|NONE`; renamed artifacts or task
+  labels are not progress. It is bounded assistance, not an autonomous approval
+  mechanism.
 
 Project-local pi resources are executable. The machine currently sets
 `defaultProjectTrust` to `always`; consider changing it to `ask` for stronger

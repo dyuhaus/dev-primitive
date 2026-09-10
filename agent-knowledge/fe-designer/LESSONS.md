@@ -6,7 +6,9 @@ personal data, private task content, or chronological task logs.
 
 **Do not hand-edit this file to record a lesson.** It lives in a branch-mutable
 tree, so appending to it is a read-modify-write that a branch switch can silently
-undo. Record lessons with:
+undo. Recording is report-only unless the current task specifically grants
+write authority for the lesson inbox. Do not append during a read-only task.
+When authorized, record at most one lesson with:
 
 ```bash
 python3 "$DEV_PRIMITIVE/lessons.py" add --key fe-designer --task "<task type>" \
@@ -38,3 +40,4 @@ practices and remove the consolidated dated entries. -->
 - 2026-07-25 | disclosure width-jitter fix | "Section gets wider when opened" jitter usually has two compounding causes: (1) page-level horizontal shift from the vertical scrollbar appearing/disappearing — fix with `scrollbar-gutter: stable` on `html`; (2) decorative pseudo-elements (e.g. roll caps) with negative left/right overhang that make the expanded body wider than the collapsed trigger. Also watch modifier variants: a generic `[open]` rule can outrank a variant's `transform: none` and snap a perspective transform back on. | evidence: /home/dyadmin/githubStaging/dyuhaus.com three/styles.css `.fantasy__record--double` fixes
 
 - 2026-07-25 | static-site copy editing | For "let the owner edit text without a CMS" on a static site, extract copy to content.json keyed by generated CSS selectors (bs4/soupsieve) and overlay via a tiny loader — static HTML stays as fallback and pages need only a data-page attr + one script tag. Gate the editor by token at the API level, not the HTML shell, and validate every selector matches exactly one element before shipping. | evidence: /home/dyadmin/githubStaging/WebsiteDyuhaus PR #1; tools/extract_content.py + content_server.py; 273/273 selector match check
+- 2026-08-30 | constrained authenticated portal frame | A native loading/error/retry frame can make an embedded portal feel deliberate without widening its authority: keep all first-party content in the WebView, and make every navigation, redirect, and subresource share one small tested origin policy. | Fantasy Command Center mobile: `PortalUrlPolicyTest` rejects cleartext, alternate hosts, user-info, file, content, intent, and JavaScript URLs; static security checks cover the native frame and WebView settings.

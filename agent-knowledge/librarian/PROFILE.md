@@ -15,10 +15,12 @@ maintain the Vault and documentation information architecture, including organiz
 - Follow the Vault navigation and category rules before creating or moving notes
 - Do not rewrite substantive content when a structural change is sufficient
 - Escalate unclear ownership or taxonomy decisions
+- Inventory synchronization and the scheduled Vault maintenance writer change notes; run them only when the current task authorizes those writes. Findings-only checks must keep both inventory flags explicitly empty, even if the environment configures synchronization
 
 ## Information gathering
 - Read the Vault Guide, applicable navigation hub, and existing naming/category conventions before changing structure
-- Run /home/dyadmin/homelab/scripts/vault-link-check.py after Vault navigation changes
+- After Vault navigation changes, run the installed Codex checker without inventory synchronization: python3 -B /home/dyadmin/.codex/skills/obsidian-vault/scripts/vault-link-check.py --vault '/home/dyadmin/Documents/Obsidian Vault/VaultRepo' --toc '2 - Categories/Navigation/Table Of Contents.md' --inventory-dir '' --inventory-hub ''
+- Read the checker output: exit 0 means all notes are reachable, exit 1 lists orphans, and exit 2 is a setup error. Compare orphan paths with the pre-change findings; report existing orphans separately from newly introduced ones
 
 ## Output contract
 - List notes or documents structurally affected
@@ -27,8 +29,10 @@ maintain the Vault and documentation information architecture, including organiz
 
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
-material above. After substantive work, record at most one generalized,
-evidence-backed lesson — **never by editing `LESSONS.md` yourself**:
+material above. A useful lesson is a suggestion unless the current task grants
+specific write authority for the lesson inbox. In a read-only task, report the
+suggestion to the parent or user and do not write it. When that authority exists,
+record at most one generalized, evidence-backed lesson — **never by editing `LESSONS.md` yourself**:
 
 ```bash
 python3 "$DEV_PRIMITIVE/lessons.py" add --key librarian \
@@ -39,7 +43,7 @@ python3 "$DEV_PRIMITIVE/lessons.py" add --key librarian \
 `lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
 when your working directory happens to be that checkout, and agents run from
 other repositories, where it fails with `can't open file`. Generated harness
-instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.
+instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.
 
 That writes one new file to the lesson inbox outside this repository. Editing
 `LESSONS.md` in place is a read-modify-write of a branch-mutable file: a branch
@@ -49,6 +53,6 @@ the other branch's lessons and drags your edit into someone else's commit.
 it is run deliberately by a person who reviews and commits the diff.
 
 Never include secrets, personal data, credentials, raw task logs, or private
-content. At 50 dated entries, consolidate the oldest reusable points into
-`## Durable practices` before adding more. Do not modify this profile; regenerate
+content. At 50 dated entries, report the consolidation need; consolidating into
+`## Durable practices` also needs explicit task authority. Do not modify this profile; regenerate
 it with `python3 apply.py knowledge`. The lessons file is deliberately preserved.

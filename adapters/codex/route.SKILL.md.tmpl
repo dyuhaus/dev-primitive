@@ -1,0 +1,35 @@
+---
+name: agent-route
+description: "Explainably recommend which configured agent profile fits a task, using the machine's deterministic local router, then confirm with the user before adopting or delegating to it. Use only when David explicitly asks for a routing recommendation; never trigger automatically."
+---
+
+<!-- Generated from dev-primitive/roles.config.json by apply.py codex.
+     Do not hand-edit; change the registry and re-run:
+     python3 {{REPO_DIR}}/install_harness.py codex -->
+
+# Route a task (Codex)
+
+Only on an explicit request, run the deterministic local router. It makes no model call and dispatches
+nothing:
+
+```bash
+python3 {{REPO_DIR}}/router.py --explain "<the task>"
+```
+
+Present the selected profile, its confidence, the reasons, the alternatives, and
+any clarifying questions the router returned. Ask the user before acting on a
+new profile selection or new authority — recognition alone never grants either.
+Do not use the router to repeat a question for a profile the user has already
+authorized the parent to dispatch for the current task.
+
+Planner and Builder are excluded from automatic recommendations and require
+explicit role or PB invocation. For other profiles, once confirmed, load that profile's `agent-<key>` skill and adopt it. Never
+auto-select a direct-call-only profile ({{DIRECT_CALL_ONLY}}); those run only on
+an explicit request from the user.
+
+The router never gives a worker authority to make a nested handoff. That remains
+subject to the worker's `canDelegate`, `delegateTo`, and the task's authority.
+
+Report what the router actually said. Do not infer a recommendation it did not
+print, and do not substitute your own judgement for its output without saying
+that is what you are doing.

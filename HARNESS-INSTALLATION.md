@@ -1,105 +1,67 @@
-# Harness-level installation
+# Codex installation
 
-The agent framework is now installed at the harness level rather than being
-available only inside this repository.
+Only Codex is supported. Use a verified human-merged source revision; a passing
+source test or a model-generated proposal does not authorize live activation.
 
-## Source and installed surfaces
-
-`/home/dyadmin/dev-primitive/` remains the portable source of truth:
-
-- `roles.config.json` — harness-neutral profiles and models
-- `roles.schema.json` — structure
-- `apply.py` — validation, Claude rendering, and generated knowledge profiles
-- `router.py` — deterministic, explainable applicability routing with confirmation-required handoff
-- `agent-knowledge/` — generated profiles plus preserved durable lessons
-- `install_harness.py` — cross-harness installation
-
-Installed surfaces:
-
+<!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
 | Harness | Surface | Result |
 |---|---|---|
-| Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus specialist tools such as `runner_agent` and `team_leader_agent` |
-| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | PB subagents/commands and specialist subagents |
-| Hermes | `~/.hermes/skills/agent-*/SKILL.md` | `/agent-runner`, `/agent-tech-writer`, `/agent-prose-writer`, `/agent-team-leader`, `/agent-l1-programmer`, `/agent-librarian`, `/agent-fe-designer`, `/agent-audit`, and the framework reference skill |
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |
+| Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |
+<!-- END GENERATED: harness-surfaces -->
 
-Refresh all supported harnesses:
-
-```bash
-python3 /home/dyadmin/dev-primitive/install_harness.py all
-# or refresh only one harness:
-python3 /home/dyadmin/dev-primitive/install_harness.py pi
-```
-
-Preview without writing:
+## Native entrypoint
 
 ```bash
-python3 /home/dyadmin/dev-primitive/install_harness.py all --dry-run
+python3 install_harness.py codex --dry-run
+python3 install_harness.py codex
 ```
 
-The installer syncs the versioned Pi addon from `adapters/pi/pb-primitive/`,
-then renders the Claude and Hermes surfaces. It contains no credentials and
-never prints secret values. Generated
-files should not be hand-edited; update the source registry and reinstall.
+`codex` regenerates knowledge and installs Codex profile skills. `skills`
+links the shared `~/skills` roots into Codex. `all` performs both. Legacy
+`claude`, `dsh`, `pi`, `hermes`, and `gemini` targets refuse before generation
+or writes. `apply.py all` renders knowledge, generic reference and Codex only.
+No other installed harness surface is refreshed by a model change.
 
-## Model behavior
+Generated PB, Planner, Builder, router, Audit and Team Leader skills include `agents/openai.yaml`
+with `policy.allow_implicit_invocation: false`. The model choices remain in
+`roles.config.json`; both PB roles currently resolve to `gpt-6-astra`/`xhigh`.
+Their SKILL.md instructions require explicit invocation. Automatic profile
+selection and post-workflow audit are disabled. A full Codex install adds new
+metadata; `apply.py set` deliberately does not create absent files.
 
-Claude Code and generic/Codex consumers resolve Planner/Builder from the shared
-harness-neutral registry: `fable` and `opus` on Anthropic. Pi alone, when no
-project-level roles config is present, resolves its complete live overlay at
-the shared registry, exactly like the other harnesses — its OpenRouter overlay was
-removed on 2026-07-26. Pi project configs still win where one exists. Pi offers
-explicit `/<agent>` slash commands for every profile and `/<agent>-model`
-commands to manage the Pi overlay only. `/agents` is the native catalog: it
-lists every available agent command and the effective active model assignment.
-Those model commands never change the
-shared registry, Claude Code, Codex, Hermes, or a project configuration.
-Completed Planner → executor workflows also run the configured lightweight
-GPT-5.6 Sol audit at medium thinking; it is read-only and distinct from `/audit`.
-Hermes
-skills carry profile metadata and instructions, while Hermes's active model
-remains controlled by its native harness configuration.
-
-## Routing behavior
-
-`routing.postWorkflowAudit` configures the small post-workflow reviewer used by
-Pi and generated Claude PB flows. It receives the task, plan, and executor
-evidence, then appends a concise advisory verdict without editing or delegation.
-
-`router.py` classifies a task deterministically and returns an explainable
-applicability result. Pi automatically offers an eligible handoff when
-`enabled: true`, while Claude and Pi `/route` show it on demand. Every path
-requires confirmation and never silently invokes any profile; the portable
-alternative is:
-
-```bash
-python3 /home/dyadmin/dev-primitive/router.py --explain 'task'
-```
-
-Runner is the low-confidence fallback. With `planBeforeBuild` enabled, generic
-substantive implementation is confirmed as a Planner handoff and Pi then runs
-Planner → Builder; direct specialist matches and explicitly outlined L1 work do
-not pay that planning round-trip. Planner recommends specialists but does not
-invoke them. Team Leader and Audit have `direct-call-only` semantics in every
-adapter and are hard-excluded from routing. Invoke `/audit` explicitly for
-GPT-5.6 Sol harness/runtime audits that must work directly without Planner,
-Builder, or other delegated agents.
-
-Run `python3 /home/dyadmin/dev-primitive/apply.py knowledge` to refresh the
-generated specialty profiles. It preserves `agent-knowledge/*/LESSONS.md`.
+`--home` changes the target home but not source-side knowledge generation.
+For tests, isolate both the source checkout and target home. Never install from
+a dirty deployment-coupled checkout. Preserve meaningful local changes and
+capture exact file preimages before activation; compare installed artifacts
+with the reviewed source and run `harness-check` after changes.
 
 ## Verification
 
 ```bash
-cd /home/dyadmin/dev-primitive
 python3 apply.py validate
-python3 -m unittest discover -s tests -v
-python3 router.py --explain 'Update the Vault index and fix broken wikilinks'
-python3 apply.py knowledge
-node ~/.pi/agent/extensions/pb-primitive/_selftest.mjs
+python3 -m unittest discover -s tests
+python3 apply.py docs
 python3 install_harness.py all --dry-run
 ```
 
-To roll back an installation, remove only the generated `agent-*` Hermes skill
-directories and specialist Claude files, then reinstall the prior source
-configuration. Do not remove unrelated user skills, agents, sessions, or
-credentials.
+Run focused Codex behavioral checks after reviewed installation. Assert the
+ordinary-task path, explicit ordered Astra PB path, absent automatic audit,
+loader metadata and source-to-live parity. Record any skipped native behavior.
+Do not run the retired harnesses or reconstruct R5's cancelled release system.
+
+<!-- BEGIN GENERATED: roster-table (apply.py docs) -->
+| Key | Display name | Model | Provider | Invocation | Auto-select |
+|---|---|---|---|---|---|
+| `planner` | Planner | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
+| `builder` | Builder | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
+| `runner` | Runner | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `tech-writer` | Tech Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `prose-writer` | Prose Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `team-leader` | Team Leader | `gpt-5.6-terra` | `openai` | `direct-call-only` | `false` |
+| `l1-programmer` | L1 Programmer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `librarian` | Librarian | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `fe-designer` | FE-Designer | `gpt-5.6-terra` | `openai` | `default` | `true` |
+| `audit` | Audit | `gpt-5.6-sol` | `openai` | `direct-call-only` | `false` |
+| `code-reviewer` | Code Reviewer | `gpt-5.6-sol` | `openai` | `default` | `false` |
+<!-- END GENERATED: roster-table -->

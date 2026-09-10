@@ -6,7 +6,9 @@ personal data, private task content, or chronological task logs.
 
 **Do not hand-edit this file to record a lesson.** It lives in a branch-mutable
 tree, so appending to it is a read-modify-write that a branch switch can silently
-undo. Record lessons with:
+undo. Recording is report-only unless the current task specifically grants
+write authority for the lesson inbox. Do not append during a read-only task.
+When authorized, record at most one lesson with:
 
 ```bash
 python3 "$DEV_PRIMITIVE/lessons.py" add --key prose-writer --task "<task type>" \

@@ -188,8 +188,6 @@ export interface RunRoleParams {
 	systemPrompt: string;
 	/** The task/prompt text delivered as the child's user message. */
 	prompt: string;
-	/** Optional explicit thinking level for this isolated run. */
-	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	signal?: AbortSignal;
 	onUpdate?: OnUpdate;
 	timeoutMs?: number;
@@ -201,7 +199,7 @@ export interface RunRoleParams {
  * result. Never throws for normal failures — inspect `isFailed(result)`.
  */
 export async function runRole(params: RunRoleParams): Promise<RunResult> {
-	const { cwd, view, systemPrompt, prompt, thinking, signal, onUpdate } = params;
+	const { cwd, view, systemPrompt, prompt, signal, onUpdate } = params;
 	const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const label = params.label ?? view.role;
 
@@ -240,7 +238,7 @@ export async function runRole(params: RunRoleParams): Promise<RunResult> {
 		taskTmpDir = taskTmp.dir;
 		taskTmpPath = taskTmp.filePath;
 
-		const args = buildChildArgs(view, { appendSystemPromptFile: systemTmpPath ?? undefined, thinking });
+		const args = buildChildArgs(view, { appendSystemPromptFile: systemTmpPath ?? undefined });
 		// Pi expands @text-file arguments into the initial user message. Keep task
 		// content out of argv so large plans/evidence cannot hit execve E2BIG.
 		args.push(`@${taskTmpPath}`);

@@ -12,8 +12,12 @@ instructions, and the profile's information sources.
 
 ## Recording a lesson: `lessons.py`, never a hand edit
 
-After substantive work an agent may record **at most one** reusable,
-evidence-backed lesson — with `../lessons.py`, not by editing `LESSONS.md`:
+A useful lesson remains a suggestion until the current task explicitly
+permits writing to the lesson inbox. A read-only task writes neither the inbox
+nor `LESSONS.md`. With that authority an agent may record **at most one** reusable,
+evidence-backed lesson with `../lessons.py`, not by editing `LESSONS.md`:
+Authorization to edit a repository file does not automatically authorize a new
+inbox location, and an inbox write does not authorize promotion or a Git commit.
 
 ```bash
 python3 "$DEV_PRIMITIVE/lessons.py" add --key builder \
@@ -29,7 +33,7 @@ python3 "$DEV_PRIMITIVE/lessons.py" promote --key builder --apply
 `lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
 when your working directory happens to be that checkout, and agents run from
 other repositories, where it fails with `can't open file`. Generated harness
-instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.
+instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.
 
 `add` creates ONE NEW FILE per lesson, with `O_CREAT | O_EXCL`, under a state
 root outside any repository (`~/appdata/agent-knowledge/<key>/inbox/` by
@@ -67,12 +71,10 @@ are actually checked by someone.
 
 ## Durability of the inbox — read this before letting it grow
 
-`~/appdata` is **not under git and has no automatic off-box copy**. This
-machine's `repo-backup` walks git repositories under `~/githubStaging` plus
-`~/homelab`; the encrypted `bridge` and `micro-llm-game` snapshots are per-app
-opt-ins, and neither covers `~/appdata/agent-knowledge`. So an un-promoted
-lesson exists in exactly one place, on one disk, with no history and no restore
-path. Losing the inbox loses those lessons outright.
+The default inbox is **not under git and has no automatic off-box copy provided
+by this tool**. Host backups are a separate configuration: verify coverage of
+`AGENT_KNOWLEDGE_INBOX_ROOT` before relying on it. Until coverage is verified,
+losing the inbox can lose un-promoted lessons.
 
 That is a deliberate, bounded trade, and it holds only under one condition: the
 inbox is a **queue, not an archive**. The durable, replicated, reviewable home
