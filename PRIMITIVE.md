@@ -1,9 +1,8 @@
 # Configurable Agent Framework and PB Primitive
 
 This repository is a portable, provider-neutral framework for purpose-specific
-agents. Planner and Builder remain the explicit **PB core**: Planner reasons
-and Builder implements when David asks for PB or confirms a router
-recommendation. Additional specialists are registered in
+agents. Its original two-model development loop is the **PB core**: Planner
+reasons and Builder implements. Additional specialists are registered in
 `roles.config.json`. See `AGENT-FRAMEWORK.md` for the complete architecture,
 routing design, and agent-creation process.
 
@@ -14,13 +13,17 @@ routing design, and agent-creation process.
 | **planner** | read-only planning, architecture, root-cause analysis, sequencing, and approach review | configurable reasoning-tier class |
 | **builder** | senior engineering: complex systems, implementation, builds/tests; may delegate clearly outlined subtasks to L1 | configurable coding-tier class |
 
-Ordinary work stays in the active session: plan, perform, and verify it there.
-The existing `/pb` and `/pbg` commands remain the explicit PB interface. Use
-them only when David asks for PB or confirms the router recommendation. Codex
-then uses Sol to plan and Terra to build; dsh cannot dispatch that configured
-OpenAI route and must fail closed. A parent may dispatch an already-user-authorized
-worker without a repeat question; that is not a worker's nested-delegation
-authority. A new profile selection or new authority still needs user confirmation.
+**Loop:** reason with Planner → hand the plan to Builder → build → verify.
+Trivial lookups and one-line edits may remain inline. The existing `/pb` and
+`/pbg` commands remain the PB interface. Planner is not the universal default:
+domain-specific work may route directly to a confirmed specialist, ambiguous or
+routine work uses Runner, and a small explicitly outlined implementation may use
+L1. Planner does not call specialists itself; it recommends the next role and
+the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
+FE-Designer when its harness exposes those tools. A parent may dispatch an
+already-user-authorized worker without a repeat question; that is not a worker's
+nested-delegation authority. A new profile selection or new authority still needs
+user confirmation.
 
 ### Portable PB contract
 
@@ -65,16 +68,17 @@ Pinned ids win over classes. Use aliases when automatic provider upgrades are
 wanted. Run `apply.py set <role-or-agent> <class>` to change a model.
 
 The config is checked by [`roles.schema.json`](./roles.schema.json) and
-`apply.py validate`. `routing.postWorkflowAudit.enabled` is false, so completed
-work does not launch an automatic audit child or require a verdict. Code Reviewer
-and the direct-call Audit specialist remain available on request. Its ordinary mode directly
+`apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only review
+at `xhigh` effort after completed Planner → executor work; it checks the plan,
+result evidence, omissions, and follow-up without editing or delegating. This is
+separate from the full direct-call Audit specialist. Its ordinary mode directly
 investigates and repairs harness/runtime failures without invoking delegated
 agents. When explicitly selected for an instruction-only skills or `AGENTS.md`
 audit, it reads authorized instruction surfaces and reports findings without
 mutation; its ordinary repair obligations remain conditional outside that mode.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The automatic post-workflow audit is disabled. Code Reviewer remains on-demand, and the direct-call Audit profile runs on `gpt-5.6-sol` on `openai` at `xhigh` when explicitly requested.
+The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
 <!-- END GENERATED: auditor-models -->
 
 `router.py` supplies deterministic, explainable applicability recognition.
@@ -122,10 +126,11 @@ belong in that harness's adapter, not in the shared contract.
 - **Hermes:** the same skill surface, including `planner` and `builder`.
   Hermes's active model comes from its own harness configuration.
 - **Pi:** the global PB addon resolves this shared registry — there is no Pi
-  overlay any more, though one is still honored if reintroduced. With the active
-  disabled audit configuration, completed work and `/pbg` rounds launch no
-  audit child. `/route <task>` runs the same local recommendation router and
-  asks for confirmation; see `adapters/pi/README.md` for precedence.
+  overlay any more, though one is still honored if reintroduced. Completed
+  Planner → executor work, including each `/pbg` round, runs the configured
+  light workflow audit before reporting. `/route <task>` runs the same local
+  recommendation router and asks for confirmation; see `adapters/pi/README.md`
+  for precedence.
 - **Anything else:** `apply.py generic` prints a portable description of the PB
   core and specialist registry to paste into a system prompt.
 
