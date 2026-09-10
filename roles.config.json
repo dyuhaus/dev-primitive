@@ -548,7 +548,7 @@
     "planBeforeBuild": true,
     "inlineTrivial": true,
     "postWorkflowAudit": {
-      "enabled": false,
+      "enabled": true,
       "model": {
         "class": "gpt-5.6-sol",
         "id": "",

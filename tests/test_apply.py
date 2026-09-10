@@ -52,7 +52,6 @@ class ApplyTests(unittest.TestCase):
         for key, entry in cls.claude_config["agents"].items():
             entry["model"].update({"class": "fable" if key in ("audit", "code-reviewer") else "sonnet", "provider": "anthropic"})
         cls.claude_config["routing"]["postWorkflowAudit"]["model"].update({"class": "sonnet", "provider": "anthropic"})
-        cls.claude_config["routing"]["postWorkflowAudit"]["enabled"] = True
         cls.claude_config["routing"]["postWorkflowAudit"]["thinking"] = "medium"
 
     def test_current_config_and_all_specialists_validate(self):
@@ -65,7 +64,7 @@ class ApplyTests(unittest.TestCase):
         self.assertTrue(fe["autoSelectEligible"])
         self.assertEqual(fe["model"], {"class": "gpt-5.6-terra", "id": "", "provider": "openai", "effort": "xhigh"})
         workflow_audit = self.config["routing"]["postWorkflowAudit"]
-        self.assertFalse(workflow_audit["enabled"])
+        self.assertTrue(workflow_audit["enabled"])
         self.assertEqual(workflow_audit["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
         self.assertEqual(workflow_audit["thinking"], "xhigh")
         audit = self.config["agents"]["audit"]
@@ -842,46 +841,14 @@ class ApplyTests(unittest.TestCase):
         self.assertIn('model: "gpt-5.6-sol"', note)
         self.assertIn('reasoning_effort: "xhigh"', note)
 
-    def test_pb_audit_guidance_tracks_the_enabled_configuration(self):
-        codex = dict(apply.render_harness_skills(
-            self.config, Path("/tmp/agent-framework-test-home"), "codex"))
-        dsh = dict(apply.render_harness_skills(
-            self.config, Path("/tmp/agent-framework-test-home"), "dsh"))
-        codex_pb = next(text for path, text in codex.items() if path.parent.name == "agent-pb")
-        dsh_pb = next(text for path, text in dsh.items() if path.parent.name == "agent-pb")
-        self.assertIn("Ordinary authorized work stays in the current session", codex_pb)
-        self.assertIn("Run PB only when David explicitly asks for it or confirms a", codex_pb)
-        self.assertIn("when David requests it or confirms the router recommendation", codex_pb)
-        self.assertNotIn("Use for any substantive implementation work", codex_pb)
-        self.assertIn("Automatic post-workflow audit is disabled", codex_pb)
-        self.assertIn("do not spawn a review child or require a verdict", codex_pb)
-        self.assertIn("any explicitly requested review findings", codex_pb)
-        self.assertNotIn("the audit verdict", codex_pb)
-        self.assertIn("dsh cannot dispatch the configured OpenAI routes", dsh_pb)
-        self.assertIn("dsh cannot dispatch the configured OpenAI route and fails closed", dsh_pb)
-        self.assertIn("dsh must not execute it in-session", dsh_pb)
-        self.assertNotIn('separate **read-only** child', codex_pb)
-        disabled_framework = next(text for path, text in codex.items() if path.parent.name == "agent-framework")
-        self.assertIn("Automatic post-workflow audit is disabled", disabled_framework)
-        self.assertIn("no post-workflow audit is automatic", apply.generic_block(self.config))
-
-        enabled = copy.deepcopy(self.config)
-        enabled["routing"]["postWorkflowAudit"]["enabled"] = True
-        enabled_codex = dict(apply.render_harness_skills(
-            enabled, Path("/tmp/agent-framework-test-home"), "codex"))
-        enabled_dsh = dict(apply.render_harness_skills(
-            enabled, Path("/tmp/agent-framework-test-home"), "dsh"))
-        enabled_pb = next(text for path, text in enabled_codex.items() if path.parent.name == "agent-pb")
-        enabled_dsh_pb = next(text for path, text in enabled_dsh.items() if path.parent.name == "agent-pb")
-        self.assertIn('separate **read-only** child', enabled_pb)
-        self.assertIn('model: "gpt-5.6-sol"', enabled_pb)
-        self.assertIn('reasoning_effort: "xhigh"', enabled_pb)
-        self.assertIn('orchestrator must not', enabled_pb)
-        self.assertIn("**Light audit.**", enabled_dsh_pb)
-        self.assertIn("Report a verdict, not a reassurance.", enabled_dsh_pb)
-        enabled_framework = next(text for path, text in enabled_codex.items() if path.parent.name == "agent-framework")
-        self.assertIn("configured light post-workflow audit follows the registry", enabled_framework)
-        self.assertIn("configured light post-workflow audit follows the registry", apply.generic_block(enabled))
+    def test_codex_pb_spawns_the_post_workflow_audit_child(self):
+        rendered = apply.render_harness_skills(
+            self.config, Path("/tmp/agent-framework-test-home"), "codex")
+        pb = next(text for path, text in rendered if path.parent.name == "agent-pb")
+        self.assertIn('separate **read-only** child', pb)
+        self.assertIn('model: "gpt-5.6-sol"', pb)
+        self.assertIn('reasoning_effort: "xhigh"', pb)
+        self.assertIn('orchestrator must not', pb)
 
     def test_codex_rendered_authority_policy_separates_parent_dispatch_and_nested_handoffs(self):
         """Render the policy in the installed Codex surface, not just templates.

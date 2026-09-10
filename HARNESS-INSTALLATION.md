@@ -83,10 +83,8 @@ files should not be hand-edited; update the source registry and reinstall.
 
 ## Model behavior
 
-Every harness reads the explicit PB Planner/Builder route from the shared
-harness-neutral registry: `gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at
-`xhigh`. Ordinary work stays in the active session; PB starts only when David
-asks for it or confirms a router recommendation. Pi, when no
+Every harness reads Planner/Builder from the shared harness-neutral registry:
+`gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at `xhigh`. Pi, when no
 project-level roles config is present, resolves that same shared registry exactly like the other harnesses —
 its OpenRouter overlay was removed on 2026-07-26 — and Pi project configs still
 win where one exists.
@@ -127,19 +125,18 @@ Note the division of labour between the two entry points: `install_harness.py`
 mirrors the shared `~/skills` roots into each harness, and `apply.py` never does
 that at any action.
 
-The active `routing.postWorkflowAudit.enabled: false` setting means completed
-work launches no automatic audit child and requires no audit verdict. Code
-Reviewer and direct-call `/audit` remain explicit, on-demand options.
+Completed Planner → executor workflows run the configured lightweight audit at
+`xhigh` effort; it is read-only and distinct from `/audit`.
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The automatic post-workflow audit is disabled. Code Reviewer remains on-demand, and the direct-call Audit profile runs on `gpt-5.6-sol` on `openai` at `xhigh` when explicitly requested.
+The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
 <!-- END GENERATED: auditor-models -->
 
 ## Routing behavior
 
-`routing.postWorkflowAudit` retains the optional audit model and thinking
-settings. With `enabled: false`, Pi and generated PB flows launch no automatic
-reviewer or verdict; explicit Code Reviewer and Audit requests remain available.
+`routing.postWorkflowAudit` configures the small post-workflow reviewer used by
+Pi and generated Claude PB flows. It receives the task, plan, and executor
+evidence, then appends a concise advisory verdict without editing or delegation.
 
 `router.py` classifies a task deterministically and returns an explainable
 applicability result. Pi automatically offers an eligible handoff when
@@ -153,11 +150,11 @@ python3 /home/dyadmin/dev-primitive/router.py --explain 'task'
 ```
 
 Runner is the low-confidence fallback. With `planBeforeBuild` enabled, generic
-substantive implementation may recommend Planner, but PB starts only when David
-asks for it or confirms that recommendation. Direct specialist matches and
-explicitly outlined L1 work stay outside PB. Planner recommends specialists but
-does not invoke them. Team Leader and Audit have `direct-call-only` semantics in
-every adapter and are hard-excluded from routing. Invoke `/audit` explicitly for
+substantive implementation is confirmed as a Planner handoff and Pi then runs
+Planner → Builder; direct specialist matches and explicitly outlined L1 work do
+not pay that planning round-trip. Planner recommends specialists but does not
+invoke them. Team Leader and Audit have `direct-call-only` semantics in every
+adapter and are hard-excluded from routing. Invoke `/audit` explicitly for
 harness/runtime audits that must work directly without Planner, Builder, or
 other delegated agents.
 
