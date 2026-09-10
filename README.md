@@ -1,113 +1,77 @@
 # dev-primitive
 
-A small, portable, provider-neutral primitive for configurable task agents.
-The original two-model loop remains the **PB core**: one model *plans and
-reasons*, another *scripts and builds*. It now also registers purpose-specific
-specialists such as Runner, writers, Librarian, FE-Designer, Audit, Team Leader, and L1 Programmer.
-See [`AGENT-FRAMEWORK.md`](./AGENT-FRAMEWORK.md) for the architecture and
-future agent-creation process.
+Codex-only agent registry and explicit Planner -> Builder workflow.
+`roles.config.json` owns model routing, profile contracts, and workflow settings.
+Ordinary work stays in the current Codex session. PB never starts automatically.
 
-```
-planner  →  reasoning-tier model  →  architecture, design, root-cause, sequencing, review
-builder  →  coding-tier model     →  writing/editing code, running builds & tests, applying the plan
-```
+<!-- BEGIN GENERATED: roster (apply.py docs) -->
+Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
+<!-- END GENERATED: roster -->
 
-**Loop:** reason with the planner → hand its plan to the builder → build → verify.
-The session's main loop is an *orchestrator* that routes each kind of work to the
-right model instead of doing both itself. Trivial lookups and one-line edits stay
-inline. Planner is the entry point for substantive generic engineering, not for
-every prompt: confirmed domain specialists, Runner, and explicitly outlined L1
-work can be direct destinations. Planner recommends handoffs; it does not spawn
-other specialists itself.
+## Explicit workflow
 
-## Quickstart
+Invoke `$agent-pb`, `/pb`, or explicitly ask for Planner -> Builder. Both roles
+currently use `gpt-6-astra` at `xhigh`: one read-only planning pass, review of its
+terminal plan, one implementation pass, then concrete verification. Invoking a
+role alone does not automatically start the other role. Task classification,
+a router recommendation, and task size never start PB. Automatic post-workflow
+audit is disabled. Requested Code Review and Audit remain available.
+
+Codex metadata sets `allow_implicit_invocation: false` for PB, Planner, Builder,
+and the optional router skill. This complements the instruction boundary.
+
+## Commands
 
 ```bash
-python3 apply.py validate    # check config, print the resolved role/model table
-python3 apply.py claude      # (re)generate the Claude Code adapter (~/.claude/agents + /pb + /pbg)
-python3 apply.py generic     # print a paste-in block for any other harness
-python3 apply.py all         # Claude adapter, knowledge profiles, portable block
-python3 apply.py knowledge    # regenerate agent-knowledge/*/PROFILE.md; preserve LESSONS.md
-python3 router.py --explain "Update the Vault index"  # recommend a specialist
-python3 apply.py set builder sonnet   # change a role's model + regenerate (easy path)
+python3 apply.py validate
+python3 apply.py show
+python3 apply.py roster
+python3 install_harness.py codex --dry-run
+python3 router.py --explain "a task"  # explicit recommendation only; no dispatch
 ```
 
-No third-party dependencies (Python 3.8+ stdlib only).
+Install only reviewed, human-merged source with `install_harness.py codex`;
+`all` means Codex plus shared skill links and generated knowledge. Legacy
+`claude`, `dsh`, `pi`, `hermes`, and `gemini` installation targets refuse before
+writes. Historical adapter source is retained for reference, without an active
+installation or refresh path. No model/provider/harness fallback is allowed.
 
-## The one knob: `roles.config.json`
+## Registry and validation
 
-`roles.planner` and `roles.builder` preserve the PB interface. Specialist
-profiles live under the optional `agents` registry and each has its own model,
-capabilities, boundaries, invocation policy, and escalation/delegation rules.
-`router.py` deterministically recognizes applicable agents and supplies an
-explainable handoff. Pi can offer that handoff automatically, but it always
-requires the user's confirmation before delegation. Completed Planner →
-Builder/specialist workflows receive a small read-only GPT-5.6 Sol audit at
-medium thinking before the final report. This is separate from the full Audit
-agent. Team Leader and Audit are
-direct-call-only and cannot be selected by the router. Audit is explicitly
-invoked for AI-harness/runtime bug audits and runs on GPT-5.6 Sol without
-calling delegated agents.
+Planner and Builder are the `roles` entries; specialist models remain their
+configured Codex/OpenAI models. A nonempty exact model `id` overrides `class`.
+Change the registry and regenerate; never hand-edit installed skills or profiles.
+`apply.py set` updates existing Codex files only, preserves lessons, and does not
+install missing surfaces. `install_harness.py` is the deliberate install command.
 
-Everything is driven by [`roles.config.json`](./roles.config.json) — the single
-source of truth. Each role has a **customizable model class**:
+<!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
+Review policy: automatic workflow audit disabled; requested Audit uses `gpt-5.6-sol` on `openai` at `xhigh`. Requested code review uses the registry-configured Code Reviewer; neither review nor Audit is an automatic workflow gate.
+<!-- END GENERATED: auditor-models -->
 
-```jsonc
-"planner": { "model": { "class": "fable", "id": "", "provider": "anthropic" }, "readOnly": true }
-"builder": { "model": { "class": "opus",  "id": "", "provider": "anthropic" }, "readOnly": false }
+```bash
+python3 apply.py validate
+python3 -m unittest discover -s tests
+python3 apply.py docs
+python3 install_harness.py all --dry-run
 ```
 
-- **`class`** — the model class/alias (e.g. `fable`, `opus`, `sonnet`, or any
-  provider-specific class). On harnesses that support aliases it resolves to the
-  newest model in that family, so it auto-upgrades as new models ship.
-- **`id`** — optional exact model to pin (e.g. `claude-opus-4-8`). When set it
-  overrides `class`.
-- **`provider`** — a key into the `providers` map (Anthropic, any
-  OpenAI-compatible endpoint incl. OpenRouter, Google, or a local model), which
-  names the wire protocol and the **env vars** for the API key / base URL.
+Tests cover Codex behavior and rejection of retired entrypoints. A static pass
+is not a claim of provider-backed behavioral acceptance or installed parity.
 
-This shared file is harness-neutral: every harness — Claude Code, Pi,
-Codex/generic consumers — resolves its Planner/Builder values (`fable`/`opus` on
-Anthropic by default), unless a project-level config overrides them.
-`routing.postWorkflowAudit` defaults to `sonnet` at medium thinking; an
-effective project-level configuration may change or disable that reviewer.
+## Source layout
 
-Pi previously carried its own OpenRouter overlay; it was removed on 2026-07-26
-when the reference machine stopped using external models. Reintroducing one is
-a supported path — drop a `roles.config.pi.json` back into `adapters/pi/` and
-`install_harness.py` will validate and honor it — but nothing requires it.
+- `apply.py`, `install_harness.py`: validation, generation and installation.
+- `router.py`: optional explainable recommendations; no execution.
+- `adapters/codex`: supported templates.
+- `agent-knowledge`: generated profiles and preserved lessons.
+- `tests`: focused native checks.
 
-Change a model by editing this file and re-running `apply.py`; with no overlay
-in play that single edit applies to every harness at once. The config is
-validated by
-[`roles.schema.json`](./roles.schema.json) and by `apply.py validate`. **No
-secrets live here — only the names of env vars.**
+See [framework](AGENT-FRAMEWORK.md), [PB contract](PRIMITIVE.md), and
+[installation](HARNESS-INSTALLATION.md).
 
-## Adding it to any harness
-
-An *adapter* turns the config into whatever a harness understands:
-
-| Harness | How |
-|---|---|
-| **Claude Code** | `apply.py claude` renders two subagents (`planner`, `builder`) with the configured `model:` and `/pb` (one pass) + `/pbg` (loop until a done-condition) slash commands, plus `/pbg-builder` / `/pbg-planner` to switch a role's model from chat. |
-| **Codex / Hermes / Gemini / raw system prompt** | `apply.py generic` prints a portable Markdown block (roles + resolved classes + provider env) to paste into `AGENTS.md` / `GEMINI.md` / a system prompt. |
-| **Programmatic / OpenAI-compatible client** | Read the shared `roles.config.json` directly; pick `roles.<role>.model` + the `providers[...]` entry, one client per role. |
-
-To support a **new** harness: add `adapters/<harness>/` templates (placeholders
-`{{PLANNER_MODEL}}` / `{{BUILDER_MODEL}}` / `{{PLANNER_PURPOSE}}` /
-`{{BUILDER_PURPOSE}}`) and a small render function in `apply.py`. The config never
-changes.
-
-## Layout
-
-```
-roles.config.json        single source of truth (edit this)
-roles.schema.json        JSON-Schema validator
-apply.py                 stdlib-only generator / validator
-router.py                deterministic explainable recommendation router
-agent-knowledge/         generated specialty profiles and preserved durable lessons
-PRIMITIVE.md             full harness-neutral spec
-adapters/claude-code/    planner / builder / PB / specialist / route templates
-```
-
-See [`PRIMITIVE.md`](./PRIMITIVE.md) for the full spec and design rules.
+<!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
+| Harness | Surface | Result |
+|---|---|---|
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |
+| Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |
+<!-- END GENERATED: harness-surfaces -->

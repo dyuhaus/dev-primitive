@@ -8,6 +8,7 @@ applicable profiles; every harness handoff remains confirmation-required.
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,54 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROLE_KEYS = ("planner", "builder")
 SPECIALIST_KEYS = ("runner", "tech-writer", "prose-writer", "team-leader", "l1-programmer", "librarian", "fe-designer", "audit", "code-reviewer")
 ALL_AGENT_KEYS = ROLE_KEYS + SPECIALIST_KEYS
+
+# Wire protocols a provider entry may declare. `deepseek` and `openrouter` were
+# added on 2026-08-21: this machine has been multi-provider since 2026-08-16
+# (Codex on OpenAI, Pi on OpenRouter, dsh on DeepSeek) and a registry that
+# cannot name them cannot describe the machine it configures.
+PROVIDER_TYPES = ("anthropic", "openai", "google", "deepseek", "openrouter", "local")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+# Provider *key* names consumers recognise. Downstream tools (Maestro's
+# backend/lib/roles.js, the harness adapters below) map a role to a harness by
+# the provider's key, not by its type — so a DeepSeek provider keyed `dsh`
+# validates cleanly and is then silently unroutable. Keys outside this set are
+# allowed but warned about, because refusing them would break a private config.
+RECOGNISED_PROVIDER_KEYS = ("anthropic", "openai", "deepseek", "openrouter")
+
+# Which provider types each harness adapter can actually *dispatch* a model to.
+# This is a property of the harness, not of the machine's policy: Claude Code
+# resolves a subagent's `model:` against Anthropic classes and ids only, Codex
+# against OpenAI models, dsh against DeepSeek models. An adapter that emits a
+# model field it cannot dispatch produces a profile that silently runs on the
+# session model while its own file claims otherwise.
+ADAPTER_DISPATCHABLE_PROVIDER_TYPES = {
+    "claude-code": ("anthropic",),
+    "codex": ("openai",),
+    "dsh": ("deepseek",),
+    "pi": ("openrouter", "anthropic"),
+    "hermes": (),  # Hermes takes its model from its own harness configuration.
+}
+
+# Model classes and id prefixes Claude Code will actually resolve. Anything else
+# in a `model:` frontmatter field is discarded silently by the harness.
+ANTHROPIC_MODEL_CLASSES = ("opus", "sonnet", "haiku", "fable", "default", "inherit")
+ANTHROPIC_MODEL_ID_PREFIXES = (
+    "claude-",
+    "anthropic.claude-",
+    "us.anthropic.claude-",
+    "eu.anthropic.claude-",
+    "apac.anthropic.claude-",
+)
+
+
+class AdapterUnsupported(Exception):
+    """One harness adapter cannot render the current registry.
+
+    Raised instead of exiting so a caller can decide: an explicit single-adapter
+    request is a hard failure, while a multi-surface refresh skips that adapter
+    with a warning and still regenerates the neutral surfaces.
+    """
 
 
 def fail(msg: str) -> None:
@@ -45,8 +94,8 @@ def validate(cfg: dict) -> list:
             if not isinstance(prov, dict):
                 errs.append(f"providers.{name} must be an object")
                 continue
-            if prov.get("type") not in ("anthropic", "openai", "google", "local"):
-                errs.append(f"providers.{name}.type must be one of anthropic|openai|google|local")
+            if prov.get("type") not in PROVIDER_TYPES:
+                errs.append(f"providers.{name}.type must be one of {'|'.join(PROVIDER_TYPES)}")
             if not isinstance(prov.get("apiKeyEnv"), str):
                 errs.append(f"providers.{name}.apiKeyEnv must be a string")
 
@@ -73,6 +122,17 @@ def validate(cfg: dict) -> list:
             errs.append(f"{path}.provider must be a string")
         elif provider not in providers:
             errs.append(f"{path}.provider '{provider}' is not defined in providers")
+        effort = model.get("effort")
+        provider_type = (providers.get(provider) or {}).get("type") if isinstance(provider, str) else None
+        if provider_type == "openai" and effort is None:
+            errs.append(f"{path}.effort is required for an openai provider")
+        if effort is not None and effort not in EFFORT_LEVELS:
+            errs.append(f"{path}.effort must be one of {'|'.join(EFFORT_LEVELS)}")
+        value = (mid or cls).strip().lower()
+        if provider_type == "openai" and is_anthropic_model(value):
+            errs.append(f"{path} names Anthropic model '{value}' on an openai provider")
+        if provider_type == "anthropic" and value.startswith(("gpt-", "openai/")):
+            errs.append(f"{path} names OpenAI model '{value}' on an anthropic provider")
 
     def validate_entry(entry, path, specialist=False):
         if not isinstance(entry, dict):
@@ -83,7 +143,7 @@ def validate(cfg: dict) -> list:
         validate_model(entry.get("model"), f"{path}.model")
         if "canDelegate" in entry and not isinstance(entry["canDelegate"], bool):
             errs.append(f"{path}.canDelegate must be boolean")
-        for field in ("escalateTo", "delegateTo", "infoSources"):
+        for field in ("escalateTo", "delegateTo", "infoSources", "capabilities", "boundaries", "outputContract"):
             if field in entry and (not isinstance(entry[field], list) or not all(isinstance(x, str) for x in entry[field])):
                 errs.append(f"{path}.{field} must be a list of strings")
         if specialist:
@@ -210,8 +270,11 @@ def apply_set(cfg: dict, args) -> list:
     if args.provider is not None:
         model["provider"] = args.provider
         changes.append(f"provider -> '{args.provider}'")
+    if args.effort is not None:
+        model["effort"] = args.effort
+        changes.append(f"effort -> '{args.effort}'")
     if not changes:
-        fail("nothing to set — pass a model class, or --id/--class/--provider")
+        fail("nothing to set — pass a model class, or --id/--class/--provider/--effort")
     return changes
 
 
@@ -226,6 +289,7 @@ def role_view(cfg: dict, key: str) -> dict:
         "id": entry["model"].get("id", ""),
         "provider": provider_name,
         "provider_type": provider.get("type", ""),
+        "effort": entry["model"].get("effort", ""),
         "purpose": entry.get("purpose", ""),
         "read_only": bool(entry.get("readOnly", False)),
         "display_name": entry.get("displayName", key.title()),
@@ -253,17 +317,51 @@ def render(text: str, mapping: dict) -> str:
 # --------------------------------------------------------------------------- #
 # Claude Code resolves a subagent's `model:` frontmatter against Anthropic
 # classes and ids only, and silently discards anything else — the subagent then
-# runs on the session model while its file still claims otherwise. This machine
-# stopped configuring non-Anthropic models on 2026-07-26, so that trap cannot be
-# hit; this guard keeps it that way if one is reintroduced by mistake.
+# runs on the session model while its file still claims otherwise.
+#
+# This guard used to be keyed on the provider *name* and was called from exactly
+# one place (the specialists loop). Neither half worked: `apply.py set <role>
+# <model>` never touches the provider field, so the guard could not fire on the
+# path the documented one-liner actually uses, and planner, builder and the
+# post-workflow auditor bypassed it entirely. `set builder gpt-5.6-terra` exited
+# 0, printed a success table, and rendered an undispatchable model nine times.
+#
+# It is now keyed on the resolved model class checked against the classes and id
+# prefixes Claude Code can really resolve, it covers every profile including the
+# PB roles and the auditor, and it refuses to render rather than emitting a value
+# the harness will throw away.
 
 
-def claude_model_field(model: str, provider: str) -> str:
-    if provider and provider != "anthropic":
-        fail(
-            f"model '{model}' uses provider '{provider}', but Claude Code can only "
-            "dispatch Anthropic models for a subagent. Configure an Anthropic "
-            "class, or add an explicit bridge before rendering this profile."
+def provider_type_of(cfg: dict, provider_name: str) -> str:
+    return str(((cfg.get("providers") or {}).get(provider_name) or {}).get("type", ""))
+
+
+def is_anthropic_model(model: str) -> bool:
+    """True when Claude Code can resolve this value in a `model:` field."""
+    name = str(model).strip().lower()
+    if not name:
+        return False
+    if name in ANTHROPIC_MODEL_CLASSES:
+        return True
+    return any(name.startswith(prefix) for prefix in ANTHROPIC_MODEL_ID_PREFIXES)
+
+
+def claude_model_field(model: str, provider_type: str) -> str:
+    """The value to write into a Claude Code `model:` field, or refuse.
+
+    `provider_type` is the provider's declared wire protocol, not its key name:
+    a DeepSeek endpoint keyed `anthropic` must still be refused.
+    """
+    if provider_type and provider_type != "anthropic":
+        raise AdapterUnsupported(
+            f"model '{model}' uses a '{provider_type}' provider, but Claude Code can "
+            "only dispatch Anthropic models for a subagent"
+        )
+    if not is_anthropic_model(model):
+        raise AdapterUnsupported(
+            f"model '{model}' is not a model class or id Claude Code can resolve "
+            f"(known classes: {', '.join(ANTHROPIC_MODEL_CLASSES)}; ids must start "
+            f"with one of: {', '.join(ANTHROPIC_MODEL_ID_PREFIXES)})"
         )
     return model
 
@@ -272,21 +370,67 @@ def claude_model_summary(model: str, provider: str) -> str:
     return f"running on the configured model class ({model})"
 
 
-def template_mapping(cfg: dict) -> dict:
+def claude_dispatch_report(cfg: dict) -> list:
+    """Every profile the Claude adapter cannot dispatch, with the reason.
+
+    Returns a list of one-line strings. Empty means the whole registry renders.
+    Collected rather than raised on the first hit so one run names every profile
+    that has to change, instead of one per re-run.
+    """
+    problems = []
+    checks = [(f"roles.{key}", role_view(cfg, key)) for key in ROLE_KEYS]
+    checks += [(f"agents.{key}", role_view(cfg, key)) for key in cfg.get("agents", {})]
+    for where, view in checks:
+        try:
+            claude_model_field(view["model"], view["provider_type"])
+        except AdapterUnsupported as exc:
+            problems.append(f"{where}: {exc}")
+    post_audit = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {})
+    if post_audit.get("model") is not None:
+        model = resolve_model({"model": post_audit.get("model", {})})
+        ptype = provider_type_of(cfg, (post_audit.get("model") or {}).get("provider", ""))
+        try:
+            claude_model_field(model, ptype)
+        except AdapterUnsupported as exc:
+            problems.append(f"routing.postWorkflowAudit: {exc}")
+    return problems
+
+
+def template_mapping(cfg: dict, adapter: str = "claude-code") -> dict:
+    """Placeholder values for the PB templates.
+
+    The `*_MODEL_FIELD` entries are the only values a template may put in a
+    frontmatter `model:` line. They go through the adapter's dispatch guard, so
+    an undispatchable model stops the render here rather than being written out.
+    """
     p, b = role_view(cfg, "planner"), role_view(cfg, "builder")
     post_audit = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {})
     audit_model = resolve_model({"model": post_audit.get("model", {})})
     audit_provider = (post_audit.get("model") or {}).get("provider", "")
+    audit_provider_type = provider_type_of(cfg, audit_provider)
+    field = claude_model_field if adapter == "claude-code" else (lambda model, _ptype: model)
+    # `postWorkflowAudit` may legitimately carry no model at all — a config with
+    # `{"enabled": false}` and nothing else is valid, and validate() has a test
+    # saying so. Guarding an absent model would reject that config, so the audit
+    # field is only checked when one is actually configured. This matches
+    # claude_dispatch_report(), which already skips the same case.
+    audit_field = field(audit_model, audit_provider_type) if post_audit.get("model") is not None else audit_model
     return {
         "PLANNER_MODEL": p["model"],
         "BUILDER_MODEL": b["model"],
+        "PLANNER_EFFORT": p["effort"],
+        "BUILDER_EFFORT": b["effort"],
+        "PLANNER_MODEL_FIELD": field(p["model"], p["provider_type"]),
+        "BUILDER_MODEL_FIELD": field(b["model"], b["provider_type"]),
         "PLANNER_PURPOSE": p["purpose"],
         "BUILDER_PURPOSE": b["purpose"],
         "PLANNER_PROVIDER": p["provider"],
         "BUILDER_PROVIDER": b["provider"],
         "WORKFLOW_AUDIT_ENABLED": str(post_audit.get("enabled", False)).lower(),
         "WORKFLOW_AUDIT_MODEL": audit_model,
+        "WORKFLOW_AUDIT_MODEL_FIELD": audit_field,
         "WORKFLOW_AUDIT_THINKING": post_audit.get("thinking", "medium"),
+        "ANTHROPIC_CLASSES": ", ".join(f"`{name}`" for name in ANTHROPIC_MODEL_CLASSES),
     }
 
 
@@ -333,8 +477,46 @@ def delegation_note(view: dict) -> str:
     return f"may delegate narrowly scoped subtasks to {targets}."
 
 
-def install_claude(cfg: dict, home: Path, dry: bool) -> None:
+def render_claude(cfg: dict, home: Path) -> list:
+    """Render every Claude Code surface in memory: [(target Path, content)].
+
+    Raises AdapterUnsupported before producing anything when the registry names
+    a model Claude Code cannot dispatch. Nothing is written here, so a caller can
+    validate a proposed config change before it reaches disk.
+    """
+    problems = claude_dispatch_report(cfg)
+    if problems:
+        raise AdapterUnsupported(
+            "the Claude Code adapter cannot dispatch every configured profile, so "
+            "it refuses to render one:\n"
+            + "\n".join(f"  - {line}" for line in problems)
+            + "\nClaude Code discards an unresolvable `model:` value silently and "
+            "runs the subagent on the session model, so emitting these files would "
+            "look like success. Configure an Anthropic class for these profiles, or "
+            "run the harness whose adapter can dispatch them."
+        )
     mapping = template_mapping(cfg)
+    # Frontmatter values, pre-quoted. Same rule the skill adapters follow: a
+    # template may only put a `yaml_scalar()` value, a hand-written quoted
+    # literal, or an identifier-shaped bare token into frontmatter. These four
+    # descriptions carry a resolved model class, which is registry text — and
+    # registry text is one `--id` pin away from containing whatever it likes.
+    planner_model, builder_model = mapping["PLANNER_MODEL"], mapping["BUILDER_MODEL"]
+    mapping["PB_DESCRIPTION"] = yaml_scalar(
+        f"Plan then build — run the two-model dev loop ({planner_model} plans, {builder_model} builds)."
+    )
+    mapping["PBG_DESCRIPTION"] = yaml_scalar(
+        "Plan → build → verify, looping until a done-condition holds — single-command "
+        f"goal loop ({planner_model} plans, {builder_model} builds)."
+    )
+    mapping["PBG_BUILDER_DESCRIPTION"] = yaml_scalar(
+        f"Switch the builder's model (now {builder_model}) and regenerate — wraps "
+        "`apply.py set builder`."
+    )
+    mapping["PBG_PLANNER_DESCRIPTION"] = yaml_scalar(
+        f"Switch the planner's model (now {planner_model}) and regenerate — wraps "
+        "`apply.py set planner`."
+    )
     tdir = SCRIPT_DIR / "adapters" / "claude-code"
     jobs = [
         (tdir / "planner.md.tmpl", home / ".claude" / "agents" / "planner.md"),
@@ -359,7 +541,7 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
             "AGENT_KEY": key,
             "AGENT_DISPLAY_NAME": view["display_name"],
             "AGENT_MODEL": view["model"],
-            "AGENT_MODEL_FIELD": claude_model_field(view["model"], view["provider"]),
+            "AGENT_MODEL_FIELD": claude_model_field(view["model"], view["provider_type"]),
             "AGENT_MODEL_SUMMARY": claude_model_summary(view["model"], view["provider"]),
             "AGENT_PROVIDER": view["provider"],
             "AGENT_PURPOSE": view["purpose"],
@@ -377,6 +559,18 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
             "AGENT_KNOWLEDGE_DIR": str(SCRIPT_DIR / "agent-knowledge" / key),
             "AGENT_PURPOSE_SHORT": short_purpose(view["purpose"]),
             "AGENT_DELEGATION_NOTE": delegation_note(view),
+            "ANTHROPIC_CLASSES": mapping["ANTHROPIC_CLASSES"],
+            # The two slash-command descriptions, pre-quoted. Built here rather
+            # than assembled in the template because both interpolate a registry
+            # `purpose`, and four of the eleven purposes contain a colon.
+            "AGENT_INVOKE_DESCRIPTION": yaml_scalar(
+                f"Hand this task to {view['display_name']} ({view['model']}) — "
+                f"{short_purpose(view['purpose'])}"
+            ),
+            "AGENT_MODEL_DESCRIPTION": yaml_scalar(
+                f"Switch {view['display_name']}'s model (now {view['model']}) and "
+                f"regenerate — wraps `apply.py set {key}`."
+            ),
         }
         jobs.append((agent_template, home / ".claude" / "agents" / f"{key}.md", values))
         # Per-agent slash commands, matching Pi's /<agent> and /<agent>-model.
@@ -389,12 +583,50 @@ def install_claude(cfg: dict, home: Path, dry: bool) -> None:
         )
         or "none"
     )
+    rendered = []
     for item in jobs:
         template, target = item[0], item[1]
         values = item[2] if len(item) == 3 else mapping
         if not template.exists():
             fail(f"missing template: {template}")
-        write_out(target, render(template.read_text(encoding="utf-8"), values), dry)
+        rendered.append((target, render(template.read_text(encoding="utf-8"), values)))
+    # Assert on the artifact, for the adapter that is actually installed here.
+    # Nothing is written yet, so a template or registry edit that would produce
+    # frontmatter Claude Code cannot parse stops the build instead of landing an
+    # unloadable command in ~/.claude with exit 0.
+    for target, content in rendered:
+        # Slash commands have no `name:` — the filename is the command name.
+        required = ("name", "description") if target.parent.name == "agents" else ("description",)
+        check_frontmatter(target, content, required=required)
+    return rendered
+
+
+def install_claude(cfg: dict, home: Path, dry: bool) -> None:
+    raise AdapterUnsupported("Claude is decommissioned; only Codex is supported")
+
+
+def retire_stale_claude_surface(cfg: dict, home: Path, dry: bool) -> None:
+    """Retire only manifest-owned generated Claude PB/profile paths.
+
+    These paths are deliberately narrower than every Claude-generated surface:
+    the catalog and routing commands can coexist with a manually maintained
+    Claude workflow, while these PB/profile files would advertise a routing
+    configuration Claude Code cannot dispatch.  A path must be both in this
+    manifest *and* carry the exact marker emitted by the Claude templates.
+    """
+    root = home / ".claude"
+    owned = claude_manifest_paths(home, cfg)
+    removed = 0
+    for target, marker in owned:
+        if is_marked_generated(target, marker):
+            if dry:
+                print(f"--- would retire stale Claude generated file {target} ---")
+            else:
+                target.unlink()
+                print(f"  retired stale Claude generated file {target}")
+            removed += 1
+    if not removed:
+        print("  no manifest-owned stale Claude PB/profile files to retire")
 
 
 ROLE_INFO_SOURCES = {
@@ -438,8 +670,10 @@ def profile_markdown(cfg: dict, key: str) -> str:
 
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
-material above. After substantive work, append at most one generalized,
-evidence-backed lesson in the documented format if it will improve future work.
+material above. A useful lesson is a suggestion unless the current task grants
+specific write authority to `LESSONS.md`. In a read-only task, report the
+suggestion to the parent or user and do not write it. When that authority exists,
+append at most one generalized, evidence-backed lesson in the documented format.
 Never include secrets, personal data, credentials, raw task logs, or private
 content. At 50 dated entries, consolidate the oldest reusable points into
 `## Durable practices` before adding more. Do not modify this profile; regenerate
@@ -460,7 +694,9 @@ personal data, private task content, or chronological task logs.
 
 ## Dated lessons
 
-<!-- Append at most one evidence-backed, generalized entry after substantive work:
+<!-- A useful lesson is report-only unless the current task specifically grants
+write authority to this file. Do not append during a read-only task.
+When authorized, append at most one evidence-backed, generalized entry:
 - YYYY-MM-DD | task type | reusable lesson | evidence/path or validation command
 When this section reaches 50 entries, fold the oldest reusable items into Durable
 practices and remove the consolidated dated entries. -->
@@ -479,11 +715,13 @@ source configuration, not generated profiles. `LESSONS.md` is intentionally
 created once and then preserved across regenerations.
 
 Before substantive work, an agent reads its profile, lessons, project
-instructions, and the profile's information sources. After work it may append
-**at most one** reusable, evidence-backed lesson in the documented dated format.
-Lessons are not task logs and must never contain secrets, credentials, personal
-data, raw private content, or unverified claims. At 50 dated entries, consolidate
-the oldest reusable entries into `## Durable practices`.
+instructions, and the profile's information sources. A useful lesson is a
+reportable suggestion unless the task specifically grants write authority to
+`LESSONS.md`; read-only work never writes it. With that authority, an agent may
+append **at most one** reusable, evidence-backed lesson in the documented dated
+format. Lessons are not task logs and must never contain secrets, credentials,
+personal data, raw private content, or unverified claims. At 50 dated entries,
+consolidate the oldest reusable entries into `## Durable practices`.
 '''
     if not readme.exists():
         write_out(readme, readme_content, dry)
@@ -504,12 +742,667 @@ def generic_block(cfg: dict) -> str:
         view = role_view(cfg, key)
         mode = "read-only" if view["read_only"] else "write-capable"
         lines.append(f"- **{key}** — `{view['model']}` ({view['provider']}); {mode}. {view['purpose']}")
+    lines += ["", "### PB role contracts"]
+    for key in ROLE_KEYS:
+        view = role_view(cfg, key)
+        lines += [f"", f"#### {key.title()}", "", "Boundaries:", list_text(view["boundaries"]), "", "Output contract:", list_text(view["output_contract"])]
     lines += ["", "### Specialist registry", "", "| Key | Model | Invocation | Auto-select | Purpose |", "|---|---|---|---|---|"]
     for key in cfg.get("agents", {}):
         view = role_view(cfg, key)
         lines.append(f"| `{key}` | `{view['model']}` | `{view['invocation']}` | `{str(view['auto_select']).lower()}` | {view['purpose']} |")
-    lines += ["", "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters."]
+    lines += [
+        "",
+        "### Portable PB contract",
+        "",
+        "- Await the Planner's terminal output before starting Builder; never pre-spawn Builder.",
+        "- Review the plan before building: it must identify verified current state and a done-condition; the smallest real end-to-end slice; explicit non-goals or deferred work; a simpler rejected alternative; exact affected surfaces and step → verification actions; earliest behavioral/live proof; and stop/replan plus install/rollback risks.",
+        "- Use one Planner and one Builder per round. At most one plan-authorized L1/FE delegation is allowed; multi-workstream work needs an explicit Team Leader call.",
+        "- On the first failed or inconclusive real proof, stop scope expansion and only diagnose or retry the same slice. A second inconclusive proof or two rounds without measurable progress is BLOCKED even if artifact labels change.",
+        "- /pb is exactly one pass and reports incomplete evidence. /pbg is capped at exactly three rounds. Persistence language cannot override ambiguity, safety, failed proof, no-progress, or round bounds.",
+        "",
+        "Team Leader is direct-call-only and must never be selected automatically. Ordinary tasks stay in the current session. Planner → Builder runs only when explicitly invoked, using Astra for both roles. Automatic workflow audit is disabled. Change models only in roles.config.json and regenerate Codex.",
+    ]
     return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------- #
+# Harness skill adapters (Codex, dsh, Hermes)
+# --------------------------------------------------------------------------- #
+# Codex, dsh and Hermes all discover skills as `<root>/<name>/SKILL.md` with
+# `name` and `description` frontmatter, so one renderer serves all three; the
+# per-harness templates carry the differences (which delegation tool exists,
+# which review command exists, what the harness can and cannot dispatch).
+#
+# The skill adapters must describe dispatchability truthfully rather than
+# emitting a frontmatter model field the harness will ignore.
+# each profile states plainly which model the registry intends and that the
+# session model is what actually runs.
+
+HARNESS_SKILL_ROOTS = {
+    "claude": ".claude/skills",
+    "codex": ".codex/skills",
+    "dsh": ".dsh/skills",
+    "hermes": ".hermes/skills",
+}
+
+# The harness-neutral skills root every harness surface is mirrored from.
+NEUTRAL_SKILL_ROOT = "skills"
+
+HARNESS_LABELS = {"codex": "Codex", "dsh": "the DeepSeek Harness (dsh)", "hermes": "Hermes"}
+
+
+def frontmatter_description(text: str, limit: int = 400) -> str:
+    """A single-line skill description short enough for every harness catalog."""
+    flat = " ".join(str(text).split())
+    if len(flat) <= limit:
+        return flat
+    return flat[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def yaml_scalar(value) -> str:
+    """One registry value, rendered as a YAML scalar every harness can parse.
+
+    The bug this exists to prevent, measured live: the skill templates
+    interpolated a profile's `purpose` into `description:` raw, and four of the
+    eleven purposes contain a colon-and-space ("planning and reasoning about the
+    project: architecture, ..."). YAML reads that as a nested mapping, the
+    frontmatter fails to parse, and dsh's filesystem skill provider **drops the
+    whole skill** with nothing but a line in its log — so `agent-planner`,
+    `agent-builder`, `agent-fe-designer` and `agent-code-reviewer` were absent
+    from a harness whose own catalog never said anything was missing. Silent
+    loss is the worst failure shape available here.
+
+    Always double-quoted, never bare: a value that happens to be safe today is
+    one registry edit away from being unsafe, and nothing downstream would say
+    so. JSON string syntax is a strict subset of YAML 1.2's double-quoted flow
+    scalar, so `json.dumps` is a correct YAML quoter for any text.
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+# One identifier-shaped token: no space, no colon, no indicator character. Any
+# value that is not built out of these has to be quoted by `yaml_scalar`.
+BARE_YAML_SCALAR = r"[A-Za-z0-9_./-]+"
+
+# The bare scalars the generator actually emits: a single identifier-shaped
+# token (`name: runner`, `model: sonnet`), or the comma-separated token list a
+# Claude Code `tools:` line carries (`Read, Grep, Glob`) — the form Anthropic's
+# own shipped agents use. Every token is itself bare-safe, so neither form can
+# contain a colon, a `#` or a leading indicator. Free prose still does not
+# match, because a token may not contain a space: `everyday tasks, and
+# maintenance` is rejected exactly as before.
+BARE_YAML_VALUE = re.compile(rf"^{BARE_YAML_SCALAR}(?:, {BARE_YAML_SCALAR})*$")
+
+# A YAML block scalar header — `|` or `>` with optional indentation and chomping
+# indicators, e.g. the `description: >-` the Claude agent templates use. The
+# body is literal text, so nothing interpolated into it can close the scalar,
+# *provided* every body line stays indented past the key. A registry value
+# containing a newline would break that indentation, so `check_frontmatter`
+# verifies it rather than assuming it.
+BLOCK_SCALAR_HEADER = re.compile(r"^[|>](?:[0-9]*[+-]?|[+-][0-9]*)$")
+
+
+def frontmatter_of(content: str) -> str:
+    """The raw YAML frontmatter block of a rendered skill file, or ''."""
+    if not content.startswith("---\n"):
+        return ""
+    end = content.find("\n---\n", 3)
+    if end == -1:
+        return ""
+    return content[4 : end + 1]
+
+
+def check_frontmatter(target, content: str, required=("name", "description")) -> None:
+    """Refuse to emit a file whose frontmatter a harness cannot parse.
+
+    Assert on the artifact, not on the template: the templates are the thing
+    that was wrong, so the check runs on the rendered bytes. Structural by
+    default (stdlib only, so the primitive stays dependency-free); when PyYAML
+    is importable it additionally does a real parse, which is what actually
+    proves a harness will accept the file.
+
+    **Every adapter's output goes through this, Claude Code's included.** The
+    three skill adapters were covered from the first version of this function
+    and the Claude adapter was not — and Claude Code is the adapter actually
+    installed on this machine. `agent-invoke.md.tmpl` and `agent-model.md.tmpl`
+    interpolated a registry purpose into an unquoted plain scalar, so a single
+    purpose containing ": " rendered a slash command no YAML parser accepts,
+    with exit 0 and nothing on stderr. A guard that covers every adapter but the
+    live one is not a guard.
+
+    `required` names the fields that must survive the parse as non-empty
+    strings. Claude Code slash commands carry no `name:` — the filename is the
+    command name — so their callers pass `("description",)`.
+    """
+    block = frontmatter_of(content)
+    if not block:
+        fail(f"{target}: rendered file has no parseable `---` frontmatter block")
+    lines = block.splitlines()
+    index = 0
+    top_level_keys = set()
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        key, sep, value = line.partition(":")
+        if not sep:
+            fail(f"{target}: frontmatter line is not a `key: value` pair: {line!r}")
+        if indent == 0:
+            # A repeated top-level key is how an interpolated value that escaped
+            # its block scalar comes back as document structure — a purpose
+            # containing a newline and "model: opus" renders a second `model:`
+            # line, which parses cleanly and quietly wins. PyYAML cannot help:
+            # duplicate keys are legal YAML and it keeps the last one.
+            if key.strip() in top_level_keys:
+                fail(
+                    f"{target}: frontmatter declares `{key.strip()}` twice. An interpolated "
+                    "value has escaped its block scalar and is being read as document "
+                    "structure — the later value silently overrides the intended one."
+                )
+            top_level_keys.add(key.strip())
+        value = value.strip()
+        if BLOCK_SCALAR_HEADER.match(value):
+            # Consume the block scalar's body: literal text, and none of it is a
+            # `key: value` pair to be validated. A body line at or below the
+            # key's indentation has escaped the scalar and is read as document
+            # structure again — so stop there and let the normal rules judge it.
+            body = 0
+            while index < len(lines):
+                nxt = lines[index]
+                if nxt.strip() and len(nxt) - len(nxt.lstrip(" ")) <= indent:
+                    break
+                body += 1 if nxt.strip() else 0
+                index += 1
+            if not body:
+                fail(
+                    f"{target}: frontmatter `{key.strip()}` opens a block scalar with no "
+                    "indented body — an interpolated value with a newline in it breaks "
+                    "out of the block and restructures the document."
+                )
+            continue
+        if not value or value[0] in "\"'":
+            continue  # a nested-mapping key, or an already-quoted scalar
+        if not BARE_YAML_VALUE.match(value):
+            fail(
+                f"{target}: frontmatter value for `{key.strip()}` is unquoted free "
+                f"text ({value[:60]!r}). Emit it through yaml_scalar() — an "
+                "unquoted colon makes the harness drop the whole file silently."
+            )
+    try:
+        import yaml  # noqa: PLC0415 — optional; the structural check stands alone
+    except ImportError:
+        return
+    try:
+        data = yaml.safe_load(block)
+    except Exception as exc:  # noqa: BLE001 — any parser complaint is fatal here
+        fail(f"{target}: frontmatter is not valid YAML: {exc}")
+    if not isinstance(data, dict):
+        fail(f"{target}: frontmatter parsed as {type(data).__name__}, not a mapping")
+    for field in required:
+        if not isinstance(data.get(field), str) or not data[field].strip():
+            fail(f"{target}: frontmatter `{field}` must be a non-empty string, got {data.get(field)!r}")
+
+
+def model_routing_note(view: dict, adapter: str) -> str:
+    if adapter == "codex" and view["provider_type"] == "openai":
+        return (
+            f"Direct adoption runs on the current Codex session model, not the registry's "
+            f"`{view['model']}` assignment. To route delegated work, call `spawn_agent` "
+            f"with `model: \"{view['model']}\"` and `reasoning_effort: \"{view['effort']}\"`."
+        )
+    """One honest sentence about whether this harness can run the model configured."""
+    label = HARNESS_LABELS.get(adapter, adapter)
+    dispatchable = ADAPTER_DISPATCHABLE_PROVIDER_TYPES.get(adapter, ())
+    if view["provider_type"] in dispatchable:
+        return (
+            f"The registry configures this profile as `{view['model']}` on the "
+            f"`{view['provider']}` provider, and {label} can dispatch that model."
+        )
+    # Worded so no indefinite article precedes the provider type. The previous
+    # phrasing hardcoded "a", and every provider in this registry is `anthropic`,
+    # so every non-dispatchable profile of every skill adapter read "a anthropic
+    # endpoint" — in the one sentence whose whole job is to be believed.
+    protocol = view["provider_type"] or "undeclared"
+    return (
+        f"The registry configures this profile as `{view['model']}` on the "
+        f"`{view['provider']}` provider, whose wire protocol is `{protocol}`. "
+        f"{label} cannot dispatch that model, so this profile runs on whatever "
+        "model the current session is using. Treat the configured model as "
+        "routing intent, not a fact about this session, and never report that "
+        "the profile ran on it."
+    )
+
+
+def invocation_rule(view: dict) -> str:
+    if view["invocation"] == "direct-call-only":
+        return (
+            "This profile runs only when the user explicitly asks for it. Never "
+            "self-invoke it, volunteer it, or make it an automatic routing target."
+        )
+    return "Use this profile only for work inside its stated scope; escalate when the work leaves it."
+
+
+def roster_sentence(cfg: dict) -> str:
+    """The canonical one-line roster, generated so a hand-written count cannot drift."""
+    agents = list(cfg.get("agents", {}))
+    direct = [k for k in agents if cfg["agents"][k].get("invocation") == "direct-call-only"]
+    ordinary = [k for k in agents if k not in direct]
+    names = ", ".join(f"`{k}`" for k in ordinary)
+    direct_names = ", ".join(f"`{k}`" for k in direct)
+    return (
+        f"Beyond the `planner`/`builder` core there are {len(agents)} specialists: "
+        f"{names}, plus {len(direct)} direct-call-only profiles that must never be "
+        f"auto-selected — {direct_names}."
+    )
+
+
+def roster_table(cfg: dict) -> str:
+    lines = ["| Key | Display name | Model | Provider | Invocation | Auto-select |", "|---|---|---|---|---|---|"]
+    for key in ROLE_KEYS + tuple(cfg.get("agents", {})):
+        view = role_view(cfg, key)
+        lines.append(
+            f"| `{key}` | {view['display_name']} | `{view['model']}` | `{view['provider']}` | "
+            f"`{view['invocation']}` | `{str(view['auto_select']).lower()}` |"
+        )
+    return "\n".join(lines)
+
+
+def auditor_models(cfg: dict) -> str:
+    """The models the two review roles actually run on, read from the registry."""
+    post_audit = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {})
+    if not post_audit.get("enabled", False):
+        audit = role_view(cfg, "audit")
+        return f"automatic workflow audit disabled; requested Audit uses `{audit['model']}` on `{audit['provider']}` at `{audit['effort']}`"
+    light = resolve_model({"model": post_audit.get("model", {})}) or "(unset)"
+    full = role_view(cfg, "audit")["model"] if "audit" in cfg.get("agents", {}) else "(unset)"
+    light_cfg = post_audit.get("model") or {}
+    audit_cfg = (cfg.get("agents", {}).get("audit", {}).get("model") or {})
+    return (f"`{light}` on `{light_cfg.get('provider', '(unset)')}` at "
+            f"`{light_cfg.get('effort', post_audit.get('thinking', '(unset)'))}` for the light post-workflow audit and "
+            f"`{full}` on `{audit_cfg.get('provider', '(unset)')}` at "
+            f"`{audit_cfg.get('effort', '(unset)')}` for the direct-call Audit profile")
+
+
+def skill_list(cfg: dict, prefix: str = "agent-") -> str:
+    lines = []
+    for key in ROLE_KEYS + tuple(cfg.get("agents", {})):
+        view = role_view(cfg, key)
+        suffix = " — direct-call-only; never invoke automatically" if view["invocation"] == "direct-call-only" else ""
+        lines.append(f"- `{prefix}{key}` — {short_purpose(view['purpose'])}{suffix}")
+    return "\n".join(lines)
+
+
+def harness_mapping(cfg: dict, adapter: str) -> dict:
+    mapping = template_mapping(cfg, adapter)
+    mapping.update(
+        {
+            "REPO_DIR": str(SCRIPT_DIR),
+            "HARNESS_LABEL": HARNESS_LABELS.get(adapter, adapter),
+            "ROSTER_TABLE": roster_table(cfg),
+            "ROSTER_SENTENCE": roster_sentence(cfg),
+            "SKILL_LIST": skill_list(cfg),
+            "AUDITOR_MODELS": auditor_models(cfg),
+            "PLANNER_ROUTING_NOTE": model_routing_note(role_view(cfg, "planner"), adapter),
+            "BUILDER_ROUTING_NOTE": model_routing_note(role_view(cfg, "builder"), adapter),
+            "DIRECT_CALL_ONLY": ", ".join(
+                k for k, a in (cfg.get("agents") or {}).items() if a.get("invocation") == "direct-call-only"
+            )
+            or "none",
+        }
+    )
+    return mapping
+
+
+def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
+    """Render one harness's whole skill surface: [(target Path, content)]."""
+    if adapter != "codex":
+        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
+    tdir = SCRIPT_DIR / "adapters" / adapter
+    root = home / HARNESS_SKILL_ROOTS[adapter]
+    agent_template = tdir / "agent.SKILL.md.tmpl"
+    for template in (agent_template, tdir / "framework.SKILL.md.tmpl", tdir / "pb.SKILL.md.tmpl", tdir / "route.SKILL.md.tmpl"):
+        if not template.exists():
+            fail(f"missing template: {template}")
+    shared = harness_mapping(cfg, adapter)
+    rendered = [
+        (root / "agent-framework" / "SKILL.md", render((tdir / "framework.SKILL.md.tmpl").read_text(encoding="utf-8"), shared)),
+        (root / "agent-pb" / "SKILL.md", render((tdir / "pb.SKILL.md.tmpl").read_text(encoding="utf-8"), shared)),
+        (root / "agent-route" / "SKILL.md", render((tdir / "route.SKILL.md.tmpl").read_text(encoding="utf-8"), shared)),
+    ]
+    body = agent_template.read_text(encoding="utf-8")
+    # Roles first, then specialists: the Hermes installer used to iterate only
+    # the specialists map, so planner and builder could never appear at all.
+    for key in ROLE_KEYS + tuple(cfg.get("agents", {})):
+        view = role_view(cfg, key)
+        values = dict(shared)
+        values.update(
+            {
+                "AGENT_KEY": key,
+                # `*_YAML` values are the ONLY ones a template may put in
+                # frontmatter. They are pre-quoted, so no registry text can
+                # close the scalar and restructure the document.
+                "AGENT_SKILL_NAME": yaml_scalar(f"agent-{key}"),
+                "AGENT_DESCRIPTION": yaml_scalar(frontmatter_description(
+                    ("Only when David explicitly invokes " + key + " or Planner -> Builder. Never trigger automatically. " if key in ROLE_KEYS else "") + view["purpose"]
+                )),
+                "AGENT_KEY_YAML": yaml_scalar(key),
+                "AGENT_MODEL_CLASS_YAML": yaml_scalar(view["class"]),
+                "AGENT_MODEL_ID_YAML": yaml_scalar(view["id"]),
+                "AGENT_PROVIDER_YAML": yaml_scalar(view["provider"]),
+                "AGENT_PROVIDER_TYPE_YAML": yaml_scalar(view["provider_type"]),
+                "AGENT_INVOCATION_YAML": yaml_scalar(view["invocation"]),
+                "AGENT_DISPLAY_NAME": view["display_name"],
+                "AGENT_PURPOSE": view["purpose"],
+                "AGENT_PURPOSE_SHORT": short_purpose(view["purpose"]),
+                "AGENT_MODEL": view["model"],
+                "AGENT_MODEL_CLASS": view["class"],
+                "AGENT_MODEL_ID": view["id"],
+                "AGENT_PROVIDER": view["provider"],
+                "AGENT_PROVIDER_TYPE": view["provider_type"],
+                "AGENT_MODEL_ROUTING_NOTE": model_routing_note(view, adapter),
+                "AGENT_EFFORT": view["effort"],
+                "AGENT_DELEGATION_NOTE": delegation_note(view),
+                "AGENT_INVOCATION": view["invocation"],
+                "AGENT_INVOCATION_RULE": invocation_rule(view),
+                "AGENT_AUTO_SELECT": str(view["auto_select"]).lower(),
+                "AGENT_READ_ONLY": str(view["read_only"]).lower(),
+                "AGENT_TOOLS": ", ".join(view["tools"]) or "not restricted by this harness",
+                "AGENT_CAPABILITIES": list_text(view["capabilities"]),
+                "AGENT_BOUNDARIES": list_text(view["boundaries"]),
+                "AGENT_ESCALATE_TO": ", ".join(view["escalate_to"]) or "none",
+                "AGENT_CAN_DELEGATE": str(view["can_delegate"]).lower(),
+                "AGENT_DELEGATE_TO": ", ".join(view["delegate_to"]) or "none",
+                "AGENT_OUTPUT_CONTRACT": list_text(view["output_contract"]),
+                "AGENT_INFO_SOURCES": list_text(knowledge_info_sources(cfg, key)),
+                "AGENT_KNOWLEDGE_DIR": str(SCRIPT_DIR / "agent-knowledge" / key),
+            }
+        )
+        rendered.append((root / f"agent-{key}" / "SKILL.md", render(body, values)))
+    # Assert on the artifact: every rendered file, including the three shared
+    # skills whose frontmatter is hand-written in the templates.
+    for target, content in rendered:
+        check_frontmatter(target, content)
+    return rendered
+
+
+def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> None:
+    for target, content in render_harness_skills(cfg, home, adapter):
+        write_out(target, content, dry)
+    # Codex reads invocation policy from sibling agents/openai.yaml metadata.
+    # A task description alone must never auto-load PB or its component roles.
+    for name in ("agent-pb", "agent-planner", "agent-builder", "agent-route", "agent-audit", "agent-team-leader"):
+        target = home / HARNESS_SKILL_ROOTS[adapter] / name / "agents" / "openai.yaml"
+        write_out(target, "policy:\n  allow_implicit_invocation: false\n", dry)
+
+
+def link_shared_skills(home: Path, dry: bool, adapters=("codex",)) -> list:
+    """Mirror the neutral ~/skills roots into every harness's skill directory.
+
+    Existing symlinks are reconciled to the current neutral source; real files
+    and directories are left exactly as they are. Without this a Codex session
+    can keep loading a stale git-workflow skill after the neutral source moves.
+    """
+    if any(adapter != "codex" for adapter in adapters):
+        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
+    source = home / NEUTRAL_SKILL_ROOT
+    actions = []
+    if not source.is_dir():
+        print(f"  (no shared skill root at {source}; nothing to link)")
+        return actions
+    names = sorted(entry.name for entry in source.iterdir() if not entry.name.startswith("."))
+    for adapter in adapters:
+        root = home / HARNESS_SKILL_ROOTS[adapter]
+        for name in names:
+            target, origin = root / name, (source / name).resolve()
+            if target.is_symlink():
+                current = target.resolve(strict=False)
+                if current == origin:
+                    continue
+                actions.append((target, origin))
+                if dry:
+                    print(f"--- would reset {target} -> {origin} (was {current}) ---")
+                    continue
+                target.unlink()
+                target.symlink_to(origin)
+                print(f"  reset {target} -> {origin} (was {current})")
+                continue
+            if target.exists():
+                continue
+            actions.append((target, origin))
+            if dry:
+                print(f"--- would link {target} -> {origin} ---")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(origin)
+            print(f"  linked {target} -> {origin}")
+    if not actions:
+        print("  every harness skill root already carries the shared skills")
+    return actions
+
+
+def write_config(cfg_path: Path, cfg: dict) -> None:
+    """Persist the registry atomically, so a crashed write cannot truncate it."""
+    payload = json.dumps(cfg, indent=2, ensure_ascii=False) + "\n"
+    temp = cfg_path.with_name(cfg_path.name + ".tmp")
+    temp.write_text(payload, encoding="utf-8")
+    os.replace(temp, cfg_path)
+
+
+ALL_ADAPTERS = ("codex",)
+
+# The only adapter whose renderer can REFUSE a model class. Claude Code is the
+# one harness here that resolves a `model:` frontmatter field, so it is the one
+# adapter that can object to what `set` was asked to configure; the skill
+# adapters state the configured model as prose and will render anything. `set`
+# used to print "Checked against installed adapters: claude, codex, dsh" —
+# naming three adapters when only one had checked anything.
+MODEL_OBJECTING_ADAPTERS = ("claude",)
+
+
+CLAUDE_REGISTRY_MARKER = "<!-- Generated from dev-primitive/roles.config.json by apply.py. Do not hand-edit;"
+CLAUDE_GENERIC_MARKER = "<!-- Generated by dev-primitive/apply.py. Do not hand-edit. -->"
+
+
+def claude_manifest_paths(home: Path, cfg: dict) -> list:
+    """Exact paths and markers the Claude renderer owns for this registry.
+
+    A user-maintained ~/.claude file must never be mistaken for an installed
+    primitive adapter merely because it happens to be named planner or builder.
+    """
+    root = home / ".claude"
+    owned = [(root / "agents" / name, CLAUDE_REGISTRY_MARKER) for name in ("planner.md", "builder.md", "workflow-audit.md")]
+    owned += [(root / "agents" / f"{key}.md", CLAUDE_REGISTRY_MARKER) for key in cfg.get("agents", {})]
+    owned += [(root / "commands" / name, CLAUDE_REGISTRY_MARKER) for name in ("pb.md", "pbg.md", "pbg-builder.md", "pbg-planner.md")]
+    # Route/catalog are manifest-owned too, but carry their templates' distinct
+    # exact marker. They must not survive an OpenAI-only registry cutover.
+    owned += [(root / "commands" / name, CLAUDE_GENERIC_MARKER) for name in ("route.md", "agent-catalog.md")]
+    for key in cfg.get("agents", {}):
+        owned.extend(((root / "commands" / f"{key}.md", CLAUDE_REGISTRY_MARKER), (root / "commands" / f"{key}-model.md", CLAUDE_REGISTRY_MARKER)))
+    return owned
+
+
+def is_marked_generated(target: Path, marker: str) -> bool:
+    return target.is_file() and marker in target.read_text(encoding="utf-8", errors="replace")
+
+
+def installed_adapters(home: Path, cfg: dict) -> list:
+    """Which harnesses have an installed generated surface in this home."""
+    return [adapter for adapter in ALL_ADAPTERS if surface_installed(home, adapter, cfg)]
+
+
+def surface_installed(home: Path, adapter: str, cfg: dict = None) -> bool:
+    """Whether this harness already has a GENERATED surface on disk.
+
+    Presence of `~/.dsh` means dsh is installed. It does not mean this primitive
+    has ever written a profile into it — and `apply.py set` must not turn a
+    routine model switch into the act of installing a harness surface that was
+    deliberately never installed. Installing a surface is `install_harness.py`'s
+    job, run on purpose.
+    """
+    if adapter == "claude":
+        return any(is_marked_generated(path, marker) for path, marker in claude_manifest_paths(home, cfg or {}))
+    root = home / HARNESS_SKILL_ROOTS[adapter]
+    if not root.is_dir():
+        return False
+    return any((root / f"agent-{key}" / "SKILL.md").is_file() for key in ALL_AGENT_KEYS) or (
+        root / "agent-framework" / "SKILL.md"
+    ).is_file()
+
+
+def render_surface(cfg: dict, home: Path, adapter: str) -> list:
+    """[(target, content)] for one adapter, without writing anything."""
+    if adapter == "claude":
+        return render_claude(cfg, home)
+    return render_harness_skills(cfg, home, adapter)
+
+
+def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
+    """Update every harness surface that ALREADY exists. Returns failed adapters.
+
+    Two rules, both learned the hard way:
+
+    * `set` used to refresh Claude alone, so after a model change the registry
+      said one thing and every other installed surface still said the old one.
+    * `set` then refreshed every *present* harness, which installed the Codex,
+      dsh and Hermes surfaces as a side effect of changing a model — creating
+      harness surfaces nobody asked for, during a machine freeze. So this now
+      rewrites only files that are already on disk, and never creates one.
+    """
+    skipped = []
+    install_knowledge(cfg, dry)
+    absent = [a for a in ALL_ADAPTERS if not surface_installed(home, a, cfg)]
+    for adapter in ALL_ADAPTERS:
+        if adapter in absent:
+            continue
+        try:
+            rendered = render_surface(cfg, home, adapter)
+        except AdapterUnsupported as exc:
+            skipped.append(adapter)
+            print(f"WARNING: skipping the {adapter} adapter — {exc}", file=sys.stderr)
+            continue
+        updated, missing = 0, []
+        for target, content in rendered:
+            if not target.exists():
+                missing.append(target)
+                continue
+            write_out(target, content, dry)
+            updated += 1
+        print(f"  [{adapter}] updated {updated} existing file(s)")
+        if missing:
+            print(
+                f"  [{adapter}] {len(missing)} generated file(s) do not exist yet and were NOT "
+                f"created; run `python3 {SCRIPT_DIR / 'install_harness.py'} {adapter}` to install them"
+            )
+    if absent:
+        print(
+            "  no generated surface installed for: "
+            + ", ".join(absent)
+            + " — nothing written there. Install one deliberately with "
+            f"`python3 {SCRIPT_DIR / 'install_harness.py'} <harness>`."
+        )
+    return skipped
+
+
+# --------------------------------------------------------------------------- #
+# Generated documentation blocks
+# --------------------------------------------------------------------------- #
+# The roster count, the auditors' models and the per-harness surface table were
+# all hand-written and all drifted: the docs named a model the registry does not
+# configure, and the roster said eight specialists while the registry held nine —
+# omitting code-reviewer. These blocks are regenerated from the registry by
+# `apply.py docs`
+# and a test fails the build when a checked-in doc no longer matches.
+
+DOC_FILES = ("README.md", "PRIMITIVE.md", "AGENT-FRAMEWORK.md", "HARNESS-INSTALLATION.md", "AGENTS.md")
+
+
+def harness_surface_table(cfg: dict) -> str:
+    return "\n".join([
+        "| Harness | Surface | Result |", "|---|---|---|",
+        "| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |",
+        "| Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |",
+    ])
+
+
+DOC_BLOCKS = {
+    "roster": roster_sentence,
+    "roster-table": roster_table,
+    "auditor-models": lambda cfg: (
+        "Review policy: "
+        + auditor_models(cfg)
+        + ". Requested code review uses the registry-configured Code Reviewer; "
+        "neither review nor Audit is an automatic workflow gate."
+    ),
+    "harness-surfaces": harness_surface_table,
+}
+
+
+BLOCK_OPEN = "<!-- BEGIN GENERATED: "
+
+
+def render_doc(cfg: dict, text: str) -> str:
+    """Replace every marked generated block in one document.
+
+    Walks the document once so a block is never rescanned, which is what keeps
+    this terminating regardless of how many blocks a file carries.
+    """
+    out, rest = [], text
+    while True:
+        start = rest.find(BLOCK_OPEN)
+        if start < 0:
+            out.append(rest)
+            return "".join(out)
+        out.append(rest[:start])
+        rest = rest[start:]
+        header_end = rest.find(" -->")
+        if header_end < 0:
+            fail("a generated block header is never terminated")
+        header = rest[: header_end + 4]
+        name = header[len(BLOCK_OPEN) :].split(" ", 1)[0]
+        if name not in DOC_BLOCKS:
+            fail(f"unknown generated block '{name}'; known blocks: {', '.join(DOC_BLOCKS)}")
+        end_marker = f"<!-- END GENERATED: {name} -->"
+        end = rest.find(end_marker)
+        if end < 0:
+            fail(f"generated block '{name}' is opened but never closed")
+        out.append(f"{header}\n{DOC_BLOCKS[name](cfg)}\n{end_marker}")
+        rest = rest[end + len(end_marker) :]
+
+
+def docs_drift(cfg: dict) -> list:
+    """Documents whose generated blocks no longer match the registry."""
+    stale = []
+    for name in DOC_FILES:
+        path = SCRIPT_DIR / name
+        if not path.exists():
+            continue
+        current = path.read_text(encoding="utf-8")
+        if render_doc(cfg, current) != current:
+            stale.append(name)
+    return stale
+
+
+def update_docs(cfg: dict, dry: bool) -> list:
+    changed = []
+    for name in DOC_FILES:
+        path = SCRIPT_DIR / name
+        if not path.exists():
+            continue
+        current = path.read_text(encoding="utf-8")
+        updated = render_doc(cfg, current)
+        if updated == current:
+            continue
+        changed.append(name)
+        if dry:
+            print(f"--- would update generated blocks in {path} ---")
+        else:
+            path.write_text(updated, encoding="utf-8")
+            print(f"  updated {path}")
+    if not changed:
+        print("  every generated documentation block already matches the registry")
+    return changed
 
 
 def print_table(cfg: dict) -> None:
@@ -527,7 +1420,7 @@ def print_table(cfg: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate the configurable agent framework and harness adapters.")
-    ap.add_argument("action", choices=["validate", "show", "claude", "generic", "knowledge", "all", "set"])
+    ap.add_argument("action", choices=["validate", "show", "roster", "claude", "codex", "dsh", "hermes", "generic", "knowledge", "docs", "all", "set"])
     ap.add_argument("role", nargs="?", help="(set) PB role or specialist key")
     ap.add_argument("model", nargs="?", help="(set) model class")
     ap.add_argument("--config", default=str(SCRIPT_DIR / "roles.config.json"))
@@ -536,8 +1429,11 @@ def main() -> None:
     ap.add_argument("--id", dest="pin_id", default=None)
     ap.add_argument("--class", dest="cls", default=None)
     ap.add_argument("--provider", default=None)
+    ap.add_argument("--effort", choices=EFFORT_LEVELS, default=None)
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
+    if args.action in ("claude", "dsh", "hermes"):
+        fail("Only Codex is supported; other harnesses are decommissioned")
     cfg_path, cfg = Path(args.config), load_config(Path(args.config))
     errors = validate(cfg)
     if errors:
@@ -545,31 +1441,67 @@ def main() -> None:
         for error in errors:
             print(f"  - {error}", file=sys.stderr)
         raise SystemExit(1)
+    home = Path(args.home).expanduser()
     if args.action == "set":
         changes = apply_set(cfg, args)
         errors = validate(cfg)
         if errors:
             fail("resulting config would be invalid: " + "; ".join(errors))
+        # Render every installed adapter against the IN-MEMORY config before the
+        # write. `set` used to persist first and guard afterwards, so a rejected
+        # change left the source of truth changed and every surface unchanged.
+        present = installed_adapters(home, cfg)
+        # Say only what was actually established. Rendering every present adapter
+        # proves the templates still render; only Claude Code resolves a `model:`
+        # field, so only its adapter can reject the model class being set. The
+        # old line named all three skill adapters as having "checked" it, which
+        # asserted a validation none of them is capable of performing.
+        objecting = [a for a in present if a in MODEL_OBJECTING_ADAPTERS]
+        print(f"Rendered against present harnesses: {', '.join(present) or 'none'} (a render failure blocks the change).")
+        if objecting:
+            print(f"Model class validated by: {', '.join(objecting)} — the only adapter here that resolves a model field.")
+        else:
+            print(
+                "Model class validated by: nothing. No harness present on this machine resolves a "
+                "model field, so no adapter could object to this model class."
+            )
+        for adapter in present:
+            try:
+                render_surface(cfg, home, adapter)
+            except AdapterUnsupported as exc:
+                fail(
+                    f"refusing to change the registry: the {adapter} adapter cannot "
+                    f"render the result, so nothing was written.\n{exc}"
+                )
         if args.dry_run:
             print(f"[dry-run] {args.role}: {'; '.join(changes)}")
             print_table(cfg)
             return
-        cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        write_config(cfg_path, cfg)
         print(f"Updated {args.role}: {'; '.join(changes)}")
         print_table(cfg)
         if not args.no_apply:
-            install_claude(cfg, Path(args.home).expanduser(), False)
+            refresh_surfaces(cfg, home, False)
         return
     if args.action in ("validate", "show"):
         print("Config is valid.\n")
         print_table(cfg)
         return
-    if args.action in ("claude", "all"):
-        install_claude(cfg, Path(args.home).expanduser(), args.dry_run)
+    if args.action == "roster":
+        print(roster_sentence(cfg))
+        return
+    if args.action == "docs":
+        update_docs(cfg, args.dry_run)
+        return
+    # Neutral surfaces first: they are what a harness without an adapter reads,
+    # and one undispatchable profile used to stop them regenerating too.
     if args.action in ("knowledge", "all"):
         install_knowledge(cfg, args.dry_run)
     if args.action in ("generic", "all"):
         print("\n" + generic_block(cfg))
+    if args.action in ("codex", "all"):
+        install_harness_skills(cfg, home, "codex", args.dry_run)
+
 
 
 if __name__ == "__main__":

@@ -28,8 +28,10 @@ implement basic scripts, small fixes, tests, and explicitly outlined programming
 
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
-material above. After substantive work, append at most one generalized,
-evidence-backed lesson in the documented format if it will improve future work.
+material above. A useful lesson is a suggestion unless the current task grants
+specific write authority to `LESSONS.md`. In a read-only task, report the
+suggestion to the parent or user and do not write it. When that authority exists,
+append at most one generalized, evidence-backed lesson in the documented format.
 Never include secrets, personal data, credentials, raw task logs, or private
 content. At 50 dated entries, consolidate the oldest reusable points into
 `## Durable practices` before adding more. Do not modify this profile; regenerate

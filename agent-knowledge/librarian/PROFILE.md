@@ -15,10 +15,12 @@ maintain the Vault and documentation information architecture, including organiz
 - Follow the Vault navigation and category rules before creating or moving notes
 - Do not rewrite substantive content when a structural change is sufficient
 - Escalate unclear ownership or taxonomy decisions
+- Inventory synchronization and the scheduled Vault maintenance writer change notes; run them only when the current task authorizes those writes. Findings-only checks must keep both inventory flags explicitly empty, even if the environment configures synchronization
 
 ## Information gathering
 - Read the Vault Guide, applicable navigation hub, and existing naming/category conventions before changing structure
-- Run /home/dyadmin/homelab/scripts/vault-link-check.py after Vault navigation changes
+- After Vault navigation changes, run the installed Codex checker without inventory synchronization: python3 -B /home/dyadmin/.codex/skills/obsidian-vault/scripts/vault-link-check.py --vault '/home/dyadmin/Documents/Obsidian Vault/VaultRepo' --toc '2 - Categories/Navigation/Table Of Contents.md' --inventory-dir '' --inventory-hub ''
+- Read the checker output: exit 0 means all notes are reachable, exit 1 lists orphans, and exit 2 is a setup error. Compare orphan paths with the pre-change findings; report existing orphans separately from newly introduced ones
 
 ## Output contract
 - List notes or documents structurally affected
@@ -27,8 +29,10 @@ maintain the Vault and documentation information architecture, including organiz
 
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
-material above. After substantive work, append at most one generalized,
-evidence-backed lesson in the documented format if it will improve future work.
+material above. A useful lesson is a suggestion unless the current task grants
+specific write authority to `LESSONS.md`. In a read-only task, report the
+suggestion to the parent or user and do not write it. When that authority exists,
+append at most one generalized, evidence-backed lesson in the documented format.
 Never include secrets, personal data, credentials, raw task logs, or private
 content. At 50 dated entries, consolidate the oldest reusable points into
 `## Durable practices` before adding more. Do not modify this profile; regenerate

@@ -91,23 +91,25 @@ to match — the brand profile always wins.
 | `templates.ts` | HTML/CSS/JS + manifest/brief/prompt builders + brand themes |
 | `_selftest.mjs` | unit test for `core.ts`/`templates.ts` (uses pi's bundled jiti) |
 | `_loadtest.mjs` | loads `index.ts` like pi does and exercises the tool end-to-end |
-| `build-template-site.mjs` | generates the `starter/` showcase sub-site in the repo |
+| `build-template-site.mjs` | read-only verification for the curated IHTC child in the `starter/` template library |
 
 ## Template / showcase site
 
-`build-template-site.mjs` generates a living reference sub-site at
-`starter/` (→ `starter.dyuhaus.com`) that renders the exact layout new sites
-ship with **and** displays the portable artifact bundle (manifest, tokens,
-brief, prompt) for an example site in tabbed, copyable code panels. Re-run it
-to refresh the showcase whenever the templates change:
+`build-template-site.mjs` is retained as a compatibility command, but it no
+longer generates the template. The IHTC reference at `starter/ihtc/` (→
+`starter.dyuhaus.com/ihtc/`) is hand-authored and authoritative. The command
+delegates to the library-owned `ops/validate-starter-templates.mjs`, then exits
+without writing any file; the site repo therefore owns the one validation
+contract:
 
 ```bash
 cd ~/.pi/agent/extensions/subsite-scaffold
-node build-template-site.mjs [repoPath]   # writes starter/ + subsite-artifacts/starter/ + wiring
+node build-template-site.mjs [repoPath]   # verifies only; writes nothing
 ```
 
-It is additive and safe to re-run (create/overwrite of the `starter/` folder
-only; routing/README wiring is idempotent).
+It is safe to run after the library has landed because it is non-mutating. If
+the curated IHTC child is missing or incomplete, restore it from the
+`dyuhaus.com` repository; do not regenerate or overwrite it from this extension.
 
 ## Tests
 
