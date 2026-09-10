@@ -22,6 +22,8 @@ def main():
     if errors:
         parser.error("Invalid source config: " + "; ".join(errors))
     home = Path(args.home).expanduser()
+    if args.target in ("codex", "all"):
+        primitive.assert_generated_paths_are_installable(args.dry_run)
     primitive.install_knowledge(cfg, args.dry_run)
     if args.target in ("skills", "all"):
         primitive.link_shared_skills(home, args.dry_run)

@@ -31,10 +31,29 @@ planning and reasoning about the project: architecture, design, root-cause analy
 ## Durable lessons
 Before substantive work, read [LESSONS.md](./LESSONS.md) alongside the source
 material above. A useful lesson is a suggestion unless the current task grants
-specific write authority to `LESSONS.md`. In a read-only task, report the
+specific write authority for the lesson inbox. In a read-only task, report the
 suggestion to the parent or user and do not write it. When that authority exists,
-append at most one generalized, evidence-backed lesson in the documented format.
+record at most one generalized, evidence-backed lesson — **never by editing `LESSONS.md` yourself**:
+
+```bash
+python3 "$DEV_PRIMITIVE/lessons.py" add --key planner \
+  --task "<task type>" --lesson "<reusable lesson>" --evidence "<path, command, or measurement>"
+```
+
+`$DEV_PRIMITIVE` is this repository's checkout — the directory holding
+`lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
+when your working directory happens to be that checkout, and agents run from
+other repositories, where it fails with `can't open file`. Generated harness
+instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.
+
+That writes one new file to the lesson inbox outside this repository. Editing
+`LESSONS.md` in place is a read-modify-write of a branch-mutable file: a branch
+switch can replace it between your read and your write, which silently destroys
+the other branch's lessons and drags your edit into someone else's commit.
+`lessons.py promote` is the only path from the inbox into this repository, and
+it is run deliberately by a person who reviews and commits the diff.
+
 Never include secrets, personal data, credentials, raw task logs, or private
-content. At 50 dated entries, consolidate the oldest reusable points into
-`## Durable practices` before adding more. Do not modify this profile; regenerate
+content. At 50 dated entries, report the consolidation need; consolidating into
+`## Durable practices` also needs explicit task authority. Do not modify this profile; regenerate
 it with `python3 apply.py knowledge`. The lessons file is deliberately preserved.

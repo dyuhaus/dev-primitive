@@ -75,3 +75,21 @@ See [framework](AGENT-FRAMEWORK.md), [PB contract](PRIMITIVE.md), and
 | Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |
 | Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |
 <!-- END GENERATED: harness-surfaces -->
+
+## Authorized lesson recording
+
+A useful lesson remains report-only until the task specifically authorizes the
+inbox write. Read-only work never records or promotes a lesson. `$DEV_PRIMITIVE`
+is the primary checkout containing `lessons.py`:
+
+```bash
+python3 "$DEV_PRIMITIVE/lessons.py" add --key builder --task "<task type>" \
+  --lesson "<reusable lesson>" --evidence "<path or command>"
+python3 "$DEV_PRIMITIVE/lessons.py" show
+```
+
+Each authorized `add` writes one new file outside Git; it does not append to
+`LESSONS.md`. Human-run `promote` previews the proposed repository change and
+requires `--apply` to write; it never commits. Recording, promotion, and GitHub
+merge retain their separate authority boundaries. The inbox is a temporary queue,
+not a durable archive. See [the knowledge guide](agent-knowledge/README.md).

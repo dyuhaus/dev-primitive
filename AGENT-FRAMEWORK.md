@@ -92,3 +92,21 @@ personal data, or raw logs.
 Run the native checks in [README](README.md). Codex consistency and retired
 entrypoint refusal are the acceptance scope. Do not revive multi-harness
 provider evaluation or the cancelled R5 release controller.
+
+## Authorized lesson recording
+
+A useful lesson remains report-only until the task specifically authorizes the
+inbox write. Read-only work never records or promotes a lesson. `$DEV_PRIMITIVE`
+is the primary checkout containing `lessons.py`:
+
+```bash
+python3 "$DEV_PRIMITIVE/lessons.py" add --key builder --task "<task type>" \
+  --lesson "<reusable lesson>" --evidence "<path or command>"
+python3 "$DEV_PRIMITIVE/lessons.py" show
+```
+
+Each authorized `add` writes one new file outside Git; it does not append to
+`LESSONS.md`. Human-run `promote` previews the proposed repository change and
+requires `--apply` to write; it never commits. Recording, promotion, and GitHub
+merge retain their separate authority boundaries. The inbox is a temporary queue,
+not a durable archive. See [the knowledge guide](agent-knowledge/README.md).

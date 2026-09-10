@@ -42,3 +42,21 @@ Review policy: automatic workflow audit disabled; requested Audit uses `gpt-5.6-
 Use [the Codex installer](HARNESS-INSTALLATION.md). Other harnesses are
 retired and are neither installed nor behaviorally evaluated. Report an
 unavailable Codex model or capability; do not substitute another harness.
+
+## Authorized lesson recording
+
+A useful lesson remains report-only until the task specifically authorizes the
+inbox write. Read-only work never records or promotes a lesson. `$DEV_PRIMITIVE`
+is the primary checkout containing `lessons.py`:
+
+```bash
+python3 "$DEV_PRIMITIVE/lessons.py" add --key builder --task "<task type>" \
+  --lesson "<reusable lesson>" --evidence "<path or command>"
+python3 "$DEV_PRIMITIVE/lessons.py" show
+```
+
+Each authorized `add` writes one new file outside Git; it does not append to
+`LESSONS.md`. Human-run `promote` previews the proposed repository change and
+requires `--apply` to write; it never commits. Recording, promotion, and GitHub
+merge retain their separate authority boundaries. The inbox is a temporary queue,
+not a durable archive. See [the knowledge guide](agent-knowledge/README.md).
