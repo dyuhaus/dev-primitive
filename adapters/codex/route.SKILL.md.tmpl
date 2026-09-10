@@ -1,6 +1,6 @@
 ---
 name: agent-route
-description: "Explainably recommend which configured agent profile fits a task, using the machine's deterministic local router, then confirm with the user before adopting or delegating to it. Use when it is unclear which specialist a task belongs to."
+description: "Explainably recommend which configured agent profile fits a task, using the machine's deterministic local router, then confirm with the user before adopting or delegating to it. Use only when David explicitly asks for a routing recommendation; never trigger automatically."
 ---
 
 <!-- Generated from dev-primitive/roles.config.json by apply.py codex.
@@ -9,7 +9,7 @@ description: "Explainably recommend which configured agent profile fits a task, 
 
 # Route a task (Codex)
 
-Run the deterministic local router. It makes no model call and dispatches
+Only on an explicit request, run the deterministic local router. It makes no model call and dispatches
 nothing:
 
 ```bash
@@ -22,7 +22,8 @@ new profile selection or new authority — recognition alone never grants either
 Do not use the router to repeat a question for a profile the user has already
 authorized the parent to dispatch for the current task.
 
-Once confirmed, load that profile's `agent-<key>` skill and adopt it. Never
+Planner and Builder are excluded from automatic recommendations and require
+explicit role or PB invocation. For other profiles, once confirmed, load that profile's `agent-<key>` skill and adopt it. Never
 auto-select a direct-call-only profile ({{DIRECT_CALL_ONLY}}); those run only on
 an explicit request from the user.
 

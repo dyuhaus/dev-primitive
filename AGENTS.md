@@ -1,24 +1,23 @@
 # dev-primitive — Agent Guide
 
-This repository is model- and harness-agnostic. `AGENTS.md` is the portable
-entrypoint for Codex, Hermes, Claude Code, and any future assistant harness.
+This repository supports Codex only. `AGENTS.md` is its project entrypoint.
 
 ## Project
 
-The portable agent registry for this machine: one harness-neutral
+The Codex agent registry for this machine: one portable
 `roles.config.json` describing every agent profile, plus generators that render
-it into each harness's native surface.
+it into Codex's native surface.
 
 - `roles.config.json` — the single source of truth. Never hand-edit a generated
   file; change this and regenerate.
 - `roles.schema.json` — the data shape, including which provider key names
   consumers actually recognise.
-- `apply.py` — validation, the Claude Code adapter, the Codex/dsh/Hermes skill
-  adapters, the generated knowledge profiles, and the generated doc blocks.
+- `apply.py` — validation, Codex skills, generated knowledge profiles and
+  generated documentation; retired adapters are not installable.
 - `router.py` — deterministic, explainable applicability routing. Always
   confirmation-required; it never dispatches.
 - `install_harness.py` — installs those surfaces and mirrors the shared
-  `~/skills` roots into every harness's skill directory. It is the **only**
+  `~/skills` roots into Codex's skill directory. It is the **only**
   entry point that mirrors shared skills, and the only one that creates a
   harness surface; `apply.py set` refreshes surfaces that already exist and
   never adds one.
@@ -34,20 +33,14 @@ python3 apply.py docs                     # must report no drift
 python3 install_harness.py all --dry-run
 ```
 
-### What each harness can actually do here
+### Codex-only operation
 
-`AGENTS.md` is read by Codex and dsh, and both get native profile skills. The
-active registry is OpenAI-only: `gpt-5.6-sol` at `xhigh` for planning/audit/review
-and `gpt-5.6-terra` at `xhigh` for build/action roles. In Codex, direct profile adoption uses
-the current session model; a delegated child must receive explicit
-`spawn_agent` `model` and `reasoning_effort` values. dsh cannot dispatch the
-active OpenAI routing. The manual Claude adapter refuses this registry because
-Claude discards an unresolvable `model:` value silently; `all` retires only
-manifest-owned stale generated Claude PB/profile files.
-
-Codex additionally has a native `codex review` subcommand, but automated review
-is currently on-demand only. David reviews and merges pull requests in GitHub.
-Hermes has no delegation mechanism at all.
+Codex is the only supported runtime and installation target. Planner -> Builder
+is explicit-invocation only, both roles use `gpt-6-astra` at xhigh, and neither task size
+nor a router recommendation automatically starts it. Automatic workflow audit
+is disabled. Requested reviews use `gpt-5.6-sol`; other specialists remain registry-configured on Codex.
+`install_harness.py all` means Codex and shared skill links only. Retired targets
+refuse before writing. See HARNESS-INSTALLATION.md for exact source/live checks.
 
 ## Rules
 
@@ -70,10 +63,8 @@ This repo follows /home/dyadmin/AGENTS.md "Git Workflow Standard".
   certificate is required.
 - Merge: David approves and squash-merges every PR. Agents never approve,
   merge, enable auto-merge, or use a relay.
-- Deploy coupling: none for the repo itself — but `~/.claude/agents`,
-  `~/.claude/commands` and each harness's `~/.<harness>/skills` are generated
-  FROM it, so a template change is not landed until the installer has been
-  re-run and the installed surface matches.
+- Deploy coupling: installed `~/.codex/skills` are generated copies. Install
+  from verified merged source and compare the installed surface afterward.
 - Long-lived branch exceptions: none
 
 ## Traps this repo has actually hit

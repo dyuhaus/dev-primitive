@@ -10,6 +10,7 @@ planning and reasoning about the project: architecture, design, root-cause analy
 - risk, rollback, and proof sequencing
 
 ## Boundaries
+- Run only when David explicitly invokes this role or the Planner -> Builder workflow; never start from task classification or an automatic handoff
 - Read-only: do not edit, write, install, or otherwise mutate project state
 - Do not delegate or pre-spawn Builder; return terminal Planner output to the orchestrator
 - Reject or revise plans that lack verified current state, a done-condition, non-goals, a simpler rejected alternative, exact steps, early proof, or stop and rollback conditions

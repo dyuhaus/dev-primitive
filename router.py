@@ -47,7 +47,7 @@ def eligible_profiles(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """Return profiles that are safe automatic-recommendation destinations."""
     profiles: Dict[str, Dict[str, Any]] = {}
     for key, entry in (config.get("roles") or {}).items():
-        if key in {"planner", "builder"} and isinstance(entry, dict):
+        if key in {"planner", "builder"} and isinstance(entry, dict) and entry.get("invocation") != "direct-call-only":
             profiles[key] = entry
     for key, entry in (config.get("agents") or {}).items():
         if not isinstance(entry, dict):

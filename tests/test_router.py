@@ -31,20 +31,21 @@ class RouterTests(unittest.TestCase):
         self.assert_route("Write a launch email and proposal for customers", "prose-writer")
         self.assert_route("Implement a responsive accessible React component with keyboard support and CSS", "fe-designer")
         self.assert_route("Following this exact outline, add a small parser script and unit test", "l1-programmer")
-        self.assert_route("Refactor the broker service architecture and analyze trade-offs", "planner")
+        self.assert_route("Refactor the broker service architecture and analyze trade-offs", "runner")
         self.assert_route("Clean up routine service logs", "runner")
 
-    def test_generic_implementation_enters_plan_then_build(self):
-        decision = router.route("Implement authentication caching and tests", self.config)
-        self.assertEqual(decision["selected"], "planner")
-        self.assertIn("Planner must produce the plan before Builder", " ".join(decision["reasons"]))
-        self.assertEqual(decision["candidates"][0]["agent"], "builder")
+    def test_generic_implementation_never_routes_to_pb(self):
+        for task in ("Implement authentication caching and tests", "Plan architecture and build a complex service", "Run a Planner -> Builder workflow"):
+            decision = router.route(task, self.config)
+            self.assertNotIn(decision["selected"], ("planner", "builder"))
+            self.assertFalse(decision["automaticSelectionEnabled"])
+            self.assertTrue({"planner", "builder"}.isdisjoint(item["agent"] for item in decision["candidates"]))
 
-    def test_plan_before_build_can_be_disabled(self):
+    def test_old_plan_before_build_flag_cannot_bypass_explicit_role_policy(self):
         config = copy.deepcopy(self.config)
-        config["routing"]["planBeforeBuild"] = False
+        config["routing"]["planBeforeBuild"] = True
         decision = router.route("Implement authentication caching and tests", config)
-        self.assertEqual(decision["selected"], "builder")
+        self.assertNotIn(decision["selected"], ("planner", "builder"))
 
     def test_ambiguous_task_falls_back_to_runner(self):
         decision = router.route("Help with this thing", self.config)

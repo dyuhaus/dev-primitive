@@ -9,4 +9,4 @@ class CodexCutoverTests(unittest.TestCase):
         models = [x['model'] for x in cfg['roles'].values()] + [x['model'] for x in cfg['agents'].values()]
         models.append(cfg['routing']['postWorkflowAudit']['model'])
         self.assertTrue(all(m['provider'] == 'openai' and m['effort'] == 'xhigh' for m in models))
-        self.assertEqual({m['class'] for m in models}, {'gpt-5.6-sol', 'gpt-5.6-terra'})
+        self.assertEqual({m['class'] for m in models}, {'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'})

@@ -602,8 +602,7 @@ def render_claude(cfg: dict, home: Path) -> list:
 
 
 def install_claude(cfg: dict, home: Path, dry: bool) -> None:
-    for target, content in render_claude(cfg, home):
-        write_out(target, content, dry)
+    raise AdapterUnsupported("Claude is decommissioned; only Codex is supported")
 
 
 def retire_stale_claude_surface(cfg: dict, home: Path, dry: bool) -> None:
@@ -761,7 +760,7 @@ def generic_block(cfg: dict) -> str:
         "- On the first failed or inconclusive real proof, stop scope expansion and only diagnose or retry the same slice. A second inconclusive proof or two rounds without measurable progress is BLOCKED even if artifact labels change.",
         "- /pb is exactly one pass and reports incomplete evidence. /pbg is capped at exactly three rounds. Persistence language cannot override ambiguity, safety, failed proof, no-progress, or round bounds.",
         "",
-        "Team Leader is direct-call-only and must never be selected automatically. Use Runner as the everyday front door; use Planner → Builder for substantive development. Change models only in roles.config.json and regenerate adapters.",
+        "Team Leader is direct-call-only and must never be selected automatically. Ordinary tasks stay in the current session. Planner → Builder runs only when explicitly invoked, using Astra for both roles. Automatic workflow audit is disabled. Change models only in roles.config.json and regenerate Codex.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1013,6 +1012,9 @@ def roster_table(cfg: dict) -> str:
 def auditor_models(cfg: dict) -> str:
     """The models the two review roles actually run on, read from the registry."""
     post_audit = ((cfg.get("routing") or {}).get("postWorkflowAudit") or {})
+    if not post_audit.get("enabled", False):
+        audit = role_view(cfg, "audit")
+        return f"automatic workflow audit disabled; requested Audit uses `{audit['model']}` on `{audit['provider']}` at `{audit['effort']}`"
     light = resolve_model({"model": post_audit.get("model", {})}) or "(unset)"
     full = role_view(cfg, "audit")["model"] if "audit" in cfg.get("agents", {}) else "(unset)"
     light_cfg = post_audit.get("model") or {}
@@ -1055,6 +1057,8 @@ def harness_mapping(cfg: dict, adapter: str) -> dict:
 
 def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
     """Render one harness's whole skill surface: [(target Path, content)]."""
+    if adapter != "codex":
+        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
     tdir = SCRIPT_DIR / "adapters" / adapter
     root = home / HARNESS_SKILL_ROOTS[adapter]
     agent_template = tdir / "agent.SKILL.md.tmpl"
@@ -1080,7 +1084,9 @@ def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
                 # frontmatter. They are pre-quoted, so no registry text can
                 # close the scalar and restructure the document.
                 "AGENT_SKILL_NAME": yaml_scalar(f"agent-{key}"),
-                "AGENT_DESCRIPTION": yaml_scalar(frontmatter_description(view["purpose"])),
+                "AGENT_DESCRIPTION": yaml_scalar(frontmatter_description(
+                    ("Only when David explicitly invokes " + key + " or Planner -> Builder. Never trigger automatically. " if key in ROLE_KEYS else "") + view["purpose"]
+                )),
                 "AGENT_KEY_YAML": yaml_scalar(key),
                 "AGENT_MODEL_CLASS_YAML": yaml_scalar(view["class"]),
                 "AGENT_MODEL_ID_YAML": yaml_scalar(view["id"]),
@@ -1124,15 +1130,22 @@ def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
 def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> None:
     for target, content in render_harness_skills(cfg, home, adapter):
         write_out(target, content, dry)
+    # Codex reads invocation policy from sibling agents/openai.yaml metadata.
+    # A task description alone must never auto-load PB or its component roles.
+    for name in ("agent-pb", "agent-planner", "agent-builder", "agent-route", "agent-audit", "agent-team-leader"):
+        target = home / HARNESS_SKILL_ROOTS[adapter] / name / "agents" / "openai.yaml"
+        write_out(target, "policy:\n  allow_implicit_invocation: false\n", dry)
 
 
-def link_shared_skills(home: Path, dry: bool, adapters=("claude", "codex", "dsh", "hermes")) -> list:
+def link_shared_skills(home: Path, dry: bool, adapters=("codex",)) -> list:
     """Mirror the neutral ~/skills roots into every harness's skill directory.
 
     Existing symlinks are reconciled to the current neutral source; real files
     and directories are left exactly as they are. Without this a Codex session
     can keep loading a stale git-workflow skill after the neutral source moves.
     """
+    if any(adapter != "codex" for adapter in adapters):
+        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
     source = home / NEUTRAL_SKILL_ROOT
     actions = []
     if not source.is_dir():
@@ -1177,7 +1190,7 @@ def write_config(cfg_path: Path, cfg: dict) -> None:
     os.replace(temp, cfg_path)
 
 
-ALL_ADAPTERS = ("claude", "codex", "dsh", "hermes")
+ALL_ADAPTERS = ("codex",)
 
 # The only adapter whose renderer can REFUSE a model class. Claude Code is the
 # one harness here that resolves a `model:` frontmatter field, so it is the one
@@ -1216,13 +1229,7 @@ def is_marked_generated(target: Path, marker: str) -> bool:
 
 def installed_adapters(home: Path, cfg: dict) -> list:
     """Which harnesses have an installed generated surface in this home."""
-    present = []
-    if surface_installed(home, "claude", cfg):
-        present.append("claude")
-    for adapter in ("codex", "dsh", "hermes"):
-        if surface_installed(home, adapter, cfg):
-            present.append(adapter)
-    return present
+    return [adapter for adapter in ALL_ADAPTERS if surface_installed(home, adapter, cfg)]
 
 
 def surface_installed(home: Path, adapter: str, cfg: dict = None) -> bool:
@@ -1312,31 +1319,21 @@ DOC_FILES = ("README.md", "PRIMITIVE.md", "AGENT-FRAMEWORK.md", "HARNESS-INSTALL
 
 
 def harness_surface_table(cfg: dict) -> str:
-    rows = [
-        ("Claude Code", "`~/.claude/agents/` and `~/.claude/commands/`",
-         "Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files."),
-        ("Codex", "`~/.codex/skills/agent-*/SKILL.md`",
-         "One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. The code-reviewer remains available only when explicitly requested."),
-        ("dsh", "`~/.dsh/skills/agent-*/SKILL.md`",
-         "The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model."),
-        ("Pi", "`~/.pi/agent/extensions/pb-primitive/`",
-         "PB tools plus a generated `<key>_agent` tool per profile, resolved from this same registry."),
-        ("Hermes", "`~/.hermes/skills/agent-*/SKILL.md`",
-         "One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today."),
-    ]
-    lines = ["| Harness | Surface | Result |", "|---|---|---|"]
-    lines += [f"| {name} | {surface} | {result} |" for name, surface, result in rows]
-    return "\n".join(lines)
+    return "\n".join([
+        "| Harness | Surface | Result |", "|---|---|---|",
+        "| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |",
+        "| Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |",
+    ])
 
 
 DOC_BLOCKS = {
     "roster": roster_sentence,
     "roster-table": roster_table,
     "auditor-models": lambda cfg: (
-        "The two review roles run on "
+        "Review policy: "
         + auditor_models(cfg)
-        + ". Both use the active OpenAI routing and the configured `xhigh` effort; "
-        "they are distinct from the Terra build/action path."
+        + ". Requested code review uses the registry-configured Code Reviewer; "
+        "neither review nor Audit is an automatic workflow gate."
     ),
     "harness-surfaces": harness_surface_table,
 }
@@ -1435,6 +1432,8 @@ def main() -> None:
     ap.add_argument("--effort", choices=EFFORT_LEVELS, default=None)
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
+    if args.action in ("claude", "dsh", "hermes"):
+        fail("Only Codex is supported; other harnesses are decommissioned")
     cfg_path, cfg = Path(args.config), load_config(Path(args.config))
     errors = validate(cfg)
     if errors:
@@ -1500,20 +1499,9 @@ def main() -> None:
         install_knowledge(cfg, args.dry_run)
     if args.action in ("generic", "all"):
         print("\n" + generic_block(cfg))
-    for adapter in ("codex", "dsh", "hermes"):
-        if args.action == adapter:
-            install_harness_skills(cfg, home, adapter, args.dry_run)
-    if args.action in ("claude", "all"):
-        try:
-            install_claude(cfg, home, args.dry_run)
-        except AdapterUnsupported as exc:
-            # An explicit `apply.py claude` is a hard failure; inside `all` it is
-            # a skip, because the neutral surfaces have nothing to do with
-            # Claude Code's frontmatter limitation.
-            if args.action == "claude":
-                fail(str(exc))
-            print(f"WARNING: skipping the Claude Code adapter — {exc}", file=sys.stderr)
-            retire_stale_claude_surface(cfg, home, args.dry_run)
+    if args.action in ("codex", "all"):
+        install_harness_skills(cfg, home, "codex", args.dry_run)
+
 
 
 if __name__ == "__main__":
