@@ -10,6 +10,7 @@ senior engineering implementation: designing and building complex systems, writi
 - make narrowly scoped implementation delegation when plan-authorized
 
 ## Boundaries
+- Run only when David explicitly invokes this role or the Planner -> Builder workflow; never start from task classification or an automatic handoff
 - Do not begin without a completed reviewed plan or equivalently precise explicit user specification
 - Do not expand scope after the first failed or inconclusive real proof; only diagnose or retry the same slice
 - Use at most one plan-authorized L1 Programmer or FE-Designer delegation per round; multi-workstream work requires an explicit Team Leader call

@@ -1,42 +1,60 @@
-# Harness-level installation
+# Codex installation
 
-The agent framework is now installed at the harness level rather than being
-available only inside this repository.
-
-## Source and installed surfaces
-
-`/home/dyadmin/dev-primitive/` remains the portable source of truth:
-
-- `roles.config.json` — harness-neutral profiles and models
-- `roles.schema.json` — structure
-- `apply.py` — validation, Claude rendering, and generated knowledge profiles
-- `router.py` — deterministic, explainable applicability routing with confirmation-required handoff
-- `agent-knowledge/` — generated profiles plus preserved durable lessons
-- `install_harness.py` — cross-harness installation
-
-Installed surfaces:
+Only Codex is supported. Use a verified human-merged source revision; a passing
+source test or a model-generated proposal does not authorize live activation.
 
 <!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
 | Harness | Surface | Result |
 |---|---|---|
-| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | Manual-only adapter. It can render PB subagents and commands only for an Anthropic-compatible registry; the active OpenAI registry is intentionally refused, and `all` retires only its manifest-owned stale PB/profile files. |
-| Codex | `~/.codex/skills/agent-*/SKILL.md` | One skill per profile plus `agent-framework`, `agent-pb`, `agent-route`. Direct adoption runs on the current session model; delegated work must set the registry model and reasoning effort explicitly. The code-reviewer remains available only when explicitly requested. |
-| dsh | `~/.dsh/skills/agent-*/SKILL.md` | The same skill set through dsh's filesystem skill provider (`user-dsh` root). No model routing: dsh dispatches DeepSeek models. Delegation exists through its `subagent` tool but carries no per-profile model. |
-| Pi | `~/.pi/agent/extensions/pb-primitive/` | PB tools plus a generated `<key>_agent` tool per profile, resolved from this same registry. |
-| Hermes | `~/.hermes/skills/agent-*/SKILL.md` | One skill per profile including `planner` and `builder`. Hermes's active model comes from its own harness configuration. No Hermes CLI is installed today. |
+| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |
+| Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |
 <!-- END GENERATED: harness-surfaces -->
 
-Every profile in the registry is rendered onto every surface:
+## Native entrypoint
 
-<!-- BEGIN GENERATED: roster (apply.py docs) -->
-Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
-<!-- END GENERATED: roster -->
+```bash
+python3 install_harness.py codex --dry-run
+python3 install_harness.py codex
+```
+
+`codex` regenerates knowledge and installs Codex profile skills. `skills`
+links the shared `~/skills` roots into Codex. `all` performs both. Legacy
+`claude`, `dsh`, `pi`, `hermes`, and `gemini` targets refuse before generation
+or writes. `apply.py all` renders knowledge, generic reference and Codex only.
+No other installed harness surface is refreshed by a model change.
+
+Generated PB, Planner, Builder, router, Audit and Team Leader skills include `agents/openai.yaml`
+with `policy.allow_implicit_invocation: false`. The model choices remain in
+`roles.config.json`; both PB roles currently resolve to `gpt-6-astra`/`xhigh`.
+Their SKILL.md instructions require explicit invocation. Automatic profile
+selection and post-workflow audit are disabled. A full Codex install adds new
+metadata; `apply.py set` deliberately does not create absent files.
+
+`--home` changes the target home but not source-side knowledge generation.
+For tests, isolate both the source checkout and target home. Never install from
+a dirty deployment-coupled checkout. Preserve meaningful local changes and
+capture exact file preimages before activation; compare installed artifacts
+with the reviewed source and run `harness-check` after changes.
+
+## Verification
+
+```bash
+python3 apply.py validate
+python3 -m unittest discover -s tests
+python3 apply.py docs
+python3 install_harness.py all --dry-run
+```
+
+Run focused Codex behavioral checks after reviewed installation. Assert the
+ordinary-task path, explicit ordered Astra PB path, absent automatic audit,
+loader metadata and source-to-live parity. Record any skipped native behavior.
+Do not run the retired harnesses or reconstruct R5's cancelled release system.
 
 <!-- BEGIN GENERATED: roster-table (apply.py docs) -->
 | Key | Display name | Model | Provider | Invocation | Auto-select |
 |---|---|---|---|---|---|
-| `planner` | Planner | `gpt-5.6-sol` | `openai` | `default` | `false` |
-| `builder` | Builder | `gpt-5.6-terra` | `openai` | `default` | `false` |
+| `planner` | Planner | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
+| `builder` | Builder | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
 | `runner` | Runner | `gpt-5.6-terra` | `openai` | `default` | `true` |
 | `tech-writer` | Tech Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
 | `prose-writer` | Prose Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
@@ -47,152 +65,3 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 | `audit` | Audit | `gpt-5.6-sol` | `openai` | `direct-call-only` | `false` |
 | `code-reviewer` | Code Reviewer | `gpt-5.6-sol` | `openai` | `default` | `false` |
 <!-- END GENERATED: roster-table -->
-
-Refresh all supported harnesses:
-
-```bash
-python3 /home/dyadmin/dev-primitive/install_harness.py all
-# or refresh only one target:
-python3 /home/dyadmin/dev-primitive/install_harness.py codex
-python3 /home/dyadmin/dev-primitive/install_harness.py skills
-```
-
-Preview without writing:
-
-```bash
-python3 /home/dyadmin/dev-primitive/install_harness.py all --dry-run
-```
-
-The installer regenerates the agent-knowledge profiles, mirrors the shared
-`~/skills` roots into every harness's skill directory, syncs the versioned Pi
-addon from `adapters/pi/pb-primitive/`, then renders the Codex, dsh, Hermes and
-Claude surfaces — in that order, deliberately. The neutral surfaces have nothing
-to do with any one harness's model-dispatch limits, so a profile the Claude
-adapter cannot render makes `all` warn and skip **that one adapter** while
-everything else still installs. `install_harness.py claude` on its own still
-fails hard, because there the refusal is the answer.
-
-The shared-skills step safely reconciles symlinks to the current `~/skills`
-source while leaving real files and directories untouched. Without it a Codex
-session can retain a stale `git-workflow` link after that source moves, or carry
-none of `git-workflow`, `subsite-scaffold`, `decommission-checklist` and
-`harden-service` while its instructions assume they are installed.
-
-The installer contains no credentials and never prints secret values. Generated
-files should not be hand-edited; update the source registry and reinstall.
-
-## Model behavior
-
-Every harness reads Planner/Builder from the shared harness-neutral registry:
-`gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at `xhigh`. Pi, when no
-project-level roles config is present, resolves that same shared registry exactly like the other harnesses —
-its OpenRouter overlay was removed on 2026-07-26 — and Pi project configs still
-win where one exists.
-
-**Resolving a model and dispatching it are different things.** Claude Code
-silently discards a non-Anthropic `model:` value, so its manual adapter refuses
-the active OpenAI registry rather than writing a lie. In Codex, direct profile
-adoption runs the current session model; a delegated child must receive explicit
-`model` and `reasoning_effort` arguments from the registry. dsh cannot dispatch
-the active OpenAI registry. Hermes skills carry routing intent as metadata,
-while Hermes's active model comes from its own harness configuration.
-
-Pi offers explicit `/<agent>` slash commands for every profile and
-`/<agent>-model` commands; `/agents` is its native catalog, listing every
-available agent command and the effective active model assignment.
-
-Changing a model is one command — `apply.py set <role-or-agent> <class>` — and
-it refreshes **every surface that is already installed**, not Claude Code's
-alone. It also renders every present adapter against the in-memory config before
-writing, so a rejected change leaves the registry and the installed surfaces
-still agreeing rather than disagreeing three ways.
-
-Two limits on that refresh, both deliberate:
-
-- **It updates; it never installs.** `set` rewrites generated files that already
-  exist and creates none. `~/.dsh` existing means dsh is installed on the
-  machine, not that this primitive has ever written a profile into it — a
-  routine model switch must not stand up a harness surface nobody asked for.
-  When a surface is missing, `set` says so and names the install command.
-  Installing is `install_harness.py <harness>`, run on purpose.
-- **Only Claude Code can veto a model.** It is the one adapter that resolves a
-  `model:` field, so it is the one that can reject a model class. The skill
-  adapters render the configured model as prose and will render anything, so
-  `set` reports them as *rendered*, never as having *validated* the model. On a
-  machine with no Claude Code, `set` says plainly that nothing checked the class.
-
-Note the division of labour between the two entry points: `install_harness.py`
-mirrors the shared `~/skills` roots into each harness, and `apply.py` never does
-that at any action.
-
-Completed Planner → executor workflows run the configured lightweight audit at
-`xhigh` effort; it is read-only and distinct from `/audit`.
-
-<!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
-<!-- END GENERATED: auditor-models -->
-
-## Routing behavior
-
-`routing.postWorkflowAudit` configures the small post-workflow reviewer used by
-Pi and generated Claude PB flows. It receives the task, plan, and executor
-evidence, then appends a concise advisory verdict without editing or delegation.
-
-`router.py` classifies a task deterministically and returns an explainable
-applicability result. Pi automatically offers an eligible handoff when
-`enabled: true`, while Claude and Pi `/route` show it on demand. A new profile
-selection or new authority requires confirmation and never silently invokes a
-profile; an already-authorized parent dispatch does not repeat that question.
-The portable alternative is:
-
-```bash
-python3 /home/dyadmin/dev-primitive/router.py --explain 'task'
-```
-
-Runner is the low-confidence fallback. With `planBeforeBuild` enabled, generic
-substantive implementation is confirmed as a Planner handoff and Pi then runs
-Planner → Builder; direct specialist matches and explicitly outlined L1 work do
-not pay that planning round-trip. Planner recommends specialists but does not
-invoke them. Team Leader and Audit have `direct-call-only` semantics in every
-adapter and are hard-excluded from routing. Invoke `/audit` explicitly for
-harness/runtime audits that must work directly without Planner, Builder, or
-other delegated agents.
-
-Run `python3 /home/dyadmin/dev-primitive/apply.py knowledge` to refresh the
-generated specialty profiles. It preserves `agent-knowledge/*/LESSONS.md`.
-
-## Verification
-
-```bash
-cd /home/dyadmin/dev-primitive
-python3 apply.py validate
-python3 -m unittest discover -s tests -v
-python3 router.py --explain 'Update the Vault index and fix broken wikilinks'
-python3 apply.py knowledge
-python3 apply.py docs                       # must report no drift
-node ~/.pi/agent/extensions/pb-primitive/_selftest.mjs
-python3 install_harness.py all --dry-run
-```
-
-A behavioural check for the model-routing guard, run against a **scratch copy**
-of the registry so the real one is never touched:
-
-```bash
-cp roles.config.json /tmp/scratch-roles.json
-python3 - <<'EOF'
-import json; c=json.load(open('/tmp/scratch-roles.json'))
-c['roles']['planner']['model']['class']='gpt-5.6-terra'
-json.dump(c, open('/tmp/scratch-roles.json','w'))
-EOF
-python3 apply.py claude --config /tmp/scratch-roles.json --home /tmp/scratch-home --dry-run
-# expected: exit 1, naming roles.planner, emitting no files
-python3 apply.py all --config /tmp/scratch-roles.json --home /tmp/scratch-home --dry-run
-# expected: exit 0, a warning that the Claude adapter was skipped, neutral
-# surfaces still rendered
-```
-
-To roll back an installation, remove only the generated `agent-*` skill
-directories and the specialist Claude files, then reinstall the prior source
-configuration. Do not remove unrelated user skills, agents, sessions, or
-credentials — and note that the shared-skill symlinks are not generated content:
-leave them alone.

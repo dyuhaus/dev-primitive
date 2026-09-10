@@ -23,11 +23,15 @@ for every agent profile on this machine. Each profile is installed here as an
 run the deterministic router, delegate with `spawn_agent`, and run a real code
 review with the native `codex review` subcommand.
 
-**Direct adoption does not route a model.** A profile you adopt runs on **your
-current session's model**. Substantive automated work must use `spawn_agent`
-with the profile's configured OpenAI `model` and `reasoning_effort`, unless the
-current session is explicitly confirmed to match both. Direct adoption is for
-trivial/manual work and must say which session model ran.
+Ordinary work stays in the current Codex session. Planner -> Builder and its
+component roles require explicit invocation; task size and router output never
+start them. Both roles currently use the registry's Astra model at `xhigh`.
+Automatic profile selection and post-workflow audit are disabled.
+
+**Direct adoption does not route a model.** A profile adopted in-session uses
+that session's actual model. When David explicitly requests a configured
+profile dispatch, set its registry model and effort on `spawn_agent` and report
+an unavailable route instead of substituting another harness or model.
 
 In an already-user-authorized task, the parent orchestrator may dispatch the
 selected configured child with its model, effort, mission, boundaries, and output
@@ -40,7 +44,7 @@ handoffs. A router recommendation, a new profile selection, or new authority
 still requires user confirmation; an existing authorized parent dispatch does
 not.
 
-The `tools:` list in each profile is Claude Code's tool vocabulary. Codex does
+The `tools:` list in each profile is descriptive vocabulary. Codex does
 not enforce it, so a read-only profile's boundary is a discipline here, not a
 sandbox. A read-only worker must not edit, write, commit, install, save lessons,
 or run mutating checks; it reports useful lesson suggestions unless the task
@@ -49,7 +53,7 @@ specifically authorizes a `LESSONS.md` write.
 ## Picking a profile
 
 - **`runner`** is the everyday front door for routine work, maintenance, and triage.
-- **`planner` → `builder`** is the development core for substantive work.
+- **`planner` → `builder`** runs only when David explicitly invokes it; it is never an automatic development step.
 - **`code-reviewer`** is optional and runs only when David explicitly requests
   an automated review. It is never a PR gate; David reviews and merges PRs in
   GitHub.
@@ -63,7 +67,8 @@ Plus `agent-pb` (the plan → build loop) and `agent-route` (explainable routing
 
 ## Reviewing and auditing
 
-{{AUDITOR_MODELS}}
+Requested Code Review and Audit remain available on their registry models.
+Automatic post-workflow audit is disabled; no automatic child or verdict is required.
 
 ## Rules that do not change per harness
 
@@ -73,3 +78,6 @@ Plus `agent-pb` (the plan → build loop) and `agent-route` (explainable routing
 - The router recommends; a new profile selection or new authority needs user
   confirmation. Do not repeat that question for an already-authorized parent dispatch.
 - Direct-call-only profiles are never automatic routing destinations.
+
+Codex is the only supported harness. dsh, Pi, Hermes, Gemini, and Claude
+adapters are decommissioned and must not be installed, invoked, or used as fallback.

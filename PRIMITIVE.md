@@ -1,154 +1,44 @@
-# Configurable Agent Framework and PB Primitive
+# Explicit Planner -> Builder
 
-This repository is a portable, provider-neutral framework for purpose-specific
-agents. Its original two-model development loop is the **PB core**: Planner
-reasons and Builder implements. Additional specialists are registered in
-`roles.config.json`. See `AGENT-FRAMEWORK.md` for the complete architecture,
-routing design, and agent-creation process.
+PB is an invoked Codex workflow. Ordinary work stays in the current session;
+there is no automatic planner, builder, role recommendation, or workflow audit.
 
-## The PB core
+## Execution contract
 
-| Role | Does | Model |
-|------|------|-------|
-| **planner** | read-only planning, architecture, root-cause analysis, sequencing, and approach review | configurable reasoning-tier class |
-| **builder** | senior engineering: complex systems, implementation, builds/tests; may delegate clearly outlined subtasks to L1 | configurable coding-tier class |
+Both roles currently use `gpt-6-astra` at `xhigh`, resolved from
+`roles.config.json`. One model can perform two separate roles; this is not a
+claim of independent-model review. The Planner returns a read-only terminal
+plan before Builder starts. The Builder receives that reviewed plan and its
+profile boundaries. Verification checks the resulting artifact.
 
-**Loop:** reason with Planner → hand the plan to Builder → build → verify.
-Trivial lookups and one-line edits may remain inline. The existing `/pb` and
-`/pbg` commands remain the PB interface. Planner is not the universal default:
-domain-specific work may route directly to a confirmed specialist, ambiguous or
-routine work uses Runner, and a small explicitly outlined implementation may use
-L1. Planner does not call specialists itself; it recommends the next role and
-the parent orchestrator owns handoff. Builder may narrowly delegate to L1 or
-FE-Designer when its harness exposes those tools. A parent may dispatch an
-already-user-authorized worker without a repeat question; that is not a worker's
-nested-delegation authority. A new profile selection or new authority still needs
-user confirmation.
+`/pb is exactly one pass`. Only explicit `/pbg` permits repetition;
+`/pbg is capped at exactly three rounds`. A second inconclusive proof or two
+rounds without measurable progress is BLOCKED. Do not expand scope after the
+first failed real proof. No background loop is implied by task persistence.
 
-### Portable PB contract
+An explicit PB invocation covers its two ordered parent dispatches without a
+repeated confirmation. A worker's `canDelegate`, `delegateTo`, and current task
+authority still govern nested handoffs. Team Leader requires its own explicit
+request. No automatic post-workflow audit or audit verdict is required.
 
-- Await the Planner's terminal output before starting Builder; never pre-spawn
-  Builder. A reviewed plan must establish verified current state and a
-  done-condition, the smallest real end-to-end slice, non-goals/deferred work,
-  a simpler rejected alternative, exact surfaces and step → verification actions,
-  the earliest behavioral/live proof, and stop/replan plus install/rollback risks.
-- One Planner and one Builder work each round. At most one plan-authorized L1 or
-  FE delegation is allowed; multi-workstream work requires an explicit Team
-  Leader call.
-- On a first failed or inconclusive real proof, stop scope expansion and only
-  diagnose or retry the same slice. A second inconclusive proof or two rounds
-  without measurable progress is BLOCKED; changing artifact or task labels does
-  not reset that state.
-- `/pb` is exactly one pass and reports incomplete evidence. `/pbg` is capped at
-  exactly three rounds. Terminal persistence language never overrides ambiguity,
-  safety, failed-proof, no-progress, or round bounds.
+## Source and permissions
 
-## Single source of truth
-
-Everything is driven by [`roles.config.json`](./roles.config.json):
-
-- `roles.planner` and `roles.builder` preserve the PB compatibility surface.
-- `agents` contains the specialist profiles.
-- `providers` names wire protocols and environment-variable names. Secrets do
-  not belong in this file. Use a recognised provider key — `anthropic`,
-  `openai`, `deepseek`, `openrouter` — because consumers map a role to a harness
-  by that key, not by the provider's declared type.
+`roles.config.json` owns the roles and models. Generated Codex skills and
+`agent-knowledge/*/PROFILE.md` must be regenerated from it; `LESSONS.md` is
+preserved and requires specific write authorization. A read-only task never
+writes lessons. Plans and skills do not authorize deployment, provider access,
+service changes, or publication. David reviews and merges source PRs in GitHub.
 
 <!-- BEGIN GENERATED: roster (apply.py docs) -->
 Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-writer`, `prose-writer`, `l1-programmer`, `librarian`, `fe-designer`, `code-reviewer`, plus 2 direct-call-only profiles that must never be auto-selected — `team-leader`, `audit`.
 <!-- END GENERATED: roster -->
 
-This shared registry is harness-neutral. Its active Planner/Builder defaults are
-`gpt-5.6-sol` and `gpt-5.6-terra` on OpenAI at `xhigh`, unless a project-level
-config exists. Pi resolves the shared registry exactly like every other harness;
-its former OpenRouter overlay was removed on 2026-07-26.
-
-Each model has a configurable `class`, optional pinned `id`, and `provider`.
-Pinned ids win over classes. Use aliases when automatic provider upgrades are
-wanted. Run `apply.py set <role-or-agent> <class>` to change a model.
-
-The config is checked by [`roles.schema.json`](./roles.schema.json) and
-`apply.py validate`. `routing.postWorkflowAudit` adds a compact read-only review
-at `xhigh` effort after completed Planner → executor work; it checks the plan,
-result evidence, omissions, and follow-up without editing or delegating. This is
-separate from the full direct-call Audit specialist. Its ordinary mode directly
-investigates and repairs harness/runtime failures without invoking delegated
-agents. When explicitly selected for an instruction-only skills or `AGENTS.md`
-audit, it reads authorized instruction surfaces and reports findings without
-mutation; its ordinary repair obligations remain conditional outside that mode.
-
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-The two review roles run on `gpt-5.6-sol` on `openai` at `xhigh` for the light post-workflow audit and `gpt-5.6-sol` on `openai` at `xhigh` for the direct-call Audit profile. Both use the active OpenAI routing and the configured `xhigh` effort; they are distinct from the Terra build/action path.
+Review policy: automatic workflow audit disabled; requested Audit uses `gpt-5.6-sol` on `openai` at `xhigh`. Requested code review uses the registry-configured Code Reviewer; neither review nor Audit is an automatic workflow gate.
 <!-- END GENERATED: auditor-models -->
 
-`router.py` supplies deterministic, explainable applicability recognition.
-When `routing.automaticSelection.enabled` is true, a supporting harness may
-offer a handoff but must obtain confirmation before delegation; no agent is
-silently dispatched. Team Leader and Audit are always direct-call-only.
+## Supported surface
 
-## Usage
-
-```bash
-python3 apply.py validate
-python3 apply.py show
-python3 apply.py generic
-python3 apply.py claude --dry-run
-python3 apply.py knowledge
-python3 router.py --explain "Update the Vault index"
-python3 apply.py set l1-programmer --effort xhigh --no-apply
-```
-
-`apply.py claude` is a manual-only adapter for an Anthropic-compatible registry.
-It refuses the active OpenAI registry rather than creating profiles that would
-silently run on the wrong model. `all` retires only manifest-owned stale
-generated Claude PB/profile files. Generated files are not hand-edited.
-
-## Looping until a condition holds
-
-The plain loop (`/pb`) runs one plan→build pass and reports incomplete evidence;
-it does not retry. **`/pbg <task> until:
-<condition>` is the portable bounded loop** — plan → build → verify, repeated
-until the condition holds, capped at exactly three rounds — and it is the form to name in any harness-neutral
-instruction, because it needs nothing from the harness. Some harnesses also have
-a native, harness-enforced goal loop (Claude Code's `/goal` + Stop-hook, dsh's
-`/goal`); those are stronger where they exist and absent everywhere else, so they
-belong in that harness's adapter, not in the shared contract.
-
-## Adapters
-
-- **Claude Code:** manual-only. It refuses the active OpenAI registry because
-  its `model:` field can dispatch only Anthropic models.
-- **Codex:** `install_harness.py codex` renders every profile as a native skill.
-  Direct adoption uses the current session model; delegation passes explicit
-  `spawn_agent` `model` and `reasoning_effort` values from the registry.
-- **dsh:** `install_harness.py dsh` renders skills but cannot dispatch the
-  active OpenAI registry.
-- **Hermes:** the same skill surface, including `planner` and `builder`.
-  Hermes's active model comes from its own harness configuration.
-- **Pi:** the global PB addon resolves this shared registry — there is no Pi
-  overlay any more, though one is still honored if reintroduced. Completed
-  Planner → executor work, including each `/pbg` round, runs the configured
-  light workflow audit before reporting. `/route <task>` runs the same local
-  recommendation router and asks for confirmation; see `adapters/pi/README.md`
-  for precedence.
-- **Anything else:** `apply.py generic` prints a portable description of the PB
-  core and specialist registry to paste into a system prompt.
-
-## Durable agent knowledge
-
-`agent-knowledge/<key>/PROFILE.md` is regenerated by `apply.py knowledge` from
-the registry; it documents each agent's specialty, information gathering, and
-boundaries. Each neighboring `LESSONS.md` is deliberately preserved and stores
-only generalized, evidence-backed practices—never secrets, personal data, or
-task logs. Agents read these files before substantive work. A useful lesson is
-report-only unless the task specifically grants a `LESSONS.md` write; read-only
-work never writes it. When authorized, an agent may add one lesson afterward in
-the documented format.
-
-## Portability rules
-
-- Durable state is normal repository files, not one harness's chat memory.
-- No provider/model is the only path; change configuration rather than code.
-- No credentials or secrets are placed in config or generated prompts.
-- A host's tool permissions remain authoritative; metadata is not a security
-  bypass.
+Use [the Codex installer](HARNESS-INSTALLATION.md). Other harnesses are
+retired and are neither installed nor behaviorally evaluated. Report an
+unavailable Codex model or capability; do not substitute another harness.

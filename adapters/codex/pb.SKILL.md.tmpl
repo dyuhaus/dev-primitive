@@ -1,80 +1,54 @@
 ---
 name: agent-pb
-description: "Run this machine's plan-then-build development loop on Codex — reason first as the planner profile, then implement as the builder profile, then verify against an explicit done-condition. Use for any substantive implementation work, and read it before assuming the two roles run on different models here."
+description: "Run Planner -> Builder only when David explicitly invokes PB or asks for this workflow. Both roles use the configured Astra model in Codex. Never trigger from task size, task classification, or an automatic recommendation."
 ---
 
 <!-- Generated from dev-primitive/roles.config.json by apply.py codex.
      Do not hand-edit; change the registry and re-run:
      python3 {{REPO_DIR}}/install_harness.py codex -->
 
-# Plan → build (Codex)
+# Explicit Planner -> Builder (Codex)
 
-This machine's stated method is: reason with the **planner**, hand the plan to
-the **builder**, build, verify. On Codex, substantive automated PB work must
-use explicitly routed child agents unless the current session is confirmed to
-match the required model and effort.
+Ordinary authorized work stays in the current Codex session: plan, perform,
+and verify it there. This workflow starts only when David explicitly invokes
+`$agent-pb`, `/pb`, `/pbg`, or asks for Planner -> Builder. Never start it
+because work is substantive, a router recommends it, or another skill suggests
+it. Do not automatically invoke its component roles or a post-workflow audit.
 
-Once the user has authorized the parent to run this PB task, the parent may
-dispatch the selected Planner or Builder with the configured model, effort,
-mission, boundaries, and output contract without asking the same question again.
-That does not authorize either worker to create a nested handoff: a worker must
-follow its own `canDelegate` and `delegateTo`, and a router-selected new profile
-or new authority still requires user confirmation.
+The two roles remain separate passes even though both currently use Astra.
+Use only Codex. An unavailable configured model is a reported blocker; do not
+substitute another model, provider, or harness.
 
-Await the Planner's terminal output before starting Builder; never pre-spawn
-Builder. Use one Planner and one Builder per round. At most one plan-authorized
-L1/FE delegation is allowed; multi-workstream work requires an explicit Team
-Leader call.
+1. **Plan.** Dispatch one read-only Planner with `spawn_agent`,
+   `model: "{{PLANNER_MODEL}}"`, `reasoning_effort: "{{PLANNER_EFFORT}}"`.
+   Include its profile mission and boundaries. It inspects current state and
+   returns a terminal plan: done-condition, smallest scope, non-goals, exact
+   steps and verification, early behavioral proof, and recovery/stop conditions.
+   It writes no production code and does not delegate or pre-spawn Builder.
+2. **Review the plan.** Resolve concrete gaps before building. Existing task
+   authority covers routine implementation decisions; ask only for a material
+   decision, missing resource, or unmet authority boundary.
+3. **Build.** After the Planner finishes, dispatch one Builder with
+   `model: "{{BUILDER_MODEL}}"`, `reasoning_effort: "{{BUILDER_EFFORT}}"`.
+   Include the reviewed plan and Builder mission/boundaries. Do not expand scope
+   after the first failed or inconclusive real proof; diagnose that same slice.
+4. **Verify.** Run the agreed native checks and inspect the actual artifact.
+   Report failures and limitations. Do not replace verification with a label
+   or a command's exit status alone.
+5. **Report.** State what changed, evidence, and remaining work. There is no
+   automatic audit child or required audit verdict. Review and Audit are
+   separate explicit requests; David reviews and merges GitHub PRs.
 
-## What Codex actually gives you
+An explicit PB request authorizes the parent to dispatch these two roles
+without another confirmation. It grants neither child permission to create
+additional handoffs; current role boundaries and the task's authority still
+apply. Team Leader remains a separate explicit request.
 
-{{PLANNER_ROUTING_NOTE}}
+`/pb is exactly one pass`. Only an explicit `/pbg` request permits repetition;
+`/pbg is capped at exactly three rounds`. A second inconclusive proof or two
+rounds without measurable progress is BLOCKED. Persistence language does not
+override those bounds. No background loop or automatic next round is started
+by an ordinary task.
 
-{{BUILDER_ROUTING_NOTE}}
-
-Direct adoption is a **discipline in one session**, not configured routing. For
-substantive automated PB work, call `spawn_agent` for planning with `model: "{{PLANNER_MODEL}}"`
-and `reasoning_effort: "{{PLANNER_EFFORT}}"`, then hand its plan to a Builder
-child with `model: "{{BUILDER_MODEL}}"` and
-`reasoning_effort: "{{BUILDER_EFFORT}}"`. In either form, do not blur passes:
-
-1. **Plan pass.** Adopt `agent-planner`. Investigate read-only — read files,
-   grep, inspect git state, run non-mutating checks. Produce a completed reviewed
-   plan with verified current state and a done-condition; the smallest real
-   end-to-end slice; explicit non-goals/deferred work; a simpler rejected
-   alternative; exact affected surfaces and ordered step → verification actions;
-   the earliest behavioral/live proof; and stop/replan plus install/rollback
-   risks. Write **no** production code in this pass.
-2. **Review the plan.** If it has a real gap, or a decision only the user can
-   make, reject or revise it before building.
-3. **Build pass.** Adopt `agent-builder`. Execute the plan's steps in order. If
-   a step is wrong or blocked, say so and adapt — do not silently skip it. On the
-   first failed or inconclusive real proof, stop scope expansion and only
-   diagnose or retry the same slice.
-4. **Verify.** Actually run the tests, build, or behaviour the plan named, and
-   report the concrete result. A command that exited 0 has told you it finished,
-   not that the work happened — assert on the artifact.
-5. **Light audit** (enabled={{WORKFLOW_AUDIT_ENABLED}}). When enabled, spawn a
-   separate **read-only** child with `model: "{{WORKFLOW_AUDIT_MODEL}}"` and
-   `reasoning_effort: "{{WORKFLOW_AUDIT_THINKING}}"`; the orchestrator must not
-   perform this audit itself. Give it the plan, changed paths, evidence, and the
-   acceptance criteria. It returns a verdict on coverage, consistency, scope,
-   secrets, destructive action, and dropped follow-up.
-6. **Report.** What changed, how it was verified, the audit verdict, what is left.
-
-Direct adoption is only for trivial/manual work or a session explicitly confirmed
-to match both required values. The explicit `model` and `reasoning_effort` above
-route every substantive automated child; include the profile mission and
-boundaries in its task.
-
-## Looping until a condition holds
-
-`/pb is exactly one pass` and reports incomplete evidence rather than retrying.
-The portable form is **`/pbg <task> until: <condition>`** — plan → build →
-verify, repeated until the condition actually holds. `/pbg is capped at exactly
-three rounds`. A second inconclusive proof or two rounds without measurable
-progress is BLOCKED even if artifact labels change. Persistence language cannot
-override ambiguity, safety, failed proof, no-progress, or round bounds. Report
-where it stands and the remaining gap rather than churning.
-
-Honor the nearest project `AGENTS.md` throughout.
+Honor the machine contract and nearest project `AGENTS.md`. A plan or skill
+never grants additional write, provider, service, or publication authority.

@@ -1,12 +1,12 @@
 {
   "$schema": "./roles.schema.json",
   "version": 2,
-  "description": "Configurable multi-agent primitive. Planner and Builder are the portable PB development core; specialist profiles are registered here for explicit invocation and future routing. Pi may apply its own runtime-only overlay.",
+  "description": "Codex-only agent registry; explicit Astra Planner -> Builder and requested specialist profiles.",
   "roles": {
     "planner": {
       "purpose": "planning and reasoning about the project: architecture, design, root-cause analysis, trade-off calls, sequencing work, and reviewing an approach before it is built",
       "model": {
-        "class": "gpt-5.6-sol",
+        "class": "gpt-6-astra",
         "id": "",
         "provider": "openai",
         "effort": "xhigh"
@@ -18,6 +18,7 @@
         "risk, rollback, and proof sequencing"
       ],
       "boundaries": [
+        "Run only when David explicitly invokes this role or the Planner -> Builder workflow; never start from task classification or an automatic handoff",
         "Read-only: do not edit, write, install, or otherwise mutate project state",
         "Do not delegate or pre-spawn Builder; return terminal Planner output to the orchestrator",
         "Reject or revise plans that lack verified current state, a done-condition, non-goals, a simpler rejected alternative, exact steps, early proof, or stop and rollback conditions"
@@ -30,12 +31,14 @@
         "Put the earliest real behavioral or live proof before generalization or rollout",
         "State stop or replan triggers and install or rollback risks",
         "Return a terminal, self-contained reviewed plan for the orchestrator"
-      ]
+      ],
+      "invocation": "direct-call-only",
+      "autoSelectEligible": false
     },
     "builder": {
       "purpose": "senior engineering implementation: designing and building complex systems, writing and editing code, running builds and tests, and delegating clearly outlined, well-scoped subtasks to the L1 Programmer",
       "model": {
-        "class": "gpt-5.6-terra",
+        "class": "gpt-6-astra",
         "id": "",
         "provider": "openai",
         "effort": "xhigh"
@@ -52,6 +55,7 @@
         "make narrowly scoped implementation delegation when plan-authorized"
       ],
       "boundaries": [
+        "Run only when David explicitly invokes this role or the Planner -> Builder workflow; never start from task classification or an automatic handoff",
         "Do not begin without a completed reviewed plan or equivalently precise explicit user specification",
         "Do not expand scope after the first failed or inconclusive real proof; only diagnose or retry the same slice",
         "Use at most one plan-authorized L1 Programmer or FE-Designer delegation per round; multi-workstream work requires an explicit Team Leader call"
@@ -61,7 +65,9 @@
         "Report exact changed surfaces and behavioral or live validation evidence",
         "Call out incomplete, failed, or inconclusive proof without claiming completion",
         "State any stop, replan, install, or rollback risk left open"
-      ]
+      ],
+      "invocation": "direct-call-only",
+      "autoSelectEligible": false
     }
   },
   "agents": {
@@ -545,10 +551,10 @@
     }
   },
   "routing": {
-    "planBeforeBuild": true,
+    "planBeforeBuild": false,
     "inlineTrivial": true,
     "postWorkflowAudit": {
-      "enabled": true,
+      "enabled": false,
       "model": {
         "class": "gpt-5.6-sol",
         "id": "",
@@ -558,7 +564,7 @@
       "thinking": "xhigh"
     },
     "automaticSelection": {
-      "enabled": true,
+      "enabled": false,
       "status": "confirmation-required",
       "threshold": 0.6,
       "fallback": "runner",
@@ -566,9 +572,9 @@
         "enabled": false,
         "path": "runtime/routing-audit.jsonl"
       },
-      "note": "The deterministic router recognizes applicable profiles and may offer a confirmed handoff. A harness must obtain confirmation before delegation, must exclude direct-call-only agents, and must require explicit human invocation for Team Leader."
+      "note": "Automatic selection is disabled. router.py is an optional explicit recommendation command and never invokes Planner, Builder, or another profile."
     },
-    "note": "Runner is the everyday front door. Use router.py or a harness /route command for an explainable, confirmation-required handoff. Team Leader is direct-call-only."
+    "note": "Ordinary work stays in the current Codex session. Planner -> Builder runs only on explicit invocation, with both roles on gpt-6-astra at xhigh. No automatic workflow or post-workflow audit."
   },
   "providers": {
     "openai": {
