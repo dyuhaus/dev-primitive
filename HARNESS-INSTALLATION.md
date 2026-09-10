@@ -50,6 +50,31 @@ ordinary-task path, explicit ordered Astra PB path, absent automatic audit,
 loader metadata and source-to-live parity. Record any skipped native behavior.
 Do not run the retired harnesses or reconstruct R5's cancelled release system.
 
+### Lesson inbox inside the Linux sandbox
+
+Codex can mount an empty, read-only `tmpfs` directory at a writable root's
+`.git` path even when that path does not exist on the host. The lesson guard
+recognizes only an empty, non-symlink directory with mode `0555` and exactly
+one matching read-only `tmpfs` root mount in `/proc/self/mountinfo`. It continues
+checking ancestors. Ordinary `.git` directories, worktree pointer files,
+symlinks, nonempty mounts, and missing or ambiguous mount evidence still refuse.
+No marker is removed and no sandbox permission is changed.
+
+Check the guard in the command's actual mount namespace: a host path check
+alone cannot see these sandbox placeholders. The native lesson tests cover
+the exception and refusal controls; `python3 tests/control_mutants.py` checks
+that removing those rules causes assertion failures.
+
+A separate startup dependency is the native app-server's SQLite state. A
+read-only `CODEX_HOME` can prevent initialization before any command is run.
+For a supervised local verification, an explicit per-process
+`-c sqlite_home="<private-writable-evidence-directory>"` keeps temporary runtime
+state separate while preserving the normal config, authentication and skill
+locations. Retain startup stderr and the exit status. An outer sandbox must
+also permit the approved inbox path; an inner writable-root declaration
+cannot make a read-only outer mount writable. Never change managed policy to
+force a test to pass.
+
 <!-- BEGIN GENERATED: roster-table (apply.py docs) -->
 | Key | Display name | Model | Provider | Invocation | Auto-select |
 |---|---|---|---|---|---|

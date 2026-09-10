@@ -72,6 +72,7 @@ import os
 import re
 import secrets
 import socket
+import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -171,12 +172,40 @@ def repo_lessons_path(key: str) -> Path:
     return REPO_KNOWLEDGE_DIR / key / "LESSONS.md"
 
 
+def _sandbox_git_placeholder(marker: Path) -> bool:
+    """Recognize an empty read-only tmpfs mount, never ordinary Git metadata.
+
+    Linux Codex sandboxes mount these at writable-root/.git even when no
+    repository exists there. Without kernel mount evidence, keep refusing.
+    """
+    try:
+        if marker.is_symlink() or not marker.is_dir():
+            return False
+        if stat.S_IMODE(marker.stat().st_mode) != 0o555 or any(marker.iterdir()):
+            return False
+        matches = []
+        for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+            before, separator, after = line.partition(" - ")
+            fields, filesystem = before.split(), after.split()
+            if not separator or len(fields) < 6 or len(filesystem) < 3:
+                continue
+            mountpoint = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
+            if mountpoint == str(marker):
+                matches.append(fields[3] == "/" and "ro" in fields[5].split(",")
+                               and filesystem[:2] == ["tmpfs", "tmpfs"])
+        return matches == [True]
+    except (OSError, UnicodeError):
+        return False
+
+
 def branch_mutable_ancestor(path: Path) -> "Path | None":
     """Return the git work tree containing `path`, or None.
 
     A `.git` entry is checked for *existence*, not type: a linked worktree has a
     `.git` FILE, and a lesson written into a linked worktree is exactly as
     exposed to a branch switch as one written into a primary checkout.
+    The sole exception is an empty read-only tmpfs placeholder proven by the
+    kernel mount table; ancestor traversal continues past that sandbox mount.
 
     Symlinks are RESOLVED, not merely normalized. `os.path.abspath` is lexical:
     it collapses `..` without following links, so a state root that is a symlink
@@ -192,6 +221,8 @@ def branch_mutable_ancestor(path: Path) -> "Path | None":
         return None
     for candidate in (resolved, *resolved.parents):
         if (candidate / ".git").exists():
+            if _sandbox_git_placeholder(candidate / ".git"):
+                continue
             return candidate
     return None
 

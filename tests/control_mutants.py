@@ -143,6 +143,16 @@ LOGIC_MUTANTS = [
      "        results, failures = [promote(key, args.apply) for key in keys], []"),
     ("M32-control-harness-treats-an-error-as-a-kill", "tests/mutant_scoring.py",
      "    return verdict == KILLED", "    return verdict in (KILLED, ERRORED_ONLY)"),
+    ("M33-sandbox-placeholder-regression", "lessons.py",
+     "        return matches == [True]", "        return False"),
+    ("M34-writable-tmpfs-accepted", "lessons.py",
+     '"ro" in fields[5].split(",")', "True"),
+    ("M35-nonempty-git-mount-accepted", "lessons.py",
+     " or any(marker.iterdir())", ""),
+    ("M36-writable-git-directory-accepted", "lessons.py",
+     "stat.S_IMODE(marker.stat().st_mode) != 0o555", "False"),
+    ("M37-non-tmpfs-git-mount-accepted", "lessons.py",
+     'filesystem[:2] == ["tmpfs", "tmpfs"]', "True"),
 ]
 
 # --------------------------------------------------- generated instructions
