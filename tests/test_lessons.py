@@ -257,6 +257,111 @@ class BranchMutableGuard(LessonsTestBase):
         )
 
 
+class SandboxGitPlaceholder(LessonsTestBase):
+    """An empty mount made by the sandbox is not repository metadata."""
+
+    def tearDown(self):
+        marker = self.state / ".git"
+        if marker.is_dir() and not marker.is_symlink():
+            marker.chmod(0o755)
+        super().tearDown()
+
+    def marker(self):
+        marker = self.state / ".git"
+        marker.mkdir(parents=True)
+        marker.chmod(0o555)
+        return marker
+
+    def mounts(self, marker, options="ro,nosuid,nodev", filesystem="tmpfs", root="/"):
+        path = str(marker).replace("\\", "\\134").replace(" ", "\\040")
+        return f"42 1 0:2 {root} {path} {options} - {filesystem} tmpfs rw,mode=555\n"
+
+    def with_mountinfo(self, value):
+        original = Path.read_text
+        actual_mounts = Path("/proc/self/mountinfo").read_text()
+
+        def read(path, *args, **kwargs):
+            if str(path) == "/proc/self/mountinfo":
+                if isinstance(value, Exception):
+                    raise value
+                return actual_mounts + value
+            return original(path, *args, **kwargs)
+
+        return patch.object(Path, "read_text", read)
+
+    def test_empty_readonly_tmpfs_placeholder_allows_one_lesson(self):
+        marker = self.marker()
+        before = self.lessons_md.read_bytes()
+        with self.with_mountinfo(self.mounts(marker)):
+            self.assertIsNone(lessons.branch_mutable_ancestor(self.state / KEY / "inbox"))
+            self.assertTrue(self.add().is_file())
+        self.assertEqual(self.lessons_md.read_bytes(), before)
+        self.assertEqual(len(lessons.pending_entries(KEY)), 1)
+
+    def test_placeholder_does_not_hide_a_real_ancestor_repository(self):
+        marker = self.marker()
+        (self.tmp / ".git").mkdir()
+        with self.with_mountinfo(self.mounts(marker)):
+            self.assertEqual(lessons.branch_mutable_ancestor(self.state), self.tmp)
+            with self.assertRaises(lessons.LessonError):
+                self.add()
+        self.assertEqual(lessons.pending_entries(KEY), [])
+
+    def test_unknown_or_non_placeholder_mounts_still_refuse(self):
+        marker = self.marker()
+        cases = ["", "malformed\n", OSError("mountinfo unavailable"),
+                 self.mounts(marker, options="rw"),
+                 self.mounts(marker, filesystem="ext4"),
+                 self.mounts(marker, root="/some/subdirectory"),
+                 self.mounts(marker.parent / "other"),
+                 self.mounts(marker) + self.mounts(marker)]
+        for value in cases:
+            with self.subTest(mountinfo=str(value)), self.with_mountinfo(value):
+                with self.assertRaises(lessons.LessonError):
+                    self.add()
+        self.assertEqual(lessons.pending_entries(KEY), [])
+
+    def test_nonempty_git_directory_still_refuses_on_tmpfs(self):
+        marker = self.marker()
+        marker.chmod(0o755)
+        (marker / "HEAD").write_text("ref: refs/heads/main\n")
+        marker.chmod(0o555)
+        with self.with_mountinfo(self.mounts(marker)):
+            with self.assertRaises(lessons.LessonError):
+                self.add()
+        self.assertEqual(lessons.pending_entries(KEY), [])
+
+    def test_writable_directory_still_refuses(self):
+        marker = self.marker()
+        marker.chmod(0o755)
+        with self.with_mountinfo(self.mounts(marker)):
+            with self.assertRaises(lessons.LessonError):
+                self.add()
+
+    def test_linked_worktree_file_still_refuses_on_tmpfs(self):
+        self.state.mkdir()
+        marker = self.state / ".git"
+        marker.write_text("gitdir: /repo/.git/worktrees/branch\n")
+        with self.with_mountinfo(self.mounts(marker)):
+            with self.assertRaises(lessons.LessonError):
+                self.add()
+
+    def test_symlink_marker_still_refuses(self):
+        marker = self.marker()
+        marker.rename(self.state / "metadata")
+        marker.symlink_to(self.state / "metadata")
+        with self.with_mountinfo(self.mounts(marker)):
+            with self.assertRaises(lessons.LessonError):
+                self.add()
+
+    def test_mountpoint_with_spaces_is_decoded(self):
+        self.state = self.tmp / "state with spaces"
+        os.environ["AGENT_KNOWLEDGE_INBOX_ROOT"] = str(self.state)
+        marker = self.marker()
+        with self.with_mountinfo(self.mounts(marker)):
+            self.assertTrue(self.add().is_file())
+
+
 class SessionDiscipline(LessonsTestBase):
     def test_second_lesson_from_the_same_session_is_refused(self):
         self.add()
