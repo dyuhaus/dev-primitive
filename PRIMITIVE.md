@@ -1,11 +1,13 @@
 # Explicit Planner -> Builder
 
+> **Codex retired 2026-11-17.** Claude Code is the only harness. Planner runs on Fable and Builder on Opus; specialists use the Anthropic classes in `roles.config.json`. Codex adapter code and its install notes below are retained as history only — do not install them.
+
 PB is an invoked Codex workflow. Ordinary work stays in the current session;
 there is no automatic planner, builder, role recommendation, or workflow audit.
 
 ## Execution contract
 
-Both roles currently use `gpt-6-astra` at `xhigh`, resolved from
+Both roles currently use Fable (Planner) and Opus (Builder), resolved from
 `roles.config.json`. One model can perform two separate roles; this is not a
 claim of independent-model review. The Planner returns a read-only terminal
 plan before Builder starts. The Builder receives that reviewed plan and its
@@ -34,7 +36,7 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 <!-- END GENERATED: roster -->
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-Review policy: automatic workflow audit disabled; requested Audit uses `gpt-5.6-sol` on `openai` at `xhigh`. Requested code review uses the registry-configured Code Reviewer; neither review nor Audit is an automatic workflow gate.
+Review policy: automatic workflow audit disabled; requested Audit uses `fable` on `anthropic` at `xhigh`. Requested code review uses the registry-configured Code Reviewer; neither review nor Audit is an automatic workflow gate.
 <!-- END GENERATED: auditor-models -->
 
 ## Supported surface

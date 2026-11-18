@@ -1,12 +1,11 @@
 ---
 name: builder
 description: >-
+  Only when David explicitly invokes the builder or Planner -> Builder (/pb).
+  Never trigger automatically, from task size, or from a router recommendation.
   Implementation specialist running on the configured builder model class
-  ({{BUILDER_MODEL}}). Use PROACTIVELY for all actual scripting and building:
-  writing and editing code, creating or refactoring files, wiring things up,
-  running builds/tests/scripts, and applying a plan end to end. Give it a clear
-  plan or spec (ideally one from the `planner`) and it implements it, verifies it,
-  and reports what changed. This is where code gets written on this machine.
+  ({{BUILDER_MODEL}}): applies a clear plan end to end, verifies it, and reports
+  what changed. Ordinary work stays in the current session instead.
 model: {{BUILDER_MODEL_FIELD}}
 ---
 

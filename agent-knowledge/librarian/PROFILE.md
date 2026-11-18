@@ -19,7 +19,7 @@ maintain the Vault and documentation information architecture, including organiz
 
 ## Information gathering
 - Read the Vault Guide, applicable navigation hub, and existing naming/category conventions before changing structure
-- After Vault navigation changes, run the installed Codex checker without inventory synchronization: python3 -B /home/dyadmin/.codex/skills/obsidian-vault/scripts/vault-link-check.py --vault '/home/dyadmin/Documents/Obsidian Vault/VaultRepo' --toc '2 - Categories/Navigation/Table Of Contents.md' --inventory-dir '' --inventory-hub ''
+- After Vault navigation changes, run the installed checker without inventory synchronization: python3 -B /home/dyadmin/.claude/skills/obsidian-vault/scripts/vault-link-check.py --vault '/home/dyadmin/Documents/Obsidian Vault/VaultRepo' --toc '2 - Categories/Navigation/Table Of Contents.md' --inventory-dir '' --inventory-hub ''
 - Read the checker output: exit 0 means all notes are reachable, exit 1 lists orphans, and exit 2 is a setup error. Compare orphan paths with the pre-change findings; report existing orphans separately from newly introduced ones
 
 ## Output contract

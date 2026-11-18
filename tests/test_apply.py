@@ -39,10 +39,13 @@ class ApplyTests(unittest.TestCase):
     def setUpClass(cls):
         with (ROOT / "roles.config.json").open(encoding="utf-8") as fh:
             cls.config = json.load(fh)
-        # Claude rendering is still safety-tested, but the live registry is
-        # intentionally OpenAI-only.  Keep a fully dispatchable Anthropic
-        # fixture so these tests exercise rendering rather than failing at the
-        # active-registry refusal boundary they are not about.
+        # Codex was retired on 2026-11-17 and the live registry is Anthropic-only.
+        # The Codex adapter code is retained as history, so its rendering tests
+        # run against the last Codex registry, frozen as a fixture.
+        with (ROOT / "tests" / "fixtures" / "roles.config.codex-retired.json").open(encoding="utf-8") as fh:
+            cls.codex_config = json.load(fh)
+        # A fully dispatchable Anthropic variant with uniform classes, so
+        # rendering tests do not depend on the live registry's exact choices.
         cls.claude_config = copy.deepcopy(cls.config)
         cls.claude_config["providers"]["anthropic"] = {
             "type": "anthropic", "apiKeyEnv": "ANTHROPIC_API_KEY", "baseUrlEnv": ""
@@ -57,21 +60,21 @@ class ApplyTests(unittest.TestCase):
     def test_current_config_and_all_specialists_validate(self):
         self.assertEqual(apply.validate(self.config), [])
         self.assertEqual(set(apply.SPECIALIST_KEYS), set(self.config["agents"]))
-        self.assertEqual(self.config["roles"]["planner"]["model"], {"class": "gpt-6-astra", "id": "", "provider": "openai", "effort": "xhigh"})
-        self.assertEqual(self.config["roles"]["builder"]["model"], {"class": "gpt-6-astra", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(self.config["roles"]["planner"]["model"], {"class": "fable", "id": "", "provider": "anthropic", "effort": "xhigh"})
+        self.assertEqual(self.config["roles"]["builder"]["model"], {"class": "opus", "id": "", "provider": "anthropic", "effort": "xhigh"})
         fe = self.config["agents"]["fe-designer"]
         self.assertEqual(fe["displayName"], "FE-Designer")
         self.assertTrue(fe["autoSelectEligible"])
-        self.assertEqual(fe["model"], {"class": "gpt-5.6-terra", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(fe["model"], {"class": "sonnet", "id": "", "provider": "anthropic", "effort": "xhigh"})
         workflow_audit = self.config["routing"]["postWorkflowAudit"]
         self.assertFalse(workflow_audit["enabled"])
-        self.assertEqual(workflow_audit["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(workflow_audit["model"], {"class": "fable", "id": "", "provider": "anthropic", "effort": "xhigh"})
         self.assertEqual(workflow_audit["thinking"], "xhigh")
         audit = self.config["agents"]["audit"]
         self.assertEqual(audit["displayName"], "Audit")
         # Deliberately not the builder's model: an audit should not be the same
         # model reviewing its own work.
-        self.assertEqual(audit["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(audit["model"], {"class": "fable", "id": "", "provider": "anthropic", "effort": "xhigh"})
         self.assertNotEqual(audit["model"]["class"], self.config["roles"]["builder"]["model"]["class"])
         self.assertEqual(audit["invocation"], "direct-call-only")
         self.assertFalse(audit["autoSelectEligible"])
@@ -85,7 +88,7 @@ class ApplyTests(unittest.TestCase):
         behavioral evaluation is required to prove a worker follows the policy.
         """
         audit = self.config["agents"]["audit"]
-        self.assertEqual(audit["model"], {"class": "gpt-5.6-sol", "id": "", "provider": "openai", "effort": "xhigh"})
+        self.assertEqual(audit["model"], {"class": "fable", "id": "", "provider": "anthropic", "effort": "xhigh"})
         self.assertFalse(audit["readOnly"], "ordinary Audit repair remains available")
         self.assertEqual(audit["invocation"], "direct-call-only")
         self.assertFalse(audit["autoSelectEligible"])
@@ -140,10 +143,10 @@ class ApplyTests(unittest.TestCase):
             self.assertIn(declared["type"], apply.PROVIDER_TYPES, declared)
 
     def test_openai_models_require_effort_and_reject_anthropic_aliases(self):
-        missing = copy.deepcopy(self.config)
+        missing = copy.deepcopy(self.codex_config)
         missing["roles"]["builder"]["model"].pop("effort")
         self.assertTrue(any("effort" in error for error in apply.validate(missing)))
-        wrong_openai = copy.deepcopy(self.config)
+        wrong_openai = copy.deepcopy(self.codex_config)
         wrong_openai["agents"]["l1-programmer"]["model"]["class"] = "sonnet"
         self.assertTrue(any("Anthropic" in error for error in apply.validate(wrong_openai)))
         wrong_anthropic = copy.deepcopy(self.claude_config)
@@ -436,9 +439,11 @@ class ApplyTests(unittest.TestCase):
             shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
             (source / ".git").write_text("gitdir: /elsewhere/.git/worktrees/linked\n")
             home = Path(directory) / "home"
-            skill = home / ".codex/skills/agent-librarian/SKILL.md"
-            skill.parent.mkdir(parents=True)
-            skill.write_text("installed sentinel\n")
+            # An installed, marker-bearing Claude Code surface, so `set` has a
+            # surface to refresh and must hit the worktree guard first.
+            for target, content in apply.render_claude(self.config, home):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
             # Source generation would rewrite this sentinel if the guard ran late.
             (source / "agent-knowledge/librarian/PROFILE.md").write_text("source sentinel\n")
             def snapshot(root):
@@ -448,7 +453,7 @@ class ApplyTests(unittest.TestCase):
             commands = (
                 ("install_harness.py", "all"),
                 ("apply.py", "all"),
-                ("apply.py", "set", "librarian", "gpt-5.6-terra"),
+                ("apply.py", "set", "librarian", "haiku"),
             )
             for command in commands:
                 with self.subTest(command=command):
@@ -487,7 +492,7 @@ class ApplyTests(unittest.TestCase):
             changed = copy.deepcopy(self.config)
             apply.apply_set(changed, args)
             self.assertEqual(changed["agents"]["l1-programmer"]["model"]["class"], "test-model")
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "gpt-5.6-terra")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "haiku")
 
 
 
@@ -545,12 +550,12 @@ class ApplyTests(unittest.TestCase):
             home = Path(directory)
             for name in (".codex", ".dsh", ".hermes"):
                 (home / name).mkdir()
-            result = run_apply("set", "l1-programmer", "gpt-5.6-terra", "--config", str(path), "--home", directory)
+            result = run_apply("set", "l1-programmer", "sonnet", "--config", str(path), "--home", directory)
             self.assertEqual(result.returncode, 0, result.stderr)
             # The registry still changed: refusing to create surfaces is not
             # refusing to do the job it was asked to do.
             self.assertEqual(
-                json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "gpt-5.6-terra"
+                json.loads(path.read_text(encoding="utf-8"))["agents"]["l1-programmer"]["model"]["class"], "sonnet"
             )
             for adapter in ("codex",):
                 root = home / f".{adapter}" / "skills"
@@ -567,19 +572,20 @@ class ApplyTests(unittest.TestCase):
             source = Path(directory) / "source"
             shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
             install = subprocess.run(
-                [sys.executable, str(source / "install_harness.py"), "codex", "--home", str(home)],
+                [sys.executable, str(source / "install_harness.py"), "claude", "--home", str(home)],
                 capture_output=True, text=True,
             )
             self.assertEqual(install.returncode, 0, install.stderr)
-            root = home / ".codex" / "skills"
-            removed = root / "agent-audit"
-            shutil.rmtree(removed)
+            root = home / ".claude" / "agents"
+            removed = root / "audit.md"
+            self.assertTrue(removed.exists(), sorted(p.name for p in root.iterdir()))
+            removed.unlink()
             before = sorted(p.name for p in root.iterdir())
             result = subprocess.run(
-                [sys.executable, str(source / "apply.py"), "set", "librarian", "gpt-5.6-terra",
+                [sys.executable, str(source / "apply.py"), "set", "librarian", "haiku",
                  "--config", str(path), "--home", str(home)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("`gpt-5.6-terra`", (root / "agent-librarian" / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertIn("model: haiku", (root / "librarian.md").read_text(encoding="utf-8"))
             self.assertEqual(sorted(p.name for p in root.iterdir()), before)
             self.assertFalse(removed.exists(), "refresh re-created a file the operator had removed")
 
@@ -592,7 +598,7 @@ class ApplyTests(unittest.TestCase):
         incapable of objecting to a model.
         """
         with tempfile.TemporaryDirectory() as directory:
-            path = self._scratch_registry(directory)
+            path = self._scratch_registry(directory, self.codex_config)
             home = Path(directory)
             for name in (".codex", ".dsh"):
                 (home / name).mkdir()
@@ -644,7 +650,7 @@ class ApplyTests(unittest.TestCase):
                     self.assertTrue(content.startswith("---\nname: "), path)
 
     def test_codex_states_the_actual_model_routing(self):
-        rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "codex"))
+        rendered = dict(apply.render_harness_skills(self.codex_config, Path("/tmp/agent-framework-test-home"), "codex"))
         for role in ("planner", "builder"):
             text = next(c for p, c in rendered.items() if p.parent.name == "agent-" + role)
             self.assertIn("current Codex session model", text)
@@ -763,13 +769,13 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual(len({path for path, _ in rendered}), expected, f"{adapter} renders a duplicate target")
 
     def test_the_model_routing_note_is_honest_for_codex_delegation(self):
-        note = apply.model_routing_note(apply.role_view(self.config, "planner"), "codex")
+        note = apply.model_routing_note(apply.role_view(self.codex_config, "planner"), "codex")
         self.assertIn("current Codex session model", note)
         self.assertIn('model: "gpt-6-astra"', note)
         self.assertIn('reasoning_effort: "xhigh"', note)
 
     def test_codex_pb_requires_explicit_invocation_without_automatic_audit(self):
-        rendered = apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "codex")
+        rendered = apply.render_harness_skills(self.codex_config, Path("/tmp/agent-framework-test-home"), "codex")
         pb = next(text for path, text in rendered if path.parent.name == "agent-pb")
         self.assertIn("only when David explicitly invokes", pb)
         self.assertEqual(pb.count('model: "gpt-6-astra"'), 2)
@@ -841,11 +847,11 @@ class ApplyTests(unittest.TestCase):
             (current / "SKILL.md").write_text("---\nname: git-workflow\ndescription: x\n---\n", encoding="utf-8")
             stale = home / "old-skills" / "git-workflow"
             stale.mkdir(parents=True)
-            target = home / apply.HARNESS_SKILL_ROOTS["codex"] / "git-workflow"
+            target = home / apply.HARNESS_SKILL_ROOTS["claude"] / "git-workflow"
             target.parent.mkdir(parents=True)
             target.symlink_to(stale)
 
-            actions = apply.link_shared_skills(home, False, adapters=("codex",))
+            actions = apply.link_shared_skills(home, False, adapters=("claude",))
 
             self.assertEqual(actions, [(target, current.resolve())])
             self.assertTrue(target.is_symlink())
@@ -856,7 +862,7 @@ class ApplyTests(unittest.TestCase):
             (protected / "SKILL.md").write_text("---\nname: local-owned\ndescription: x\n---\n", encoding="utf-8")
             installed = target.parent / "local-owned"
             installed.mkdir()
-            actions = apply.link_shared_skills(home, False, adapters=("codex",))
+            actions = apply.link_shared_skills(home, False, adapters=("claude",))
             self.assertNotIn((installed, protected.resolve()), actions)
             self.assertTrue(installed.is_dir())
 
@@ -878,35 +884,37 @@ class ApplyTests(unittest.TestCase):
             self.assertIn(f"`{key}`", sentence)
 
     def test_retired_installers_refuse_before_any_source_or_home_write(self):
-        for adapter in ("claude", "dsh", "pi", "hermes", "gemini"):
+        for adapter in ("codex", "dsh", "pi", "hermes", "gemini"):
             with self.subTest(adapter=adapter), tempfile.TemporaryDirectory() as directory:
                 home = Path(directory) / "absent-home"
                 result = subprocess.run([sys.executable, str(ROOT / "install_harness.py"), adapter, "--home", str(home)], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("decommissioned", result.stderr)
                 self.assertFalse(home.exists())
-        for adapter in ("claude", "dsh", "hermes"):
+        for adapter in ("codex", "dsh", "hermes"):
             with tempfile.TemporaryDirectory() as directory:
                 result = run_apply(adapter, "--home", directory)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(list(Path(directory).iterdir()), [])
 
-    def test_all_installs_codex_metadata_and_never_populates_retired_homes(self):
+    def test_all_installs_claude_and_never_populates_retired_homes(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / "home"
             home.mkdir()
             source = Path(directory) / "source"
             shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
-            for name in (".claude", ".dsh", ".hermes", ".pi"):
+            for name in (".codex", ".dsh", ".hermes", ".pi"):
                 (home / name).mkdir()
                 (home / name / "sentinel").write_text("preserve")
             result = subprocess.run([sys.executable, str(source / "install_harness.py"), "all", "--home", str(home)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            for name in (".claude", ".dsh", ".hermes", ".pi"):
+            for name in (".codex", ".dsh", ".hermes", ".pi"):
                 self.assertEqual([p.name for p in (home / name).iterdir()], ["sentinel"])
-            for name in ("agent-pb", "agent-planner", "agent-builder", "agent-route", "agent-audit", "agent-team-leader"):
-                metadata = home / ".codex" / "skills" / name / "agents" / "openai.yaml"
-                self.assertEqual(metadata.read_text(), "policy:\n  allow_implicit_invocation: false\n")
+            for rel in ("agents/planner.md", "agents/builder.md", "commands/pb.md"):
+                self.assertTrue((home / ".claude" / rel).is_file(), rel)
+            planner = (home / ".claude" / "agents" / "planner.md").read_text()
+            self.assertIn("Never trigger automatically", planner)
+            self.assertIn("model: fable", planner)
 
     def test_checked_in_docs_match_the_registry(self):
         """The anti-drift gate: the docs said eight specialists and named a
@@ -924,9 +932,9 @@ class ApplyTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             import re
             named = set(re.findall(r"gpt-\d+(?:\.\d+)?-[a-z]+", text))
-            self.assertLessEqual(named, configured, f"{name} names an unconfigured model")
-        self.assertIn("gpt-5.6-sol", configured)
-        self.assertIn("gpt-5.6-terra", configured)
+            self.assertEqual(named, set(), f"{name} names a retired OpenAI model")
+        self.assertIn("fable", configured)
+        self.assertIn("opus", configured)
 
 
 if __name__ == "__main__":

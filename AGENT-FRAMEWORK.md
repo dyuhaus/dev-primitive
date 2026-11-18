@@ -1,5 +1,7 @@
 # Codex Agent Framework
 
+> **Codex retired 2026-11-17.** Claude Code is the only harness. Planner runs on Fable and Builder on Opus; specialists use the Anthropic classes in `roles.config.json`. Codex adapter code and its install notes below are retained as history only — do not install them.
+
 `roles.config.json` is authoritative. Codex is the only supported harness.
 Historical adapter files describe retired integrations and must not be activated.
 
@@ -10,23 +12,23 @@ Beyond the `planner`/`builder` core there are 9 specialists: `runner`, `tech-wri
 <!-- BEGIN GENERATED: roster-table (apply.py docs) -->
 | Key | Display name | Model | Provider | Invocation | Auto-select |
 |---|---|---|---|---|---|
-| `planner` | Planner | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
-| `builder` | Builder | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
-| `runner` | Runner | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `tech-writer` | Tech Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `prose-writer` | Prose Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `team-leader` | Team Leader | `gpt-5.6-terra` | `openai` | `direct-call-only` | `false` |
-| `l1-programmer` | L1 Programmer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `librarian` | Librarian | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `fe-designer` | FE-Designer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `audit` | Audit | `gpt-5.6-sol` | `openai` | `direct-call-only` | `false` |
-| `code-reviewer` | Code Reviewer | `gpt-5.6-sol` | `openai` | `default` | `false` |
+| `planner` | Planner | `fable` | `anthropic` | `direct-call-only` | `false` |
+| `builder` | Builder | `opus` | `anthropic` | `direct-call-only` | `false` |
+| `runner` | Runner | `sonnet` | `anthropic` | `default` | `true` |
+| `tech-writer` | Tech Writer | `sonnet` | `anthropic` | `default` | `true` |
+| `prose-writer` | Prose Writer | `sonnet` | `anthropic` | `default` | `true` |
+| `team-leader` | Team Leader | `opus` | `anthropic` | `direct-call-only` | `false` |
+| `l1-programmer` | L1 Programmer | `haiku` | `anthropic` | `default` | `true` |
+| `librarian` | Librarian | `sonnet` | `anthropic` | `default` | `true` |
+| `fe-designer` | FE-Designer | `sonnet` | `anthropic` | `default` | `true` |
+| `audit` | Audit | `fable` | `anthropic` | `direct-call-only` | `false` |
+| `code-reviewer` | Code Reviewer | `fable` | `anthropic` | `default` | `false` |
 <!-- END GENERATED: roster-table -->
 
 ## Work and invocation
 
 Ordinary tasks remain in the current Codex session. Planner and Builder are
-explicit-invocation profiles, both currently on `gpt-6-astra` at `xhigh`.
+explicit-invocation profiles, currently on Fable (Planner) and Opus (Builder).
 An explicit PB request runs the [ordered PB contract](PRIMITIVE.md); neither
 automatic task classification nor task size starts it. The automatic router
 and post-workflow audit are disabled. The router may be run manually for an
@@ -46,7 +48,7 @@ David's decision. No role or candidate instruction can widen task scope.
 ## Requested review and Audit
 
 <!-- BEGIN GENERATED: auditor-models (apply.py docs) -->
-Review policy: automatic workflow audit disabled; requested Audit uses `gpt-5.6-sol` on `openai` at `xhigh`. Requested code review uses the registry-configured Code Reviewer; neither review nor Audit is an automatic workflow gate.
+Review policy: automatic workflow audit disabled; requested Audit uses `fable` on `anthropic` at `xhigh`. Requested code review uses the registry-configured Code Reviewer; neither review nor Audit is an automatic workflow gate.
 <!-- END GENERATED: auditor-models -->
 
 Code Review and Audit are explicit requests, not PR gates. David reviews and
@@ -71,7 +73,7 @@ python3 apply.py validate
 python3 apply.py show
 python3 apply.py roster
 python3 apply.py docs
-python3 install_harness.py codex --dry-run
+python3 install_harness.py claude --dry-run
 ```
 
 `apply.py set` validates and renders before writing, refreshes only already
