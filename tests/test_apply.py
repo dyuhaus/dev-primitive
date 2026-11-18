@@ -351,22 +351,6 @@ class ApplyTests(unittest.TestCase):
                 sections[current].append(line)
         return {key: "\n".join(value) for key, value in sections.items()}
 
-    def test_every_generated_codex_agent_routes_lessons_through_lessons_py(self):
-        sections = self._rendered_sections(self.config)
-        base = "/tmp/agent-framework-test-home/.codex/skills"
-        for key in apply.ALL_AGENT_KEYS:
-            body = sections[f"{base}/agent-{key}/SKILL.md"]
-            self.assertIn("lessons.py add --key", body, key)
-            self.assertIn(key, body.split("lessons.py add --key", 1)[1][:40], key)
-            self.assertNotIn("append at most one", body.lower(), key)
-
-    def test_no_generated_codex_agent_tells_an_agent_to_append_to_lessons_md(self):
-        sections = self._rendered_sections(self.config)
-        for target, body in sections.items():
-            lowered = body.lower()
-            self.assertNotIn("append at most one", lowered, target)
-            self.assertNotIn("lesson\n  to `lessons.md`", lowered, target)
-
     def test_installing_from_a_linked_worktree_is_refused(self):
         """The deployment path, enforced rather than remembered.
 
@@ -407,28 +391,6 @@ class ApplyTests(unittest.TestCase):
                 # With the script present and a primary checkout, it proceeds.
                 (primary / "lessons.py").write_text("# stub\n", encoding="utf-8")
                 apply.assert_generated_paths_are_installable(False)
-            finally:
-                apply.SCRIPT_DIR = original
-
-    def test_install_codex_runs_the_path_guard(self):
-        """The guard must be wired into the command, not merely defined."""
-        with tempfile.TemporaryDirectory() as directory:
-            worktree = Path(directory) / "linked"
-            worktree.mkdir()
-            (worktree / "lessons.py").write_text("# stub\n", encoding="utf-8")
-            (worktree / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
-            original = apply.SCRIPT_DIR
-            try:
-                apply.SCRIPT_DIR = worktree
-                with self.assertRaises(SystemExit) as ctx:
-                    apply.install_harness_skills(self.config, Path(directory) / "home", "codex", False)
-                # Assert on the MESSAGE. A bare `assertRaises(SystemExit)` passes
-                # against a guard that never ran, because this fixture has no
-                # adapters/ directory and install_harness_skills exits on the missing
-                # template a moment later — the test would confirm nothing.
-                self.assertIn("linked git worktree", str(ctx.exception))
-                self.assertFalse((Path(directory) / "home").exists(),
-                                 "agents were written before the guard ran")
             finally:
                 apply.SCRIPT_DIR = original
 
@@ -497,12 +459,6 @@ class ApplyTests(unittest.TestCase):
 
 
 
-
-    def test_no_unsubstituted_placeholders_remain(self):
-        output = io.StringIO()
-        with redirect_stdout(output):
-            apply.install_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "codex", True)
-        self.assertNotIn("{{", output.getvalue())
 
     def test_short_purpose_trims_without_breaking_a_word(self):
         long = "designs things; builds other things, and also reviews a third category of things"
@@ -632,32 +588,6 @@ class ApplyTests(unittest.TestCase):
     # Codex / dsh / Hermes surfaces
     # ----------------------------------------------------------------- #
 
-    def test_every_skill_adapter_covers_roles_specialists_and_the_reviewer(self):
-        for adapter in ("codex",):
-            with self.subTest(adapter=adapter):
-                rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), adapter))
-                names = {path.parent.name for path in rendered}
-                for key in apply.ALL_AGENT_KEYS:
-                    self.assertIn(f"agent-{key}", names, f"{adapter} is missing agent-{key}")
-                # The Hermes installer iterated only the specialists map, so the
-                # PB core could never appear and the mandatory reviewer was absent.
-                self.assertIn("agent-planner", names)
-                self.assertIn("agent-builder", names)
-                self.assertIn("agent-code-reviewer", names)
-                self.assertIn("agent-framework", names)
-                for path, content in rendered.items():
-                    self.assertNotIn("{{", content, f"unsubstituted placeholder in {path}")
-                    self.assertTrue(content.startswith("---\nname: "), path)
-
-    def test_codex_states_the_actual_model_routing(self):
-        rendered = dict(apply.render_harness_skills(self.codex_config, Path("/tmp/agent-framework-test-home"), "codex"))
-        for role in ("planner", "builder"):
-            text = next(c for p, c in rendered.items() if p.parent.name == "agent-" + role)
-            self.assertIn("current Codex session model", text)
-            self.assertIn('model: "gpt-6-astra"', text)
-            self.assertIn('reasoning_effort: "xhigh"', text)
-            self.assertIn("Never trigger automatically", text)
-
     # ----------------------------------------------------------------- #
     # Generated frontmatter must survive a real YAML parse
     # ----------------------------------------------------------------- #
@@ -682,32 +612,6 @@ class ApplyTests(unittest.TestCase):
         """A vacuous pass would be the real failure mode of the tests below."""
         offenders = [k for k in apply.ALL_AGENT_KEYS if ": " in apply.role_view(self.config, k)["purpose"]]
         self.assertTrue(offenders, "no live purpose contains ': ' — the YAML tests below prove nothing")
-
-    def test_generated_skill_frontmatter_parses_as_yaml(self):
-        yaml = self._require_yaml()
-        for adapter in ("codex",):
-            for name, block in self._skill_frontmatter(self.config, adapter).items():
-                with self.subTest(adapter=adapter, skill=name):
-                    data = yaml.safe_load(block)
-                    self.assertIsInstance(data, dict, f"{adapter}/{name} frontmatter is not a mapping")
-                    self.assertEqual(data["name"], name)
-                    self.assertIsInstance(data["description"], str)
-                    self.assertTrue(data["description"].strip())
-
-    def test_a_purpose_with_a_colon_round_trips_through_a_real_yaml_parse(self):
-        """The exact registry shape that made four skills disappear."""
-        yaml = self._require_yaml()
-        cfg = copy.deepcopy(self.config)
-        cfg["agents"]["code-reviewer"]["purpose"] = self.HOSTILE_PURPOSE
-        cfg["roles"]["planner"]["purpose"] = "plan: think first, then hand over"
-        self.assertEqual(apply.validate(cfg), [])
-        for adapter in ("codex",):
-            blocks = self._skill_frontmatter(cfg, adapter)
-            with self.subTest(adapter=adapter):
-                reviewer = yaml.safe_load(blocks["agent-code-reviewer"])
-                self.assertEqual(reviewer["description"], self.HOSTILE_PURPOSE)
-                planner = yaml.safe_load(blocks["agent-planner"])
-                self.assertEqual(planner["description"], "Only when David explicitly invokes planner or Planner -> Builder. Never trigger automatically. plan: think first, then hand over")
 
     def test_the_generator_refuses_to_write_unparseable_frontmatter(self):
         """The stdlib backstop, so a template edit cannot reintroduce this.
@@ -753,66 +657,6 @@ class ApplyTests(unittest.TestCase):
 
 
 
-
-    def test_every_skill_adapter_renders_the_same_fourteen_skills(self):
-        """The count is 14 TOTAL per adapter: 11 profiles + 3 shared skills.
-
-        Not "14 agent-* skills plus framework/pb/route" — that reading inflates
-        the surface by three and hides a real loss behind a number that already
-        looked too big.
-        """
-        expected = len(apply.ALL_AGENT_KEYS) + 3
-        self.assertEqual(len(apply.ALL_AGENT_KEYS), 11)
-        for adapter in ("codex",):
-            rendered = apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), adapter)
-            self.assertEqual(len(rendered), expected, adapter)
-            self.assertEqual(len({path for path, _ in rendered}), expected, f"{adapter} renders a duplicate target")
-
-    def test_the_model_routing_note_is_honest_for_codex_delegation(self):
-        note = apply.model_routing_note(apply.role_view(self.codex_config, "planner"), "codex")
-        self.assertIn("current Codex session model", note)
-        self.assertIn('model: "gpt-6-astra"', note)
-        self.assertIn('reasoning_effort: "xhigh"', note)
-
-    def test_codex_pb_requires_explicit_invocation_without_automatic_audit(self):
-        rendered = apply.render_harness_skills(self.codex_config, Path("/tmp/agent-framework-test-home"), "codex")
-        pb = next(text for path, text in rendered if path.parent.name == "agent-pb")
-        self.assertIn("only when David explicitly invokes", pb)
-        self.assertEqual(pb.count('model: "gpt-6-astra"'), 2)
-        self.assertIn("no automatic audit child", " ".join(pb.split()))
-        self.assertNotIn("WORKFLOW_AUDIT_MODEL", pb)
-        self.assertNotIn('model: "gpt-5.6-sol"', pb)
-
-    def test_codex_rendered_authority_policy_separates_parent_dispatch_and_nested_handoffs(self):
-        """Render the policy in the installed Codex surface, not just templates.
-
-        This checks artifact text only. It is not evidence that a model obeys the
-        policy or that the host tool boundary enforces it.
-        """
-        rendered = dict(apply.render_harness_skills(
-            self.config, Path("/tmp/agent-framework-test-home"), "codex"))
-        planner = next(text for path, text in rendered.items() if path.parent.name == "agent-planner")
-        builder = next(text for path, text in rendered.items() if path.parent.name == "agent-builder")
-        framework = next(text for path, text in rendered.items() if path.parent.name == "agent-framework")
-        framework_policy = " ".join(framework.split())
-        pb = next(text for path, text in rendered.items() if path.parent.name == "agent-pb")
-        route = next(text for path, text in rendered.items() if path.parent.name == "agent-route")
-        self.assertIn("unless the current session is explicitly confirmed to match", planner)
-        self.assertIn("already-authorized parent dispatch", planner)
-        self.assertIn("Can delegate: **false**", planner)
-        self.assertIn("`canDelegate` and `delegateTo` govern this worker's nested handoffs", planner)
-        self.assertIn("install, save a lesson, or run a mutating check", planner)
-        self.assertIn("Can delegate: **true**", builder)
-        self.assertIn("Allowed targets: l1-programmer, fe-designer", builder)
-        self.assertIn("parent dispatch is not a worker's delegation right", framework_policy)
-        self.assertIn("grants neither child permission to create", pb)
-        self.assertIn("new profile selection or new authority", route)
-
-    def test_codex_pb_preserves_ordered_bounded_execution(self):
-        rendered = apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "codex")
-        pb = " ".join(next(text for path, text in rendered if path.parent.name == "agent-pb").split())
-        for phrase in ("After the Planner finishes", "first failed or inconclusive real proof", "A second inconclusive proof", "/pb is exactly one pass", "/pbg is capped at exactly three rounds"):
-            self.assertIn(phrase, pb)
 
     def test_apply_py_does_not_mirror_the_shared_skill_roots(self):
         """The two entry points differ, and the difference is deliberate.
@@ -866,12 +710,6 @@ class ApplyTests(unittest.TestCase):
             self.assertNotIn((installed, protected.resolve()), actions)
             self.assertTrue(installed.is_dir())
 
-    def test_framework_skill_list_is_generated_from_the_registry(self):
-        rendered = dict(apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), "codex"))
-        framework = next(c for p, c in rendered.items() if p.parent.name == "agent-framework")
-        for key in apply.ALL_AGENT_KEYS:
-            self.assertIn(f"`agent-{key}`", framework)
-
     # ----------------------------------------------------------------- #
     # Generated documentation
     # ----------------------------------------------------------------- #
@@ -882,6 +720,11 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("`code-reviewer`", sentence)
         for key in self.config["agents"]:
             self.assertIn(f"`{key}`", sentence)
+
+    def test_retired_skill_adapters_refuse_to_render(self):
+        for adapter in ("codex", "dsh", "hermes"):
+            with self.subTest(adapter=adapter), self.assertRaises(apply.AdapterUnsupported):
+                apply.render_harness_skills(self.config, Path("/tmp/agent-framework-test-home"), adapter)
 
     def test_retired_installers_refuse_before_any_source_or_home_write(self):
         for adapter in ("codex", "dsh", "pi", "hermes", "gemini"):

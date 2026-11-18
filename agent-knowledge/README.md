@@ -33,7 +33,7 @@ python3 "$DEV_PRIMITIVE/lessons.py" promote --key builder --apply
 `lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
 when your working directory happens to be that checkout, and agents run from
 other repositories, where it fails with `can't open file`. Generated harness
-instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.
+instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.
 
 `add` creates ONE NEW FILE per lesson, with `O_CREAT | O_EXCL`, under a state
 root outside any repository (`~/appdata/agent-knowledge/<key>/inbox/` by

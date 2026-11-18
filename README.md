@@ -57,14 +57,14 @@ python3 apply.py docs
 python3 install_harness.py all --dry-run
 ```
 
-Tests cover Codex behavior and rejection of retired entrypoints. A static pass
+Tests cover Claude Code generation and rejection of retired entrypoints, including Codex. A static pass
 is not a claim of provider-backed behavioral acceptance or installed parity.
 
 ## Source layout
 
 - `apply.py`, `install_harness.py`: validation, generation and installation.
 - `router.py`: optional explainable recommendations; no execution.
-- `adapters/codex`: supported templates.
+- `adapters/claude-code`: supported templates (the Codex templates were removed when Codex was retired on 2026-11-17).
 - `agent-knowledge`: generated profiles and preserved lessons.
 - `tests`: focused native checks.
 

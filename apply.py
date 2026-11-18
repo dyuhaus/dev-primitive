@@ -663,7 +663,7 @@ LESSONS_PATH_NOTE = '''`$DEV_PRIMITIVE` is this repository's checkout — the di
 `lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
 when your working directory happens to be that checkout, and agents run from
 other repositories, where it fails with `can't open file`. Generated harness
-instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.'''
+instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.'''
 
 
 def profile_markdown(cfg: dict, key: str) -> str:
@@ -940,7 +940,6 @@ def generic_block(cfg: dict) -> str:
 
 HARNESS_SKILL_ROOTS = {
     "claude": ".claude/skills",
-    "codex": ".codex/skills",
     "dsh": ".dsh/skills",
     "hermes": ".hermes/skills",
 }
@@ -1217,8 +1216,9 @@ def harness_mapping(cfg: dict, adapter: str) -> dict:
 
 def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
     """Render one harness's whole skill surface: [(target Path, content)]."""
-    if adapter != "codex":
-        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
+    # Every skill-file adapter (Codex, dsh, Hermes) is retired; Claude Code uses
+    # render_claude(). Kept so a stray call fails loudly instead of rendering.
+    raise AdapterUnsupported(f"the {adapter} skill adapter is retired; only Claude Code is supported")
     tdir = SCRIPT_DIR / "adapters" / adapter
     root = home / HARNESS_SKILL_ROOTS[adapter]
     agent_template = tdir / "agent.SKILL.md.tmpl"
@@ -1292,11 +1292,6 @@ def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> No
     assert_generated_paths_are_installable(dry)
     for target, content in render_harness_skills(cfg, home, adapter):
         write_out(target, content, dry)
-    # Codex reads invocation policy from sibling agents/openai.yaml metadata.
-    # A task description alone must never auto-load PB or its component roles.
-    for name in ("agent-pb", "agent-planner", "agent-builder", "agent-route", "agent-audit", "agent-team-leader"):
-        target = home / HARNESS_SKILL_ROOTS[adapter] / name / "agents" / "openai.yaml"
-        write_out(target, "policy:\n  allow_implicit_invocation: false\n", dry)
 
 
 def link_shared_skills(home: Path, dry: bool, adapters=("claude",)) -> list:
