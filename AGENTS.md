@@ -1,5 +1,7 @@
 # dev-primitive — Agent Guide
 
+> **Codex retired 2026-11-17.** Claude Code is the only harness. Planner runs on Fable and Builder on Opus; specialists use the Anthropic classes in `roles.config.json`. Codex adapter code and its install notes below are retained as history only — do not install them.
+
 This repository supports Codex only. `AGENTS.md` is its project entrypoint.
 
 ## Project
@@ -33,14 +35,16 @@ python3 apply.py docs                     # must report no drift
 python3 install_harness.py all --dry-run
 ```
 
-### Codex-only operation
+### Claude Code-only operation
 
-Codex is the only supported runtime and installation target. Planner -> Builder
-is explicit-invocation only, both roles use `gpt-6-astra` at xhigh, and neither task size
-nor a router recommendation automatically starts it. Automatic workflow audit
-is disabled. Requested reviews use `gpt-5.6-sol`; other specialists remain registry-configured on Codex.
-`install_harness.py all` means Codex and shared skill links only. Retired targets
-refuse before writing. See HARNESS-INSTALLATION.md for exact source/live checks.
+Claude Code is the only supported runtime and installation target (Codex was
+retired on 2026-11-17). Planner -> Builder is explicit-invocation only (Planner
+on Fable, Builder on Opus), and neither task size nor a router recommendation
+automatically starts it. Automatic workflow audit is disabled. Requested
+reviews use the registry-configured Code Reviewer and Audit models.
+`install_harness.py all` means the Claude Code adapter and shared skill links
+only. Retired targets, including Codex, refuse before writing. See
+HARNESS-INSTALLATION.md for exact source/live checks.
 
 ## Rules
 

@@ -1,19 +1,22 @@
 # Codex installation
 
+> **Codex retired 2026-11-17.** Claude Code is the only harness. Planner runs on Fable and Builder on Opus; specialists use the Anthropic classes in `roles.config.json`. Codex adapter code and its install notes below are retained as history only — do not install them.
+
 Only Codex is supported. Use a verified human-merged source revision; a passing
 source test or a model-generated proposal does not authorize live activation.
 
 <!-- BEGIN GENERATED: harness-surfaces (apply.py docs) -->
 | Harness | Surface | Result |
 |---|---|---|
-| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |
+| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | Supported. PB and its roles require explicit invocation; each subagent's `model:` comes from the registry and the adapter refuses a class Claude Code cannot dispatch. Automatic workflow audit is disabled. |
+| Codex | None installed or refreshed | Retired 2026-11-17. Its renderer is retained as history; installers refuse it. |
 | Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |
 <!-- END GENERATED: harness-surfaces -->
 
 ## Native entrypoint
 
 ```bash
-python3 install_harness.py codex --dry-run
+python3 install_harness.py claude --dry-run
 python3 install_harness.py codex
 ```
 
@@ -25,7 +28,7 @@ No other installed harness surface is refreshed by a model change.
 
 Generated PB, Planner, Builder, router, Audit and Team Leader skills include `agents/openai.yaml`
 with `policy.allow_implicit_invocation: false`. The model choices remain in
-`roles.config.json`; both PB roles currently resolve to `gpt-6-astra`/`xhigh`.
+`roles.config.json`; the PB roles currently resolve to `fable` (Planner) and `opus` (Builder).
 Their SKILL.md instructions require explicit invocation. Automatic profile
 selection and post-workflow audit are disabled. A full Codex install adds new
 metadata; `apply.py set` deliberately does not create absent files.
@@ -78,15 +81,15 @@ force a test to pass.
 <!-- BEGIN GENERATED: roster-table (apply.py docs) -->
 | Key | Display name | Model | Provider | Invocation | Auto-select |
 |---|---|---|---|---|---|
-| `planner` | Planner | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
-| `builder` | Builder | `gpt-6-astra` | `openai` | `direct-call-only` | `false` |
-| `runner` | Runner | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `tech-writer` | Tech Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `prose-writer` | Prose Writer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `team-leader` | Team Leader | `gpt-5.6-terra` | `openai` | `direct-call-only` | `false` |
-| `l1-programmer` | L1 Programmer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `librarian` | Librarian | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `fe-designer` | FE-Designer | `gpt-5.6-terra` | `openai` | `default` | `true` |
-| `audit` | Audit | `gpt-5.6-sol` | `openai` | `direct-call-only` | `false` |
-| `code-reviewer` | Code Reviewer | `gpt-5.6-sol` | `openai` | `default` | `false` |
+| `planner` | Planner | `fable` | `anthropic` | `direct-call-only` | `false` |
+| `builder` | Builder | `opus` | `anthropic` | `direct-call-only` | `false` |
+| `runner` | Runner | `sonnet` | `anthropic` | `default` | `true` |
+| `tech-writer` | Tech Writer | `sonnet` | `anthropic` | `default` | `true` |
+| `prose-writer` | Prose Writer | `sonnet` | `anthropic` | `default` | `true` |
+| `team-leader` | Team Leader | `opus` | `anthropic` | `direct-call-only` | `false` |
+| `l1-programmer` | L1 Programmer | `haiku` | `anthropic` | `default` | `true` |
+| `librarian` | Librarian | `sonnet` | `anthropic` | `default` | `true` |
+| `fe-designer` | FE-Designer | `sonnet` | `anthropic` | `default` | `true` |
+| `audit` | Audit | `fable` | `anthropic` | `direct-call-only` | `false` |
+| `code-reviewer` | Code Reviewer | `fable` | `anthropic` | `default` | `false` |
 <!-- END GENERATED: roster-table -->

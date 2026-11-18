@@ -59,7 +59,7 @@ python3 "$DEV_PRIMITIVE/lessons.py" add --key audit \
 `lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
 when your working directory happens to be that checkout, and agents run from
 other repositories, where it fails with `can't open file`. Generated harness
-instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.
+instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.
 
 That writes one new file to the lesson inbox outside this repository. Editing
 `LESSONS.md` in place is a read-modify-write of a branch-mutable file: a branch

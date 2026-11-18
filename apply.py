@@ -602,7 +602,8 @@ def render_claude(cfg: dict, home: Path) -> list:
 
 
 def install_claude(cfg: dict, home: Path, dry: bool) -> None:
-    raise AdapterUnsupported("Claude is decommissioned; only Codex is supported")
+    for target, content in render_claude(cfg, home):
+        write_out(target, content, dry)
 
 
 def retire_stale_claude_surface(cfg: dict, home: Path, dry: bool) -> None:
@@ -662,7 +663,7 @@ LESSONS_PATH_NOTE = '''`$DEV_PRIMITIVE` is this repository's checkout — the di
 `lessons.py`. It is spelled out because a bare `python3 lessons.py` only works
 when your working directory happens to be that checkout, and agents run from
 other repositories, where it fails with `can't open file`. Generated harness
-instructions (`~/.codex/skills/agent-<key>/SKILL.md`) already carry the path resolved.'''
+instructions (`~/.claude/agents/<key>.md`) already carry the path resolved.'''
 
 
 def profile_markdown(cfg: dict, key: str) -> str:
@@ -919,7 +920,7 @@ def generic_block(cfg: dict) -> str:
         "- On the first failed or inconclusive real proof, stop scope expansion and only diagnose or retry the same slice. A second inconclusive proof or two rounds without measurable progress is BLOCKED even if artifact labels change.",
         "- /pb is exactly one pass and reports incomplete evidence. /pbg is capped at exactly three rounds. Persistence language cannot override ambiguity, safety, failed proof, no-progress, or round bounds.",
         "",
-        "Team Leader is direct-call-only and must never be selected automatically. Ordinary tasks stay in the current session. Planner → Builder runs only when explicitly invoked, using Astra for both roles. Automatic workflow audit is disabled. Change models only in roles.config.json and regenerate Codex.",
+        "Team Leader is direct-call-only and must never be selected automatically. Ordinary tasks stay in the current session. Planner → Builder runs only when explicitly invoked (Planner and Builder models come from roles.config.json). Automatic workflow audit is disabled. Change models only in roles.config.json and regenerate the Claude Code adapter.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -939,7 +940,6 @@ def generic_block(cfg: dict) -> str:
 
 HARNESS_SKILL_ROOTS = {
     "claude": ".claude/skills",
-    "codex": ".codex/skills",
     "dsh": ".dsh/skills",
     "hermes": ".hermes/skills",
 }
@@ -1216,8 +1216,9 @@ def harness_mapping(cfg: dict, adapter: str) -> dict:
 
 def render_harness_skills(cfg: dict, home: Path, adapter: str) -> list:
     """Render one harness's whole skill surface: [(target Path, content)]."""
-    if adapter != "codex":
-        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
+    # Every skill-file adapter (Codex, dsh, Hermes) is retired; Claude Code uses
+    # render_claude(). Kept so a stray call fails loudly instead of rendering.
+    raise AdapterUnsupported(f"the {adapter} skill adapter is retired; only Claude Code is supported")
     tdir = SCRIPT_DIR / "adapters" / adapter
     root = home / HARNESS_SKILL_ROOTS[adapter]
     agent_template = tdir / "agent.SKILL.md.tmpl"
@@ -1291,22 +1292,17 @@ def install_harness_skills(cfg: dict, home: Path, adapter: str, dry: bool) -> No
     assert_generated_paths_are_installable(dry)
     for target, content in render_harness_skills(cfg, home, adapter):
         write_out(target, content, dry)
-    # Codex reads invocation policy from sibling agents/openai.yaml metadata.
-    # A task description alone must never auto-load PB or its component roles.
-    for name in ("agent-pb", "agent-planner", "agent-builder", "agent-route", "agent-audit", "agent-team-leader"):
-        target = home / HARNESS_SKILL_ROOTS[adapter] / name / "agents" / "openai.yaml"
-        write_out(target, "policy:\n  allow_implicit_invocation: false\n", dry)
 
 
-def link_shared_skills(home: Path, dry: bool, adapters=("codex",)) -> list:
+def link_shared_skills(home: Path, dry: bool, adapters=("claude",)) -> list:
     """Mirror the neutral ~/skills roots into every harness's skill directory.
 
     Existing symlinks are reconciled to the current neutral source; real files
-    and directories are left exactly as they are. Without this a Codex session
-    can keep loading a stale git-workflow skill after the neutral source moves.
+    and directories are left exactly as they are. Without this a Claude Code
+    session can keep loading a stale skill after the neutral source moves.
     """
-    if any(adapter != "codex" for adapter in adapters):
-        raise AdapterUnsupported("Only Codex is supported; other harnesses are decommissioned")
+    if any(adapter != "claude" for adapter in adapters):
+        raise AdapterUnsupported("Only Claude Code is supported; other harnesses are decommissioned")
     source = home / NEUTRAL_SKILL_ROOT
     actions = []
     if not source.is_dir():
@@ -1351,7 +1347,7 @@ def write_config(cfg_path: Path, cfg: dict) -> None:
     os.replace(temp, cfg_path)
 
 
-ALL_ADAPTERS = ("codex",)
+ALL_ADAPTERS = ("claude",)
 
 # The only adapter whose renderer can REFUSE a model class. Claude Code is the
 # one harness here that resolves a `model:` frontmatter field, so it is the one
@@ -1432,7 +1428,7 @@ def refresh_surfaces(cfg: dict, home: Path, dry: bool) -> list:
       rewrites only files that are already on disk, and never creates one.
     """
     skipped = []
-    if surface_installed(home, "codex", cfg):
+    if surface_installed(home, "claude", cfg):
         assert_generated_paths_are_installable(dry)
     install_knowledge(cfg, dry)
     absent = [a for a in ALL_ADAPTERS if not surface_installed(home, a, cfg)]
@@ -1484,7 +1480,8 @@ DOC_FILES = ("README.md", "PRIMITIVE.md", "AGENT-FRAMEWORK.md", "HARNESS-INSTALL
 def harness_surface_table(cfg: dict) -> str:
     return "\n".join([
         "| Harness | Surface | Result |", "|---|---|---|",
-        "| Codex | `~/.codex/skills/agent-*/SKILL.md` | Supported. PB and its roles require explicit invocation; both use the configured Astra model. Automatic workflow audit is disabled. |",
+        "| Claude Code | `~/.claude/agents/` and `~/.claude/commands/` | Supported. PB and its roles require explicit invocation; each subagent's `model:` comes from the registry and the adapter refuses a class Claude Code cannot dispatch. Automatic workflow audit is disabled. |",
+        "| Codex | None installed or refreshed | Retired 2026-11-17. Its renderer is retained as history; installers refuse it. |",
         "| Other harnesses | None installed or refreshed | Decommissioned. Their installers and dispatch entrypoints refuse before launch or writes. Historical source is not activation authority. |",
     ])
 
@@ -1595,8 +1592,8 @@ def main() -> None:
     ap.add_argument("--effort", choices=EFFORT_LEVELS, default=None)
     ap.add_argument("--no-apply", action="store_true")
     args = ap.parse_args()
-    if args.action in ("claude", "dsh", "hermes"):
-        fail("Only Codex is supported; other harnesses are decommissioned")
+    if args.action in ("codex", "dsh", "hermes"):
+        fail("Only Claude Code is supported; other harnesses are decommissioned")
     cfg_path, cfg = Path(args.config), load_config(Path(args.config))
     errors = validate(cfg)
     if errors:
@@ -1640,7 +1637,7 @@ def main() -> None:
             print(f"[dry-run] {args.role}: {'; '.join(changes)}")
             print_table(cfg)
             return
-        if not args.no_apply and "codex" in present:
+        if not args.no_apply and "claude" in present:
             assert_generated_paths_are_installable(False)
         write_config(cfg_path, cfg)
         print(f"Updated {args.role}: {'; '.join(changes)}")
@@ -1660,14 +1657,17 @@ def main() -> None:
         return
     # Neutral surfaces first: they are what a harness without an adapter reads,
     # and one undispatchable profile used to stop them regenerating too.
-    if args.action in ("codex", "all"):
+    if args.action in ("claude", "all"):
         assert_generated_paths_are_installable(args.dry_run)
     if args.action in ("knowledge", "all"):
         install_knowledge(cfg, args.dry_run)
     if args.action in ("generic", "all"):
         print("\n" + generic_block(cfg))
-    if args.action in ("codex", "all"):
-        install_harness_skills(cfg, home, "codex", args.dry_run)
+    if args.action in ("claude", "all"):
+        try:
+            install_claude(cfg, home, args.dry_run)
+        except AdapterUnsupported as exc:
+            fail(str(exc))
 
 
 

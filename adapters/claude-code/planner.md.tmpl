@@ -1,14 +1,12 @@
 ---
 name: planner
 description: >-
+  Only when David explicitly invokes the planner or Planner -> Builder (/pb).
+  Never trigger automatically, from task size, or from a router recommendation.
   Planning, reasoning, and analysis specialist running on the configured planner
-  model class ({{PLANNER_MODEL}}). Use PROACTIVELY for any non-trivial thinking
-  about a project: designing an approach or architecture, root-cause analysis of
-  a bug, evaluating trade-offs, breaking a task into ordered steps, reviewing a
-  strategy before work starts, or answering "how should we do X". It investigates
-  read-only and returns a plan or analysis — it does NOT modify files or write
-  production code. Always reason here before building. Hand its plan to the
-  `builder` for implementation.
+  model class ({{PLANNER_MODEL}}): designing an approach, root-cause analysis,
+  trade-offs, ordered steps. It investigates read-only and returns a plan or
+  analysis — it does NOT modify files or write production code.
 model: {{PLANNER_MODEL_FIELD}}
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch, TodoWrite
 ---
